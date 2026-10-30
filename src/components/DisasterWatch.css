@@ -1,0 +1,223 @@
+.disaster-watch {
+  margin: 0 0 24px;
+}
+.disaster-watch .panel-heading {
+  margin-bottom: 13px;
+}
+.disaster-globe {
+  color: var(--mint);
+  flex-shrink: 0;
+}
+.disaster-intro {
+  font-size: 12px;
+  color: #a4b7c4;
+  max-width: 800px;
+}
+.disaster-intro strong {
+  font-weight: 500;
+  color: #cedbdc;
+}
+.disaster-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 19px 0 10px;
+}
+.disaster-controls .segmented button {
+  min-width: 72px;
+  min-height: 30px;
+}
+.disaster-distance-note {
+  font-size: 10px;
+  color: #b5a791;
+  max-width: 800px;
+}
+.disaster-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  margin: 19px 0;
+}
+.disaster-card {
+  border: 1px solid #34434d;
+  border-radius: 6px;
+  padding: 17px;
+  background: #18242c;
+  min-width: 0;
+}
+.disaster-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #a7c3ca;
+  margin-bottom: 12px;
+}
+.disaster-impact {
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 4px 7px;
+  border: 1px solid #4b5e69;
+  border-radius: 4px;
+  color: #c5d3dd;
+}
+.disaster-impact.impact-red {
+  border-color: #78514d;
+  background: #382728;
+  color: #f6bcb0;
+}
+.disaster-impact.impact-orange {
+  border-color: #78633e;
+  background: #352e23;
+  color: #f5c68f;
+}
+.disaster-impact.impact-green {
+  border-color: #426454;
+  background: #21342c;
+  color: #b3d9bc;
+}
+.disaster-card h3 {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.disaster-country {
+  font-size: 10px;
+  color: #9db1be;
+  margin-top: 7px;
+  line-height: 1.6;
+}
+.disaster-card dl {
+  margin: 15px 0;
+  font-size: 10px;
+  display: grid;
+  gap: 10px;
+}
+.disaster-card dl > div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+}
+.disaster-card dt {
+  color: #8da4b2;
+}
+.disaster-card dd {
+  margin: 0;
+  color: #c1d0d9;
+  line-height: 1.6;
+}
+.disaster-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 13px;
+  border-top: 1px solid #2b3c47;
+}
+.disaster-card-footer small {
+  font-size: 9px;
+  color: #90a6b6;
+}
+.disaster-card-footer a,
+.disaster-footer > a {
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--mint);
+  white-space: nowrap;
+}
+.disaster-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: #f0b999;
+  background: #30251f;
+  border: 1px solid #634637;
+  border-radius: 5px;
+  padding: 12px;
+  margin-top: 15px;
+}
+.disaster-warning svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.disaster-empty {
+  padding: 19px 0;
+  font-size: 12px;
+  color: #9eb2bf;
+}
+.disaster-snapshot {
+  font-size: 9px;
+  color: #9bb0bd;
+  line-height: 1.8;
+  margin: 14px 0;
+}
+.disaster-footer {
+  border-top: 1px solid #2c3c46;
+  padding-top: 14px;
+  display: flex;
+  gap: 22px;
+  justify-content: space-between;
+  align-items: center;
+}
+.disaster-footer p {
+  font-size: 10px;
+  line-height: 1.8;
+  color: #9bb0bc;
+  max-width: 800px;
+}
+@media (max-width: 900px) {
+  .disaster-card dl > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .disaster-card-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .disaster-impact {
+    font-size: 8px;
+  }
+}
+@media (max-width: 600px) {
+  .disaster-cards {
+    grid-template-columns: 1fr;
+  }
+  .disaster-card dl > div {
+    grid-template-columns: 88px 1fr;
+    gap: 8px;
+  }
+  .disaster-card-footer {
+    flex-direction: row;
+    align-items: center;
+  }
+  .disaster-intro {
+    font-size: 11px;
+  }
+  .disaster-controls {
+    flex-wrap: wrap;
+  }
+  .disaster-controls .segmented {
+    flex: 1;
+  }
+  .disaster-controls .segmented button {
+    flex: 1;
+    min-width: 60px;
+  }
+  .disaster-controls .quiet-button {
+    font-size: 10px;
+  }
+  .disaster-footer {
+    display: block;
+  }
+  .disaster-footer > a {
+    margin-top: 12px;
+  }
+  .disaster-impact {
+    font-size: 9px;
+  }
+}

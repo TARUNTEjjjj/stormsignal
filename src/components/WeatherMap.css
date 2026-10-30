@@ -1,0 +1,393 @@
+.storm-map-panel {
+  background: #101b28;
+  border: 1px solid #273441;
+  border-radius: 20px;
+  overflow: hidden;
+  min-width: 0;
+  color: #eaf2f7;
+}
+.storm-map-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 24px 25px 18px;
+}
+.storm-map-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #71dfd0;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+}
+.storm-map-heading h2 {
+  font-size: 23px;
+  letter-spacing: -0.7px;
+  font-weight: 600;
+  margin: 10px 0 0;
+}
+.storm-map-state {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  border: 1px solid #31564f;
+  background: #19322f;
+  color: #8af0cd;
+  padding: 7px 9px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.storm-map-state.is-stale {
+  color: #ffd18c;
+  border-color: #75562d;
+  background: #332d24;
+}
+.storm-map-controls {
+  display: flex;
+  gap: 10px;
+  padding: 0 24px 17px;
+  justify-content: space-between;
+}
+.storm-map-layer-control {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #384653;
+  background: #182433;
+  color: #93a7ba;
+  border-radius: 8px;
+  padding: 0 11px;
+  min-width: 0;
+}
+.storm-map-layer-control select {
+  border: 0;
+  background: transparent;
+  color: #d4e3ee;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 10px 0;
+  max-width: 260px;
+}
+.storm-map-layer-control select option {
+  background: #172435;
+  color: #fff;
+}
+.storm-map-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #192735;
+  border: 1px solid #384653;
+  color: #becfdd;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.storm-map-viewport {
+  position: relative;
+  height: 385px;
+  background: #101e29;
+}
+.storm-map-canvas {
+  width: 100%;
+  height: 100%;
+  background: #16242d;
+  z-index: 0;
+  font-family: inherit;
+}
+.storm-map-canvas .storm-basemap {
+  filter: invert(0.92) hue-rotate(185deg) saturate(0.45) brightness(0.75);
+}
+.storm-map-canvas .leaflet-control-attribution {
+  background: rgba(13, 24, 35, 0.92);
+  color: #b2c5d0;
+  font-size: 9px;
+  padding: 3px 7px;
+  max-width: 100%;
+}
+.storm-map-canvas .leaflet-control-attribution a {
+  color: #a6e9e4;
+}
+.storm-map-canvas .storm-marker-label {
+  color: #fff;
+  border: 1px solid #6c7e86;
+  background: #172c36;
+  box-shadow: none;
+}
+.storm-map-location {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 13px;
+  color: #e9f9fb;
+  background: rgba(9, 23, 34, 0.92);
+  border: 1px solid #49606a;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  max-width: calc(100% - 90px);
+}
+.storm-map-location span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storm-map-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: #61efd7;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px #61efd71c;
+}
+.storm-map-tools {
+  position: absolute;
+  right: 17px;
+  top: 18px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #52636b;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.storm-map-tools button {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-bottom: 1px solid #364954;
+  color: #d9e9ed;
+  background: rgba(12, 26, 38, 0.95);
+  cursor: pointer;
+}
+.storm-map-tools button:last-child {
+  border-bottom: 0;
+}
+.storm-map-tools button:hover {
+  background: #284050;
+}
+.storm-map-caption {
+  position: absolute;
+  bottom: 28px;
+  left: 18px;
+  font-size: 10px;
+  padding: 7px 10px;
+  background: rgba(7, 18, 28, 0.9);
+  border-radius: 4px;
+  color: #d3e5eb;
+  max-width: calc(100% - 40px);
+}
+.storm-map-loading {
+  position: absolute;
+  top: 70px;
+  left: 18px;
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: #152b36ed;
+  color: #abede2;
+}
+.storm-map-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+  padding: 30px;
+  background: radial-gradient(ellipse at top, #1b3744, #132331);
+  color: #88d7d0;
+}
+.storm-map-placeholder h3 {
+  color: #e6f4f5;
+  margin: 16px 0 8px;
+  font-size: 20px;
+}
+.storm-map-placeholder p {
+  font-size: 13px;
+  max-width: 400px;
+  color: #b0c4ce;
+  line-height: 1.6;
+}
+.storm-map-placeholder button {
+  margin-top: 12px;
+  padding: 10px 20px;
+  background: #70e3ce;
+  color: #10252a;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.storm-map-timeline {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: #172432;
+  padding: 17px 23px;
+  border-top: 1px solid #2c3c49;
+  border-bottom: 1px solid #2c3c49;
+}
+.storm-map-timeline > button {
+  width: 35px;
+  height: 35px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #2a413f;
+  color: #8aead9;
+  border: 1px solid #46605b;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.storm-map-timeline-track {
+  flex: 1;
+  min-width: 0;
+}
+.storm-map-timeline-track div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+.storm-map-timeline-track span {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: #8ca3b4;
+}
+.storm-map-timeline-track strong {
+  font-size: 10px;
+  color: #d3e7ec;
+  font-weight: 500;
+}
+.storm-map-timeline input {
+  accent-color: #71e6d1;
+  width: 100%;
+  height: 5px;
+  display: block;
+  margin: 13px 0 4px;
+  cursor: pointer;
+}
+.storm-map-frame-count {
+  font-size: 10px;
+  color: #8fa9bc;
+  min-width: 32px;
+  text-align: right;
+}
+.storm-map-notes {
+  padding: 13px 24px 16px;
+}
+.storm-map-notes p {
+  color: #8da5b7;
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 4px 0;
+}
+.storm-map-notes a {
+  color: #85d9d3;
+}
+.storm-map-notes .storm-map-hint {
+  color: #7893a6;
+}
+.storm-map-notes .storm-map-warning {
+  color: #ffcc8f;
+  background: #332c22;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.storm-map-panel button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.storm-map-panel button:focus-visible,
+.storm-map-panel select:focus-visible,
+.storm-map-panel input:focus-visible,
+.storm-map-panel a:focus-visible {
+  outline: 3px solid #85f0e0;
+  outline-offset: 3px;
+}
+.storm-visually-hidden {
+  position: absolute;
+  height: 1px;
+  width: 1px;
+  overflow: hidden;
+  clip: rect(1px, 1px, 1px, 1px);
+  white-space: nowrap;
+}
+.storm-map-panel:fullscreen {
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: #101b28;
+}
+.storm-map-panel:fullscreen .storm-map-viewport {
+  height: calc(100vh - 290px);
+  min-height: 250px;
+}
+@media (max-width: 650px) {
+  .storm-map-heading {
+    padding: 20px 16px 16px;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .storm-map-heading h2 {
+    font-size: 20px;
+  }
+  .storm-map-state {
+    font-size: 8px;
+    padding: 6px;
+    margin-top: 2px;
+  }
+  .storm-map-controls {
+    padding: 0 16px 15px;
+    gap: 8px;
+  }
+  .storm-map-layer-control {
+    max-width: calc(100% - 43px);
+  }
+  .storm-map-layer-control select {
+    font-size: 11px;
+    max-width: 200px;
+  }
+  .storm-map-button {
+    padding: 8px;
+  }
+  .storm-map-button span {
+    display: none;
+  }
+  .storm-map-viewport {
+    height: 335px;
+  }
+  .storm-map-timeline {
+    gap: 10px;
+    padding: 14px 15px;
+  }
+  .storm-map-timeline-track div {
+    display: block;
+  }
+  .storm-map-timeline-track strong {
+    display: block;
+    margin-top: 5px;
+  }
+  .storm-map-timeline-track span {
+    font-size: 8px;
+  }
+  .storm-map-notes {
+    padding: 12px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .storm-map-canvas .leaflet-zoom-animated {
+    transition: none !important;
+  }
+}

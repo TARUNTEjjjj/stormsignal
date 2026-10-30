@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#071922" />
+    <meta
+      name="description"
+      content="A printable, local-only household preparedness checklist from StormSignal, with links to official guidance."
+    />
+    <title>Preparedness field guide · StormSignal</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #071922;
+        --panel: #0c2530;
+        --line: #2a4650;
+        --text: #eff9f7;
+        --muted: #b3c9ce;
+        --cyan: #6ce5d5;
+        --amber: #ffca79;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          16px/1.6 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+      a {
+        color: var(--cyan);
+        text-underline-offset: 4px;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button,
+      a:focus-visible,
+      input:focus-visible {
+        outline-offset: 5px;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible {
+        outline: 3px solid var(--amber);
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: auto;
+        padding: 32px 30px 60px;
+      }
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 24px;
+      }
+      .brand {
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        font-size: 15px;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .brand span {
+        color: var(--cyan);
+      }
+      .tag,
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .tag {
+        color: var(--muted);
+      }
+      header {
+        padding: 48px 0 32px;
+        max-width: 730px;
+      }
+      .eyebrow {
+        color: var(--cyan);
+        margin: 0 0 12px;
+      }
+      h1 {
+        font-size: clamp(36px, 6vw, 66px);
+        line-height: 1.05;
+        letter-spacing: -0.045em;
+        margin: 0 0 20px;
+        font-weight: 650;
+      }
+      header p {
+        color: var(--muted);
+        font-size: 18px;
+        max-width: 650px;
+      }
+      .priority {
+        padding: 18px 22px;
+        background: #362c20;
+        border: 1px solid #695136;
+        border-radius: 12px;
+        color: #ffe3b5;
+        margin-bottom: 24px;
+      }
+      .priority strong {
+        display: block;
+        font-size: 16px;
+      }
+      .priority p {
+        margin: 5px 0 0;
+        font-size: 14px;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 25px 0;
+      }
+      .toolbar button {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--text);
+        padding: 12px 18px;
+        border-radius: 9px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 650;
+        min-height: 46px;
+      }
+      .toolbar button:first-child {
+        background: var(--cyan);
+        border-color: var(--cyan);
+        color: #09282b;
+      }
+      .count {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .progress-track {
+        height: 4px;
+        background: #223e48;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 28px;
+      }
+      .progress-fill {
+        height: 100%;
+        width: 0;
+        background: var(--cyan);
+        transition: width 0.2s;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        padding: 25px;
+        min-width: 0;
+      }
+      .card-title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .num {
+        font:
+          14px ui-monospace,
+          monospace;
+        color: var(--cyan);
+      }
+      h2 {
+        font-size: 21px;
+        margin: 0;
+        letter-spacing: -0.025em;
+      }
+      .card p {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 4px 0 16px;
+      }
+      fieldset {
+        border: 0;
+        margin: 0;
+        padding: 0;
+        min-width: 0;
+      }
+      legend {
+        font-weight: 700;
+        margin-bottom: 14px;
+        font-size: 19px;
+      }
+      label {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        margin: 0;
+        padding: 12px 0;
+        border-top: 1px solid var(--line);
+        cursor: pointer;
+        font-size: 14px;
+      }
+      input[type='checkbox'] {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        margin: 1px 0 0;
+        accent-color: var(--cyan);
+        cursor: pointer;
+      }
+      label:has(input:checked) span {
+        color: #9bc3bc;
+      }
+      .note {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 22px;
+      }
+      .source {
+        margin-top: 32px;
+        padding-top: 25px;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .source h2 {
+        color: var(--text);
+        font-size: 17px;
+      }
+      .source p {
+        max-width: 880px;
+      }
+      .source ul {
+        padding-left: 20px;
+      }
+      .source li {
+        margin-bottom: 7px;
+      }
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        margin-top: 32px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .print-only {
+        display: none;
+      }
+      @media (max-width: 650px) {
+        .wrap {
+          padding: 20px 18px 36px;
+        }
+        .top {
+          align-items: flex-start;
+        }
+        .tag {
+          max-width: 120px;
+          text-align: right;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          padding: 20px;
+        }
+        .count {
+          width: 100%;
+          margin: 0;
+        }
+        .toolbar {
+          gap: 8px;
+        }
+        header {
+          padding-top: 34px;
+        }
+        .footer {
+          display: block;
+        }
+        .priority {
+          padding: 16px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .progress-fill {
+          transition: none;
+        }
+      }
+      @media print {
+        * {
+          color: #111 !important;
+          background: transparent !important;
+          box-shadow: none !important;
+        }
+        body {
+          font-size: 11pt;
+        }
+        .wrap {
+          padding: 0;
+          max-width: none;
+        }
+        .top {
+          padding-bottom: 8px;
+        }
+        .brand {
+          font-size: 12px;
+        }
+        .tag {
+          font-size: 9px;
+        }
+        header {
+          padding: 18px 0 10px;
+          max-width: none;
+        }
+        h1 {
+          font-size: 28pt;
+          margin-bottom: 8px;
+        }
+        header p {
+          font-size: 11pt;
+        }
+        .priority {
+          padding: 10px;
+          border-color: #777;
+          margin-bottom: 14px;
+        }
+        .toolbar,
+        .progress-track,
+        .note,
+        .no-print {
+          display: none;
+        }
+        .grid {
+          gap: 12px;
+        }
+        .card {
+          padding: 12px;
+          border-color: #aaa;
+          break-inside: avoid;
+        }
+        label {
+          font-size: 10pt;
+          padding: 8px 0;
+          border-color: #ddd;
+        }
+        .card-title {
+          margin-bottom: 9px;
+        }
+        h2 {
+          font-size: 14pt;
+        }
+        .source {
+          margin-top: 15px;
+          padding-top: 12px;
+          font-size: 9pt;
+        }
+        .source li {
+          margin-bottom: 3px;
+        }
+        .source a {
+          overflow-wrap: anywhere;
+        }
+        .footer {
+          font-size: 9pt;
+          margin-top: 15px;
+        }
+        .print-only {
+          display: block;
+        }
+        .print-only p {
+          margin: 6px 0;
+        }
+        input[type='checkbox'] {
+          appearance: none;
+          width: 12px;
+          height: 12px;
+          border: 1px solid #111;
+          position: relative;
+        }
+        input[type='checkbox']:checked:after {
+          content: '✓';
+          font-size: 13px;
+          position: absolute;
+          left: 0;
+          top: -6px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="top">
+        <a class="brand" href="/">STORM<span>SIGNAL</span></a
+        ><span class="tag">Preparedness / field guide</span>
+      </div>
+      <header>
+        <p class="eyebrow">Prepare before you need to</p>
+        <h1>Before the<br />signal drops.</h1>
+        <p>
+          A short household checklist for severe weather. Make a plan, gather essentials, and keep a
+          way to hear official instructions.
+        </p>
+      </header>
+      <aside class="priority" aria-label="Follow official instructions">
+        <strong>Official instructions come first.</strong>
+        <p>
+          If authorities issue an evacuation order, follow it. Use their designated routes. Never
+          walk or drive through flooded roads. This sheet does not show current warnings, shelters,
+          or safe routes.
+        </p>
+      </aside>
+      <div class="toolbar no-print">
+        <button type="button" id="print">Print / save PDF</button
+        ><button type="button" id="reset">Reset checklist</button
+        ><span class="count" id="count" role="status" aria-live="polite"
+          >0 of 12 preparations checked</span
+        >
+      </div>
+      <div class="progress-track no-print" aria-hidden="true">
+        <div class="progress-fill" id="progress"></div>
+      </div>
+      <form id="checklist" class="grid" autocomplete="off">
+        <section class="card">
+          <div class="card-title">
+            <span class="num">01</span>
+            <h2>Know where to listen</h2>
+          </div>
+          <p>Keep more than one way to receive verified information.</p>
+          <fieldset>
+            <legend
+              class="sr-only"
+              style="
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+              "
+            >
+              Information and warning channels
+            </legend>
+            <label
+              ><input type="checkbox" id="official" /><span
+                >Find the official weather and local emergency-management channels for your area.
+                Check their current instructions.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="radio" /><span
+                >Prepare a battery-powered radio or another warning channel that works if internet
+                service fails.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="charge" /><span
+                >Charge phones and power banks. Put a torch and spare batteries where everyone can
+                find them.</span
+              ></label
+            >
+          </fieldset>
+        </section>
+        <section class="card">
+          <div class="card-title">
+            <span class="num">02</span>
+            <h2>Make a household plan</h2>
+          </div>
+          <p>Agree on the plan with the people who depend on you.</p>
+          <fieldset>
+            <legend
+              class="sr-only"
+              style="
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+              "
+            >
+              Household communication plan
+            </legend>
+            <label
+              ><input type="checkbox" id="contact" /><span
+                >Choose an out-of-area contact and a meeting plan. Write important contact numbers
+                on paper.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="transport" /><span
+                >Check official evacuation arrangements in advance, including transport and
+                assistance for anyone who needs it.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="needs" /><span
+                >Plan for children, older adults, disabilities, medical equipment, and pets. Check
+                the local shelter's actual arrangements.</span
+              ></label
+            >
+          </fieldset>
+        </section>
+        <section class="card">
+          <div class="card-title">
+            <span class="num">03</span>
+            <h2>Gather essentials</h2>
+          </div>
+          <p>Adapt supplies to your household and local guidance.</p>
+          <fieldset>
+            <legend
+              class="sr-only"
+              style="
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+              "
+            >
+              Emergency supplies
+            </legend>
+            <label
+              ><input type="checkbox" id="water" /><span
+                >Prepare drinking water and food that does not need refrigeration or cooking.
+                Include supplies for pets.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="medicine" /><span
+                >Gather required medicines, first-aid supplies, and essential medical information.
+                Check storage needs and expiry dates.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="documents" /><span
+                >Keep identity and essential documents protected from water. Make a small, reachable
+                bag with essential items.</span
+              ></label
+            >
+          </fieldset>
+        </section>
+        <section class="card">
+          <div class="card-title">
+            <span class="num">04</span>
+            <h2>Prepare for disruption</h2>
+          </div>
+          <p>Finish preparation before conditions make it unsafe.</p>
+          <fieldset>
+            <legend
+              class="sr-only"
+              style="
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+              "
+            >
+              Connection loss and safe preparation
+            </legend>
+            <label
+              ><input type="checkbox" id="printout" /><span
+                >Print this sheet or save a PDF now. Save official instructions separately with
+                their date and time.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="outside" /><span
+                >Before dangerous weather arrives, secure loose outdoor items if you can do so
+                safely. Stay away from fallen power lines.</span
+              ></label
+            >
+            <label
+              ><input type="checkbox" id="recheck" /><span
+                >Recheck official warnings and your supplies. Tell your household when the plan
+                changes; avoid forwarding unverified messages.</span
+              ></label
+            >
+          </fieldset>
+        </section>
+      </form>
+      <p class="note" id="storage-note">
+        Your checked items are saved only in this browser when storage is available. No contact
+        details are collected. Browser cleanup can remove your selections. Print or save a copy
+        before losing connection.
+      </p>
+      <div class="print-only">
+        <p>
+          Local authority / warning channel: ____________________________________________________
+        </p>
+        <p>
+          Household contact / meeting plan: ____________________________________________________
+        </p>
+      </div>
+      <section class="source" aria-labelledby="sources">
+        <h2 id="sources">Read the official guidance</h2>
+        <p>
+          This is a short, general preparation aid. It cannot cover every hazard or household need.
+          Follow your local authority's current advice and maintain an independent warning channel.
+          External links require an internet connection.
+        </p>
+        <ul>
+          <li>
+            <a href="https://www.cdc.gov/floods/safety/" target="_blank" rel="noopener noreferrer"
+              >CDC — preparing for floods</a
+            >: household planning, supplies, and evacuation preparation.
+          </li>
+          <li>
+            <a
+              href="https://sdma.maharashtra.gov.in/en/dos-and-donts/"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Maharashtra SDMA / NDMA — do's and don'ts</a
+            >: official Indian guidance for multiple hazards.
+          </li>
+          <li>
+            <a href="https://www.weather.gov/safety/flood" target="_blank" rel="noopener noreferrer"
+              >U.S. National Weather Service — flood safety</a
+            >: information before, during, and after floods.
+          </li>
+          <li>
+            <a href="https://mausam.imd.gov.in/" target="_blank" rel="noopener noreferrer"
+              >India Meteorological Department</a
+            >: current Indian weather information and warnings.
+          </li>
+        </ul>
+      </section>
+      <div class="footer">
+        <span>StormSignal · Original checklist, with official references</span
+        ><span>Content reviewed 31 October 2026</span>
+      </div>
+    </main>
+    <script>
+      (() => {
+        'use strict';
+        const key = 'stormsignal:preparedness:v1';
+        const boxes = [...document.querySelectorAll('#checklist input[type=checkbox]')];
+        const count = document.getElementById('count');
+        const progress = document.getElementById('progress');
+        const note = document.getElementById('storage-note');
+        function update() {
+          const selected = boxes.filter((b) => b.checked);
+          count.textContent = selected.length + ' of ' + boxes.length + ' preparations checked';
+          progress.style.width = (selected.length / boxes.length) * 100 + '%';
+          return selected.map((b) => b.id);
+        }
+        try {
+          const saved = JSON.parse(localStorage.getItem(key) || '[]');
+          if (Array.isArray(saved)) boxes.forEach((b) => (b.checked = saved.includes(b.id)));
+        } catch {
+          note.textContent =
+            'Browser storage is unavailable. Your selections will not be saved after this page closes. Print or save a copy.';
+        }
+        update();
+        document.getElementById('checklist').addEventListener('change', () => {
+          const saved = update();
+          try {
+            localStorage.setItem(key, JSON.stringify(saved));
+          } catch {
+            note.textContent =
+              'Browser storage is unavailable. Your selections are not saved. Print or save a copy.';
+          }
+        });
+        document.getElementById('print').addEventListener('click', () => window.print());
+        document.getElementById('reset').addEventListener('click', () => {
+          if (!window.confirm('Clear your saved checklist selections on this device?')) return;
+          boxes.forEach((b) => (b.checked = false));
+          update();
+          try {
+            localStorage.removeItem(key);
+          } catch {}
+        });
+      })();
+    </script>
+  </body>
+</html>

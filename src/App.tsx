@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity,
   ArrowDown,
@@ -38,11 +38,21 @@ import {
   Wind,
   X,
 } from 'lucide-react';
-import WeatherMap from './components/WeatherMap';
-import DisasterWatch from './components/DisasterWatch';
+const WeatherMap = lazy(() => import('./components/WeatherMap'));
+const DisasterWatch = lazy(() => import('./components/DisasterWatch'));
+import OfflineBriefing from './components/OfflineBriefing';
+import OptionalPanel from './components/OptionalPanel';
+import {
+  CONNECTION_KEY,
+  readConnectionMode,
+  networkPolicy,
+  alertCheckIsRecent,
+  type ConnectionMode,
+} from './connectivity';
 import {
   searchPlaces,
   fetchForecast,
+  fetchCompactForecast,
   fetchModels,
   fetchAirQuality,
   fetchAlerts,
@@ -98,15 +108,27 @@ function useResource<T>(
   place: Place,
   revision: number,
   loader: (p: Place, s?: AbortSignal) => Promise<T>,
+  enabled = true,
 ): Resource<T> {
-  const [state, setState] = useState<Resource<T>>({ data: null, loading: true, error: null });
+  const key = `${place.latitude},${place.longitude},${place.countryCode}`;
+  const [state, setState] = useState<Resource<T> & { key: string; loader: typeof loader }>({
+    data: null,
+    loading: true,
+    error: null,
+    key,
+    loader,
+  });
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
-    setState({ data: null, loading: true, error: null });
+    if (!enabled) {
+      setState({ data: null, loading: false, error: null, key, loader });
+      return () => controller.abort();
+    }
+    setState({ data: null, loading: true, error: null, key, loader });
     loader(place, controller.signal)
       .then((data) => {
-        if (active) setState({ data, loading: false, error: null });
+        if (active) setState({ data, loading: false, error: null, key, loader });
       })
       .catch((e) => {
         if (active && !controller.signal.aborted)
@@ -114,14 +136,18 @@ function useResource<T>(
             data: null,
             loading: false,
             error: e instanceof Error ? e.message : 'The data provider is unavailable.',
+            key,
+            loader,
           });
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [place.latitude, place.longitude, place.countryCode, revision, loader]);
-  return state;
+  }, [place.latitude, place.longitude, place.countryCode, revision, loader, enabled]);
+  return enabled && state.key === key && state.loader === loader
+    ? state
+    : { data: null, loading: enabled, error: null };
 }
 function WeatherIcon({ code, size = 24 }: { code: number | null | undefined; size?: number }) {
   return code == null ? (
@@ -364,14 +390,16 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [narrow, setNarrow] = useState(window.innerWidth <= 800);
   const [active, setActive] = useState('overview');
-  const [lowBandwidth, setLowBandwidth] = useState(() => {
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>(() => {
     try {
-      return localStorage.getItem('stormsignal:low-bandwidth') === 'true';
+      return readConnectionMode(localStorage.getItem(CONNECTION_KEY));
     } catch {
-      return false;
+      return 'lite';
     }
   });
   const [online, setOnline] = useState(navigator.onLine);
+  const policy = networkPolicy(connectionMode, online);
+  const lowBandwidth = !policy.extras;
   const [saved, setSaved] = useState<Place[]>(() => {
     try {
       return readPlaces(localStorage.getItem('stormsignal:places'));
@@ -386,50 +414,74 @@ export default function App() {
   const [offlineStatus, setOfflineStatus] = useState('Checking offline availability');
   useEffect(() => {
     if (!import.meta.env.PROD || !('serviceWorker' in navigator)) {
-      setOfflineStatus('Print kit for offline use');
+      setOfflineStatus('Download the kit for offline use');
       return;
     }
     let active = true;
-    const timeout = setTimeout(() => {
-      if (active) setOfflineStatus('Offline cache unconfirmed · print kit');
-    }, 10000);
+    let timeout: ReturnType<typeof setTimeout>;
+    let channel: MessageChannel | undefined;
+    const unconfirmed = () => {
+      if (active) setOfflineStatus('Offline cache unconfirmed · download the kit');
+    };
+    const confirmCache = (worker?: ServiceWorker | null) => {
+      clearTimeout(timeout);
+      channel?.port1.close();
+      timeout = setTimeout(unconfirmed, 5000);
+      if (!worker) return;
+      channel = new MessageChannel();
+      channel.port1.onmessage = (event) => {
+        if (!active || event.data?.type !== 'STORMSIGNAL_OFFLINE_STATUS') return;
+        clearTimeout(timeout);
+        setOfflineStatus(
+          event.data.ready === true
+            ? 'Offline interface and kit saved on this device'
+            : 'Offline cache incomplete · download the kit',
+        );
+        channel?.port1.close();
+      };
+      worker.postMessage({ type: 'STORMSIGNAL_OFFLINE_STATUS' }, [channel.port2]);
+    };
+    const controllerChanged = () => confirmCache(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', controllerChanged);
+    timeout = setTimeout(unconfirmed, 10000);
     navigator.serviceWorker
       .register('/sw.js')
       .then(() => navigator.serviceWorker.ready)
-      .then(() => {
-        if (active) {
-          clearTimeout(timeout);
-          setOfflineStatus('Offline kit saved on this device');
-        }
+      .then((registration) => {
+        if (active) confirmCache(registration.active);
       })
-      .catch(() => {
-        if (active) {
-          clearTimeout(timeout);
-          setOfflineStatus(
-            navigator.serviceWorker.controller
-              ? 'Offline kit saved on this device'
-              : 'Offline cache unavailable · print kit',
-          );
-        }
-      });
+      .catch(unconfirmed);
     return () => {
       active = false;
       clearTimeout(timeout);
+      channel?.port1.close();
+      navigator.serviceWorker.removeEventListener('controllerchange', controllerChanged);
     };
   }, []);
   const alerted = useRef(new Set<string>());
   const searchArea = useRef<HTMLDivElement>(null);
-  const forecast = useResource<Forecast>(place, revision, fetchForecast);
-  const models = useResource<ModelForecast[]>(place, revision, fetchModels);
-  const air = useResource<AirQuality>(place, revision, fetchAirQuality);
-  const alerts = useResource<AlertResult>(place, revision + alertRevision, fetchAlerts);
+  const forecast = useResource<Forecast>(
+    place,
+    revision,
+    lowBandwidth ? fetchCompactForecast : fetchForecast,
+    policy.essentials,
+  );
+  const models = useResource<ModelForecast[]>(place, revision, fetchModels, policy.extras);
+  const air = useResource<AirQuality>(place, revision, fetchAirQuality, policy.extras);
+  const alerts = useResource<AlertResult>(
+    place,
+    revision + alertRevision,
+    fetchAlerts,
+    policy.essentials,
+  );
   const tz = forecast.data?.timezone || place.timezone || 'UTC';
   const f = forecast.data;
   const hours = f?.hours.filter((h) => h.time >= now - 1800000) || [];
   const hazards = f ? deriveHazards(f, now) : [];
   const isStale = !!f && (now - f.fetchedAt > FORECAST_STALE_MS || f.fetchedAt > now + 300000);
   const outlook = getOutlook(isStale ? [] : hours, now);
-  const activeAlerts = alerts.data?.alerts.filter((a) => a.expires > now) || [];
+  const alertsRecent = alertCheckIsRecent(alerts.data?.fetchedAt, now, policy.essentials);
+  const activeAlerts = alertsRecent ? alerts.data?.alerts.filter((a) => a.expires > now) || [] : [];
   const spread = modelSpread(models.data || [], hours.slice(0, 24));
   const selectedSaved = saved.some(
     (p) =>
@@ -447,7 +499,7 @@ export default function App() {
     const resume = () => {
       if (document.visibilityState === 'visible') {
         setNow(Date.now());
-        if (navigator.onLine) {
+        if (navigator.onLine && connectionMode === 'full') {
           setAlertRevision((v) => v + 1);
           setRevision((v) => v + 1);
         }
@@ -458,11 +510,12 @@ export default function App() {
     window.addEventListener('offline', update);
     const clock = setInterval(() => {
       setNow(Date.now());
-      if (navigator.onLine && document.visibilityState === 'visible')
+      if (connectionMode === 'full' && navigator.onLine && document.visibilityState === 'visible')
         setAlertRevision((v) => v + 1);
     }, 60000);
     const refresh = setInterval(() => {
-      if (navigator.onLine && document.visibilityState === 'visible') setRevision((v) => v + 1);
+      if (connectionMode === 'full' && navigator.onLine && document.visibilityState === 'visible')
+        setRevision((v) => v + 1);
     }, 15 * 60000);
     return () => {
       window.removeEventListener('resize', resize);
@@ -472,14 +525,14 @@ export default function App() {
       clearInterval(clock);
       clearInterval(refresh);
     };
-  }, []);
+  }, [connectionMode]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(''), 6000);
     return () => clearTimeout(t);
   }, [toast]);
   useEffect(() => {
-    if (query.trim().length < 2) {
+    if (!policy.essentials || query.trim().length < 2) {
       setResults([]);
       setSearchError('');
       setSearching(false);
@@ -507,7 +560,7 @@ export default function App() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [query, policy.essentials]);
   useEffect(() => {
     const close = (e: PointerEvent) => {
       if (searchArea.current && !searchArea.current.contains(e.target as Node)) {
@@ -521,6 +574,8 @@ export default function App() {
   useEffect(() => {
     if (
       !notifications ||
+      !policy.polling ||
+      !alertsRecent ||
       !alerts.data ||
       alerts.data.status !== 'available' ||
       !('Notification' in window) ||
@@ -540,7 +595,17 @@ export default function App() {
         setToast('Notifications are unavailable in this browser.');
       }
     }
-  }, [notifications, alerts.data, place.name]);
+  }, [notifications, alerts.data, place.name, policy.polling, alertsRecent]);
+  function changeConnectionMode(mode: ConnectionMode) {
+    setConnectionMode(mode);
+    setQuery('');
+    setNotifications(false);
+    try {
+      localStorage.setItem(CONNECTION_KEY, mode);
+    } catch {
+      setToast('This setting applies now, but browser storage could not remember it.');
+    }
+  }
   function selectPlace(p: Place) {
     setPlace(p);
     setQuery('');
@@ -617,10 +682,11 @@ export default function App() {
     ['alerts', ShieldCheck, 'Official alerts'],
     ['regional-reports', Globe2, 'Disaster reports'],
     ['readiness', Bookmark, 'Preparedness'],
+    ['offline-briefings', WifiOff, 'Saved briefings'],
     ['sources', Database, 'Data & sources'],
   ] as const;
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${lowBandwidth ? 'field-mode' : ''}`}>
       <a className="skip-link" href="#main">
         Skip to weather dashboard
       </a>
@@ -647,23 +713,29 @@ export default function App() {
         </button>
         <div className="nav-label">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          {nav.map(([id, Icon, label]) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              onClick={() => {
-                setActive(id);
-                setMobileNav(false);
-              }}
-              className={active === id ? 'active' : ''}
-            >
-              <Icon size={18} />
-              {label}
-              {id === 'alerts' && !!activeAlerts.length && (
-                <span className="nav-count">{activeAlerts.length}</span>
-              )}
-            </a>
-          ))}
+          {nav
+            .filter(
+              ([id]) =>
+                (policy.extras || !['forecast', 'satellite', 'regional-reports'].includes(id)) &&
+                (policy.essentials || id !== 'alerts'),
+            )
+            .map(([id, Icon, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                onClick={() => {
+                  setActive(id);
+                  setMobileNav(false);
+                }}
+                className={active === id ? 'active' : ''}
+              >
+                <Icon size={18} />
+                {label}
+                {id === 'alerts' && !!activeAlerts.length && (
+                  <span className="nav-count">{activeAlerts.length}</span>
+                )}
+              </a>
+            ))}
         </nav>
         <div className="sidebar-divider" />
         <div className="nav-label">
@@ -709,7 +781,8 @@ export default function App() {
             <Menu size={22} />
           </button>
           <div className="breadcrumb">
-            Workspace <span>/</span> <strong>Weather overview</strong>
+            Workspace <span>/</span>{' '}
+            <strong>{lowBandwidth ? 'Field essentials' : 'Weather overview'}</strong>
           </div>
           <div className="search-area" ref={searchArea}>
             <form
@@ -724,6 +797,12 @@ export default function App() {
                 aria-label="Search any city"
                 value={query}
                 placeholder="Search any city…"
+                disabled={!policy.essentials}
+                title={
+                  !policy.essentials
+                    ? 'Search needs a connection. Use saved or quick locations instead.'
+                    : undefined
+                }
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
@@ -753,8 +832,8 @@ export default function App() {
             )}
           </div>
           <span className="status-tag">
-            <i className={`dot ${online ? 'mint' : 'amber'}`} />
-            {online ? 'CONNECTED' : 'OFFLINE'}
+            <i className={`dot ${policy.essentials ? 'mint' : 'amber'}`} />
+            {!policy.essentials ? 'OFFLINE MODE' : 'NETWORK AVAILABLE'}
           </span>
           <button
             className="icon-button locate"
@@ -791,384 +870,542 @@ export default function App() {
                   setRevision((x) => x + 1);
                   setNow(Date.now());
                 }}
-                disabled={forecast.loading}
+                disabled={forecast.loading || !policy.essentials}
               >
                 <RefreshCw size={15} className={forecast.loading ? 'spin' : ''} />
                 {forecast.loading ? 'Updating' : 'Refresh data'}
               </button>
             </div>
           </section>
-          {!online && (
+          <section className="field-controls panel" aria-labelledby="field-heading">
+            <div>
+              <span className="eyebrow">BUILT FOR PATCHY SIGNAL</span>
+              <h2 id="field-heading">Keep the essentials close.</h2>
+              <p>
+                {connectionMode === 'offline'
+                  ? 'Live data requests are paused. Use saved briefings and your emergency kit. External source links still need a connection.'
+                  : connectionMode === 'lite'
+                    ? 'A small 24-hour forecast and official alert checks. No maps, satellite downloads, extra feeds, or background polling. Refresh when you need an update.'
+                    : 'Full workspace with imagery, comparison models, air quality, regional reports, and automatic refreshes.'}
+              </p>
+            </div>
+            <div className="connection-options" role="group" aria-label="Connection mode">
+              {(
+                [
+                  ['lite', 'Data saver'],
+                  ['offline', 'Offline only'],
+                  ['full', 'Full workspace'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={connectionMode === mode}
+                  onClick={() => changeConnectionMode(mode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="field-shortcuts">
+              {policy.essentials && <a href="#alerts">Official warnings ↓</a>}
+              <a href="#offline-briefings">Saved briefings ↓</a>
+              <a href="/offline.html">Open emergency kit ↗</a>
+              <a href="/offline.html" download="StormSignal-offline-kit.html">
+                Download offline-only kit ↓
+              </a>
+            </div>
+            <p className="field-cache-status" role="status">
+              {offlineStatus}. Download the kit before losing service. This app cannot receive new
+              warnings offline.
+            </p>
+          </section>
+          {!policy.essentials && (
             <div className="wide-notice">
               <WifiOff size={18} />
               <span>
-                You’re offline. Weather and warnings cannot refresh.{' '}
-                <a href="/preparedness.html">Open the offline checklist</a>.
+                {online ? 'Offline-only mode is on.' : 'The browser reports no network connection.'}{' '}
+                Weather and warnings cannot refresh. Saved material is historical, never an
+                all-clear. <a href="/offline.html">Open your emergency kit</a>.
               </span>
             </div>
           )}
-          <div className="overview-grid">
-            <section className="conditions-card" aria-busy={forecast.loading}>
-              <div className="card-kicker">
-                <span>
-                  <i className="dot mint" /> CURRENT MODEL ESTIMATE
-                </span>
-                <span>{f ? localTime(f.current.time, tz) : 'Loading…'}</span>
-              </div>
-              <div className="temperature">
-                <span>
-                  {value(f?.current.temperature)}
-                  <sup>°</sup>
-                </span>
-                <div className="weather-glyph">
-                  {f?.current.code != null &&
-                  f.current.code <= 1 &&
-                  f.days[0]?.sunrise &&
-                  f.days[0]?.sunset &&
-                  (f.current.time < f.days[0].sunrise || f.current.time > f.days[0].sunset) ? (
-                    <Moon size={67} />
-                  ) : (
-                    <WeatherIcon code={f?.current.code} size={67} />
-                  )}
-                </div>
-              </div>
-              <div className="condition-name">
-                {f
-                  ? weatherLabel(f.current.code)
-                  : forecast.error
-                    ? 'Weather unavailable'
-                    : 'Getting the forecast…'}
-              </div>
-              <div className="feels">
-                Feels like {value(f?.current.apparent)}°C <span>·</span> {tz}
-              </div>
-              <ErrorNote error={forecast.error} />
-              {currentStale && (
-                <p className="error-note">
-                  Weather data is stale. Refresh or check official sources.
-                </p>
-              )}
-              <div className="condition-metrics">
-                <div>
-                  <Wind size={17} />
-                  <span>
-                    Wind
-                    <strong>
-                      {value(f?.current.wind)} <small>km/h</small>
-                    </strong>
-                  </span>
-                </div>
-                <div>
-                  <Droplets size={17} />
-                  <span>
-                    Humidity
-                    <strong>
-                      {value(f?.current.humidity)}
-                      <small>%</small>
-                    </strong>
-                  </span>
-                </div>
-                <div>
-                  <CloudRain size={17} />
-                  <span>
-                    Precipitation
-                    <strong>
-                      {value(f?.current.precipitation, 1)} <small>mm</small>
-                    </strong>
-                  </span>
-                </div>
-                <div>
-                  <Eye size={17} />
-                  <span>
-                    US AQI
-                    <strong>
-                      {value(air.data?.usAqi)}{' '}
-                      <small>
-                        {air.data &&
-                        (now - air.data.fetchedAt > 3600000 || now - air.data.time > 3 * 3600000)
-                          ? 'stale'
-                          : 'modeled'}
-                      </small>
-                    </strong>
-                  </span>
-                </div>
-              </div>
-              <div className="condition-footer">
-                <span>Fetched {f ? age(f.fetchedAt, now) : '—'}</span>
-                <a href="#sources">
-                  Source details <ArrowUpRight size={12} />
-                </a>
-              </div>
-            </section>
-            <section className="map-card" id="satellite">
-              <div className="map-card-header">
-                <span>
-                  <Satellite size={15} /> SATELLITE EXPLORER
-                </span>
-                <span className="mono">
-                  {place.latitude.toFixed(2)}° / {place.longitude.toFixed(2)}°
-                </span>
-              </div>
-              <WeatherMap
-                place={place}
-                alerts={activeAlerts}
-                lowBandwidth={lowBandwidth}
-                onSelect={selectPlace}
-              />
-            </section>
-          </div>
-          <section className={`signal-strip signal-${outlook.level}`} aria-label="Forecast signals">
-            <div className="signal-title">
-              <span className="signal-icon">
-                <Activity size={20} />
-              </span>
-              <div>
-                <span className="eyebrow">NEXT 24 HOURS</span>
-                <strong>{f ? outlook.title : 'Forecast pending'}</strong>
-              </div>
-            </div>
-            <p>{f ? outlook.detail : 'Signals appear once fresh forecast data is available.'}</p>
-            <a href="#alerts">
-              Check official warnings <ArrowRight size={15} />
-            </a>
-          </section>
-          <div className="analytics-grid">
-            <section className="panel forecast-panel" id="forecast">
-              <PanelHeader eyebrow="LOOK AHEAD" title="One forecast. Multiple perspectives.">
-                <span className="panel-number">01</span>
-              </PanelHeader>
-              {hours.length ? (
-                <ForecastChart hours={hours} models={models.data || []} timezone={tz} />
-              ) : (
-                <div className="empty-state">
-                  <Activity size={30} />
-                  <p>
-                    {forecast.loading
-                      ? 'Building your forecast timeline…'
-                      : 'Forecast unavailable. Try refreshing or choosing another place.'}
-                  </p>
-                </div>
-              )}
-              <ErrorNote error={models.error} />
-              <div className="model-note">
-                <Layers size={16} />
-                <p>
-                  {spread === null ? (
-                    'Model comparison appears when both model forecasts are available.'
-                  ) : (
-                    <>
-                      Up to <strong>{value(spread, 1)}°C</strong> difference between models over the
-                      next 24 hours.
-                    </>
-                  )}{' '}
-                  <span>
-                    Model spread shows disagreement, not a calibrated confidence interval.
-                  </span>
-                </p>
-              </div>
-            </section>
-            <section className="panel outlook-panel">
-              <PanelHeader eyebrow="THE WEEK AHEAD" title="7-day outlook" />
-              <div className="daily-list">
-                {f?.days.map((day, i) => (
-                  <div className="day-row" key={day.time}>
+          {policy.essentials && (
+            <>
+              <div className="overview-grid">
+                <section className="conditions-card" aria-busy={forecast.loading}>
+                  <div className="card-kicker">
                     <span>
-                      {localTime(day.time, tz, {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                      }) ===
-                      localTime(now, tz, { year: 'numeric', month: '2-digit', day: '2-digit' })
-                        ? 'Today'
-                        : localTime(day.time, tz, { weekday: 'short' })}
+                      <i className="dot mint" /> CURRENT MODEL ESTIMATE
                     </span>
-                    <WeatherIcon code={day.code} size={20} />
-                    <span className="day-rain">
-                      <Droplets size={11} />
-                      {value(day.probability)}%
+                    <span>
+                      {f
+                        ? localTime(f.current.time, tz)
+                        : forecast.loading
+                          ? 'Loading…'
+                          : 'Unavailable'}
                     </span>
-                    <strong>{value(day.high)}°</strong>
-                    <span className="day-low">{value(day.low)}°</span>
                   </div>
-                )) || <p className="muted">Waiting for daily forecast…</p>}
-              </div>
-              <div className="sun-times">
-                <span>
-                  <Sun size={16} /> Sunrise{' '}
-                  <strong>{f?.days[0]?.sunrise ? localTime(f.days[0].sunrise, tz) : '—'}</strong>
-                </span>
-                <span>
-                  <ArrowDown size={16} /> Sunset{' '}
-                  <strong>{f?.days[0]?.sunset ? localTime(f.days[0].sunset, tz) : '—'}</strong>
-                </span>
-              </div>
-            </section>
-          </div>
-          <div className="safety-grid">
-            <section className="panel alerts-panel" id="alerts">
-              <PanelHeader eyebrow="KNOW WHAT’S OFFICIAL" title="Warnings & local guidance">
-                <ShieldCheck size={22} className="mint-text" />
-              </PanelHeader>
-              <div
-                className={`coverage-banner ${alerts.data?.status === 'available' ? 'available' : ''}`}
-              >
-                <Radio size={17} />
-                <div>
-                  <strong>
-                    {alerts.loading
-                      ? 'Checking official alert coverage…'
-                      : alerts.error
-                        ? 'Alert feed unavailable'
-                        : alerts.data?.status === 'available'
-                          ? 'US National Weather Service'
-                          : 'Official feed not integrated here'}
-                  </strong>
-                  <p>
-                    {alerts.data?.coverage ||
-                      'Do not assume there are no warnings when this feed is unavailable.'}
-                  </p>
-                </div>
-              </div>
-              <ErrorNote error={alerts.error} />
-              {activeAlerts.map((alert) => (
-                <details
-                  className="official-alert"
-                  key={alert.id}
-                  open={alert.severity === 'Extreme'}
-                >
-                  <summary>
-                    <TriangleAlert size={18} />
+                  <div className="temperature">
                     <span>
-                      <strong>{alert.event}</strong>
-                      <small>
-                        {alert.severity} · Bulletin valid to{' '}
-                        {localTime(alert.expires, tz, {
-                          day: '2-digit',
-                          month: 'short',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </small>
+                      {value(f?.current.temperature)}
+                      <sup>°</sup>
                     </span>
-                    <ChevronDown size={16} />
-                  </summary>
-                  <div className="alert-body">
-                    <p>{alert.title}</p>
-                    <p className="muted">{alert.area}</p>
-                    <h3>Official instructions</h3>
-                    <p className="preserve-lines">
-                      {alert.instruction ||
-                        'Read the issuing authority’s full bulletin for instructions.'}
+                    <div className="weather-glyph">
+                      {f?.current.code != null &&
+                      f.current.code <= 1 &&
+                      f.days[0]?.sunrise &&
+                      f.days[0]?.sunset &&
+                      (f.current.time < f.days[0].sunrise || f.current.time > f.days[0].sunset) ? (
+                        <Moon size={67} />
+                      ) : (
+                        <WeatherIcon code={f?.current.code} size={67} />
+                      )}
+                    </div>
+                  </div>
+                  <div className="condition-name">
+                    {f
+                      ? weatherLabel(f.current.code)
+                      : forecast.error
+                        ? 'Weather unavailable'
+                        : 'Getting the forecast…'}
+                  </div>
+                  <div className="feels">
+                    Feels like {value(f?.current.apparent)}°C <span>·</span> {tz}
+                  </div>
+                  <ErrorNote error={forecast.error} />
+                  {currentStale && (
+                    <p className="error-note">
+                      Weather data is stale. Refresh or check official sources.
                     </p>
-                    <details>
-                      <summary>Full description</summary>
-                      <p className="preserve-lines">{alert.description}</p>
-                    </details>
-                    <p className="muted">
-                      Issued{' '}
-                      {localTime(alert.sent, tz, {
-                        day: '2-digit',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}{' '}
-                      · {alert.source}
-                    </p>
-                    <a href={alert.url} target="_blank" rel="noreferrer">
-                      Read official bulletin <ExternalLink size={13} />
+                  )}
+                  <div className="condition-metrics">
+                    <div>
+                      <Wind size={17} />
+                      <span>
+                        Wind
+                        <strong>
+                          {value(f?.current.wind)} <small>km/h</small>
+                        </strong>
+                      </span>
+                    </div>
+                    <div>
+                      <Droplets size={17} />
+                      <span>
+                        Humidity
+                        <strong>
+                          {value(f?.current.humidity)}
+                          <small>%</small>
+                        </strong>
+                      </span>
+                    </div>
+                    <div>
+                      <CloudRain size={17} />
+                      <span>
+                        Precipitation
+                        <strong>
+                          {value(f?.current.precipitation, 1)} <small>mm</small>
+                        </strong>
+                      </span>
+                    </div>
+                    {policy.extras && (
+                      <div>
+                        <Eye size={17} />
+                        <span>
+                          US AQI
+                          <strong>
+                            {value(air.data?.usAqi)}{' '}
+                            <small>
+                              {air.data &&
+                              (now - air.data.fetchedAt > 3600000 ||
+                                now - air.data.time > 3 * 3600000)
+                                ? 'stale'
+                                : 'modeled'}
+                            </small>
+                          </strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="condition-footer">
+                    <span>Fetched {f ? age(f.fetchedAt, now) : '—'}</span>
+                    <a href="#sources">
+                      Source details <ArrowUpRight size={12} />
                     </a>
                   </div>
-                </details>
-              ))}
-              {alerts.data?.status === 'available' && !activeAlerts.length && (
-                <p className="empty-alert">
-                  No active alerts returned for this point. Conditions can change; this is not an
-                  assurance of safety.
-                </p>
-              )}
-              <div className="alert-actions">
-                <a
-                  className="text-link"
-                  href={
-                    alerts.data?.officialUrl ||
-                    (place.countryCode === 'IN'
-                      ? 'https://mausam.imd.gov.in/'
-                      : 'https://severeweather.wmo.int/')
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Visit official warning source <ArrowUpRight size={15} />
-                </a>
-                <button
-                  className="quiet-button"
-                  onClick={enableNotifications}
-                  disabled={alerts.data?.status !== 'available'}
-                >
-                  <Bell size={14} />
-                  {notifications ? 'Disable alerts' : 'Enable page alerts'}
-                </button>
+                </section>
+                <section className="map-card" id="satellite">
+                  <div className="map-card-header">
+                    <span>
+                      <Satellite size={15} />{' '}
+                      {policy.extras ? 'SATELLITE EXPLORER' : 'COMPACT FORECAST'}
+                    </span>
+                    <span className="mono">
+                      {place.latitude.toFixed(2)}° / {place.longitude.toFixed(2)}°
+                    </span>
+                  </div>
+                  {policy.extras ? (
+                    <OptionalPanel
+                      label="Satellite explorer"
+                      onUseEssentials={() => changeConnectionMode('lite')}
+                    >
+                      <WeatherMap
+                        place={place}
+                        alerts={activeAlerts}
+                        lowBandwidth={lowBandwidth}
+                        onSelect={selectPlace}
+                      />
+                    </OptionalPanel>
+                  ) : (
+                    <div className="field-forecast">
+                      <h2>Next hours, at a glance.</h2>
+                      <p>Model estimates · {tz}. Times are for the selected place.</p>
+                      {hours.length ? (
+                        <div className="table-scroll">
+                          <table>
+                            <caption>
+                              Next 12 hours · refreshed {f ? age(f.fetchedAt, now) : '—'}
+                            </caption>
+                            <thead>
+                              <tr>
+                                <th>Time</th>
+                                <th>°C</th>
+                                <th>Rain mm</th>
+                                <th>Gust km/h</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {hours.slice(0, 12).map((hour) => (
+                                <tr key={hour.time}>
+                                  <th scope="row">
+                                    <time dateTime={new Date(hour.time).toISOString()}>
+                                      {localTime(hour.time, tz, { day: '2-digit', month: 'short' })}
+                                      <br />
+                                      {localTime(hour.time, tz, {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        timeZoneName: 'short',
+                                      })}
+                                    </time>
+                                  </th>
+                                  <td>{value(hour.temperature)}</td>
+                                  <td>{value(hour.precipitation, 1)}</td>
+                                  <td>{value(hour.gust)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p>
+                          {forecast.loading
+                            ? 'Fetching the compact forecast…'
+                            : 'Forecast unavailable. Use official information and saved material.'}
+                        </p>
+                      )}
+                      <p className="fine-print">
+                        The compact forecast requests 24 hourly steps instead of a full week. Maps
+                        and model comparisons load only in Full workspace.
+                      </p>
+                    </div>
+                  )}
+                </section>
               </div>
-              <p className="fine-print">
-                Notifications work only while this page is open, on supported browsers. Not an
-                emergency dispatch service. Alert feeds refresh every minute while visible.
-                {alerts.data && <> Last checked {age(alerts.data.fetchedAt, now)}.</>}
-              </p>
-            </section>
-            <section className="panel hazards-panel">
-              <PanelHeader
-                eyebrow="FORECAST-BASED INDICATORS"
-                title="What deserves a closer look"
-              />
-              <p className="section-intro">
-                Transparent weather thresholds, separate from official warning levels.
-              </p>
-              {hazards.length ? (
-                <div className="hazard-list">
-                  {hazards.slice(0, 4).map((h) => (
-                    <div className={`hazard-item ${h.level}`} key={h.kind}>
-                      <span className="hazard-symbol">
-                        {h.kind === 'rain' ? (
-                          <CloudRain size={18} />
-                        ) : h.kind === 'wind' ? (
-                          <Wind size={18} />
-                        ) : h.kind === 'thunder' ? (
-                          <CloudLightning size={18} />
+              <section
+                className={`signal-strip signal-${outlook.level}`}
+                aria-label="Forecast signals"
+              >
+                <div className="signal-title">
+                  <span className="signal-icon">
+                    <Activity size={20} />
+                  </span>
+                  <div>
+                    <span className="eyebrow">NEXT 24 HOURS</span>
+                    <strong>{f ? outlook.title : 'Forecast pending'}</strong>
+                  </div>
+                </div>
+                <p>
+                  {f ? outlook.detail : 'Signals appear once fresh forecast data is available.'}
+                </p>
+                <a href="#alerts">
+                  Check official warnings <ArrowRight size={15} />
+                </a>
+              </section>
+              {policy.extras && (
+                <div className="analytics-grid">
+                  <section className="panel forecast-panel" id="forecast">
+                    <PanelHeader eyebrow="LOOK AHEAD" title="One forecast. Multiple perspectives.">
+                      <span className="panel-number">01</span>
+                    </PanelHeader>
+                    {hours.length ? (
+                      <ForecastChart hours={hours} models={models.data || []} timezone={tz} />
+                    ) : (
+                      <div className="empty-state">
+                        <Activity size={30} />
+                        <p>
+                          {forecast.loading
+                            ? 'Building your forecast timeline…'
+                            : 'Forecast unavailable. Try refreshing or choosing another place.'}
+                        </p>
+                      </div>
+                    )}
+                    <ErrorNote error={models.error} />
+                    <div className="model-note">
+                      <Layers size={16} />
+                      <p>
+                        {spread === null ? (
+                          'Model comparison appears when both model forecasts are available.'
                         ) : (
-                          <Thermometer size={18} />
-                        )}
+                          <>
+                            Up to <strong>{value(spread, 1)}°C</strong> difference between models
+                            over the next 24 hours.
+                          </>
+                        )}{' '}
+                        <span>
+                          Model spread shows disagreement, not a calibrated confidence interval.
+                        </span>
+                      </p>
+                    </div>
+                  </section>
+                  <section className="panel outlook-panel">
+                    <PanelHeader eyebrow="THE WEEK AHEAD" title="7-day outlook" />
+                    <div className="daily-list">
+                      {f?.days.map((day, i) => (
+                        <div className="day-row" key={day.time}>
+                          <span>
+                            {localTime(day.time, tz, {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                            }) ===
+                            localTime(now, tz, {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                            })
+                              ? 'Today'
+                              : localTime(day.time, tz, { weekday: 'short' })}
+                          </span>
+                          <WeatherIcon code={day.code} size={20} />
+                          <span className="day-rain">
+                            <Droplets size={11} />
+                            {value(day.probability)}%
+                          </span>
+                          <strong>{value(day.high)}°</strong>
+                          <span className="day-low">{value(day.low)}°</span>
+                        </div>
+                      )) || <p className="muted">Waiting for daily forecast…</p>}
+                    </div>
+                    <div className="sun-times">
+                      <span>
+                        <Sun size={16} /> Sunrise{' '}
+                        <strong>
+                          {f?.days[0]?.sunrise ? localTime(f.days[0].sunrise, tz) : '—'}
+                        </strong>
                       </span>
-                      <div>
-                        <strong>{h.title}</strong>
-                        <p>{h.detail}</p>
-                        <small>
-                          {localTime(h.time, tz, {
-                            weekday: 'short',
+                      <span>
+                        <ArrowDown size={16} /> Sunset{' '}
+                        <strong>
+                          {f?.days[0]?.sunset ? localTime(f.days[0].sunset, tz) : '—'}
+                        </strong>
+                      </span>
+                    </div>
+                  </section>
+                </div>
+              )}
+              <div className="safety-grid">
+                <section className="panel alerts-panel" id="alerts">
+                  <PanelHeader eyebrow="KNOW WHAT’S OFFICIAL" title="Warnings & local guidance">
+                    <ShieldCheck size={22} className="mint-text" />
+                  </PanelHeader>
+                  <div
+                    className={`coverage-banner ${alerts.data?.status === 'available' ? 'available' : ''}`}
+                  >
+                    <Radio size={17} />
+                    <div>
+                      <strong>
+                        {alerts.loading
+                          ? 'Checking official alert coverage…'
+                          : alerts.error
+                            ? 'Alert feed unavailable'
+                            : alerts.data?.status === 'available'
+                              ? 'US National Weather Service'
+                              : 'Official feed not integrated here'}
+                      </strong>
+                      <p>
+                        {alerts.data?.coverage ||
+                          'Do not assume there are no warnings when this feed is unavailable.'}
+                      </p>
+                    </div>
+                  </div>
+                  <ErrorNote error={alerts.error} />
+                  {alerts.data?.status === 'available' && !alertsRecent && (
+                    <p className="wide-notice" role="status">
+                      This alert check is more than two minutes old. Current warning status is
+                      unverified. Refresh data or use the official source; saved briefings remain
+                      historical.
+                    </p>
+                  )}
+                  {activeAlerts.map((alert) => (
+                    <details
+                      className="official-alert"
+                      key={alert.id}
+                      open={alert.severity === 'Extreme'}
+                    >
+                      <summary>
+                        <TriangleAlert size={18} />
+                        <span>
+                          <strong>{alert.event}</strong>
+                          <small>
+                            {alert.severity} · Bulletin valid to{' '}
+                            {localTime(alert.expires, tz, {
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </small>
+                        </span>
+                        <ChevronDown size={16} />
+                      </summary>
+                      <div className="alert-body">
+                        <p>{alert.title}</p>
+                        <p className="muted">{alert.area}</p>
+                        <h3>Official instructions</h3>
+                        <p className="preserve-lines">
+                          {alert.instruction ||
+                            'Read the issuing authority’s full bulletin for instructions.'}
+                        </p>
+                        <details>
+                          <summary>Full description</summary>
+                          <p className="preserve-lines">{alert.description}</p>
+                        </details>
+                        <p className="muted">
+                          Issued{' '}
+                          {localTime(alert.sent, tz, {
+                            day: '2-digit',
+                            month: 'short',
                             hour: '2-digit',
                             minute: '2-digit',
-                          })}
-                        </small>
+                          })}{' '}
+                          · {alert.source}
+                        </p>
+                        <a href={alert.url} target="_blank" rel="noreferrer">
+                          Read official bulletin <ExternalLink size={13} />
+                        </a>
                       </div>
-                      <span className="hazard-level">{h.level}</span>
-                    </div>
+                    </details>
                   ))}
-                </div>
-              ) : (
-                <div className="no-hazards">
-                  <Eye size={22} />
-                  <p>
-                    {f
-                      ? 'No configured thresholds crossed in the next 24 hours, or data is stale or incomplete. This does not mean conditions are safe.'
-                      : 'Fresh forecast data is needed to calculate these indicators.'}
+                  {alertsRecent && alerts.data?.status === 'available' && !activeAlerts.length && (
+                    <p className="empty-alert">
+                      No active alerts returned for this point. Conditions can change; this is not
+                      an assurance of safety.
+                    </p>
+                  )}
+                  <div className="alert-actions">
+                    <a
+                      className="text-link"
+                      href={
+                        alerts.data?.officialUrl ||
+                        (place.countryCode === 'IN'
+                          ? 'https://mausam.imd.gov.in/'
+                          : 'https://severeweather.wmo.int/')
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Visit official warning source <ArrowUpRight size={15} />
+                    </a>
+                    <button
+                      className="quiet-button"
+                      onClick={enableNotifications}
+                      disabled={alerts.data?.status !== 'available' || !policy.polling}
+                    >
+                      <Bell size={14} />
+                      {notifications ? 'Disable alerts' : 'Enable page alerts'}
+                    </button>
+                  </div>
+                  <p className="fine-print">
+                    Notifications work only while this page is open, on supported browsers. Not an
+                    emergency dispatch service.{' '}
+                    {policy.polling
+                      ? 'Alert feeds refresh every minute while visible.'
+                      : 'Data saver pauses automatic checks and notifications. Use Refresh data for another check.'}
+                    {alerts.data && <> Last checked {age(alerts.data.fetchedAt, now)}.</>}
                   </p>
-                </div>
-              )}
-              <a href="#sources" className="text-link">
-                How these signals work <ArrowUpRight size={14} />
-              </a>
-            </section>
-          </div>
-          <DisasterWatch place={place} />
+                </section>
+                <section className="panel hazards-panel">
+                  <PanelHeader
+                    eyebrow="FORECAST-BASED INDICATORS"
+                    title="What deserves a closer look"
+                  />
+                  <p className="section-intro">
+                    Transparent weather thresholds, separate from official warning levels.
+                  </p>
+                  {hazards.length ? (
+                    <div className="hazard-list">
+                      {hazards.slice(0, 4).map((h) => (
+                        <div className={`hazard-item ${h.level}`} key={h.kind}>
+                          <span className="hazard-symbol">
+                            {h.kind === 'rain' ? (
+                              <CloudRain size={18} />
+                            ) : h.kind === 'wind' ? (
+                              <Wind size={18} />
+                            ) : h.kind === 'thunder' ? (
+                              <CloudLightning size={18} />
+                            ) : (
+                              <Thermometer size={18} />
+                            )}
+                          </span>
+                          <div>
+                            <strong>{h.title}</strong>
+                            <p>{h.detail}</p>
+                            <small>
+                              {localTime(h.time, tz, {
+                                weekday: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </small>
+                          </div>
+                          <span className="hazard-level">{h.level}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="no-hazards">
+                      <Eye size={22} />
+                      <p>
+                        {f
+                          ? 'No configured thresholds crossed in the next 24 hours, or data is stale or incomplete. This does not mean conditions are safe.'
+                          : 'Fresh forecast data is needed to calculate these indicators.'}
+                      </p>
+                    </div>
+                  )}
+                  <a href="#sources" className="text-link">
+                    How these signals work <ArrowUpRight size={14} />
+                  </a>
+                </section>
+              </div>
+            </>
+          )}
+          <OfflineBriefing
+            place={place}
+            forecast={f}
+            alerts={alerts.data}
+            now={now}
+            offline={!policy.essentials}
+            canSave={policy.essentials && !forecast.loading && !forecast.error && !!f && !isStale}
+            onSelectPlace={selectPlace}
+          />
+          {policy.extras && (
+            <OptionalPanel
+              label="Regional reports"
+              onUseEssentials={() => changeConnectionMode('lite')}
+            >
+              <DisasterWatch place={place} />
+            </OptionalPanel>
+          )}
           <section className="preparedness-banner" id="readiness">
             <div className="preparedness-art">
               <ShieldCheck size={46} />
@@ -1183,8 +1420,8 @@ export default function App() {
                 authorities when a warning is issued.
               </p>
             </div>
-            <a className="primary-button" href="/preparedness.html">
-              Open preparedness kit <ArrowUpRight size={16} />
+            <a className="primary-button" href="/offline.html">
+              Open offline emergency kit <ArrowUpRight size={16} />
             </a>
           </section>
           <section className="panel sources-panel" id="sources">
@@ -1193,19 +1430,12 @@ export default function App() {
               title="Know the source. Know the limits."
             >
               <button
-                className={`quiet-button ${lowBandwidth ? 'enabled' : ''}`}
-                aria-pressed={lowBandwidth}
-                onClick={() =>
-                  setLowBandwidth((v) => {
-                    try {
-                      localStorage.setItem('stormsignal:low-bandwidth', String(!v));
-                    } catch {}
-                    return !v;
-                  })
-                }
+                className={`quiet-button ${connectionMode === 'lite' ? 'enabled' : ''}`}
+                aria-pressed={connectionMode === 'lite'}
+                onClick={() => changeConnectionMode(connectionMode === 'lite' ? 'full' : 'lite')}
               >
                 <WifiOff size={15} />
-                {lowBandwidth ? 'Low bandwidth on' : 'Low bandwidth mode'}
+                {connectionMode === 'lite' ? 'Data saver on' : 'Use data saver'}
               </button>
             </PanelHeader>
             <div className="sources-grid">
@@ -1281,7 +1511,8 @@ export default function App() {
                   IP address are sent to the relevant weather, imagery, geocoding, and map
                   providers. Device location is requested only when you choose it. Saved places and
                   checklist progress stay in this browser. No accounts, ads, or analytics. Interface
-                  fonts are requested from Google Fonts.{' '}
+                  uses system fonts without font downloads. Offline briefings and emergency plans
+                  stay on your device until you download or share them.{' '}
                   <button
                     className="text-button"
                     onClick={() => {
@@ -1314,7 +1545,7 @@ export default function App() {
             </details>
           </section>
           <footer className="footer">
-            <a href="/preparedness.html" className="offline-status">
+            <a href="/offline.html" className="offline-status">
               {offlineStatus}
             </a>
             <span>

@@ -1,0 +1,23 @@
+{
+  "id": "/",
+  "name": "StormSignal — Weather & Offline Kit",
+  "short_name": "StormSignal",
+  "description": "Weather evidence and a local emergency kit. New warnings require a connection.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10171e",
+  "theme_color": "#10171e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Offline emergency kit",
+      "short_name": "Offline kit",
+      "url": "/offline.html",
+      "description": "Local plan, checklist, and action cards. No live weather."
+    }
+  ]
+}

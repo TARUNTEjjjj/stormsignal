@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 :root {
   font-family: 'DM Sans', system-ui, sans-serif;
   color: #e8edf0;
@@ -2247,4 +2246,143 @@ th {
 .footer .offline-status {
   color: #a7c9b7;
   font-size: 9px;
+}
+
+/* Field mode prioritizes readable text, deliberate downloads and large controls. */
+.field-controls {
+  padding: 24px;
+  margin-bottom: 24px;
+  border-color: #49625e;
+  background: linear-gradient(115deg, #1a302f, #172129 75%);
+}
+.field-controls h2 {
+  margin: 8px 0;
+  font-size: 25px;
+  letter-spacing: -0.7px;
+}
+.field-controls p {
+  color: #c2d3d9;
+  max-width: 80ch;
+  font-size: 14px;
+}
+.connection-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 20px 0 16px;
+}
+.connection-options button {
+  border: 1px solid #596c76;
+  border-radius: 8px;
+  background: #121d25;
+  padding: 12px 20px;
+  min-height: 46px;
+  font-weight: 650;
+}
+.connection-options button[aria-pressed='true'] {
+  background: #8be7d3;
+  color: #102722;
+  border-color: #8be7d3;
+}
+.field-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.field-shortcuts a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: #a6f5e5;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.field-controls .field-cache-status {
+  font-size: 12px;
+  color: #afc4cc;
+  margin-top: 14px;
+  border-top: 1px solid #405358;
+  padding-top: 14px;
+}
+.field-forecast {
+  padding: 20px;
+}
+.field-forecast h3 {
+  font-size: 20px;
+}
+.field-forecast > p {
+  color: #bdcbd2;
+  margin: 8px 0 16px;
+}
+.field-forecast table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.field-forecast th,
+.field-forecast td {
+  padding: 10px 6px;
+  text-align: right;
+  border-bottom: 1px solid #32424b;
+}
+.field-forecast th:first-child,
+.field-forecast td:first-child {
+  text-align: left;
+}
+.field-mode .coverage-banner p,
+.field-mode .section-intro,
+.field-mode .no-hazards p,
+.field-mode .hazard-item p,
+.field-mode .alert-body,
+.field-mode .preparedness-banner p {
+  font-size: 14px;
+}
+.field-mode .fine-print {
+  font-size: 13px;
+}
+.field-mode .primary-button,
+.field-mode .secondary-button,
+.field-mode .quiet-button,
+.field-mode .icon-button,
+.field-mode .saved-list button,
+.field-mode nav a {
+  min-height: 44px;
+}
+@media (max-width: 600px) {
+  .field-controls {
+    padding: 18px;
+  }
+  .field-controls h2 {
+    font-size: 24px;
+  }
+  .connection-options {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .connection-options button {
+    text-align: left;
+  }
+  .field-shortcuts {
+    display: grid;
+    gap: 2px;
+  }
+  .field-forecast {
+    padding: 16px;
+  }
+  .field-forecast table {
+    font-size: 12px;
+  }
+  .field-mode .heading-actions {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

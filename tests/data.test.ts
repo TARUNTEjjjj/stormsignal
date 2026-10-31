@@ -5,6 +5,7 @@ import {
   fetchAirQuality,
   fetchAlerts,
   fetchForecast,
+  fetchCompactForecast,
   fetchModels,
   searchPlaces,
   weatherLabel,
@@ -110,6 +111,34 @@ test('cache keeps original retrieval time instead of making cached data appear f
   const b = await fetchForecast(place);
   assert.equal(calls, 1);
   assert.equal(a.fetchedAt, b.fetchedAt);
+});
+
+test('data saver requests only 24 hours and current conditions without daily payload', async () => {
+  globalThis.fetch = async (target) => {
+    const params = new URL(String(target)).searchParams;
+    assert.equal(params.get('forecast_hours'), '24');
+    assert.equal(params.has('forecast_days'), false);
+    assert.equal(params.has('daily'), false);
+    assert.ok(params.get('current')?.includes('wind_gusts_10m'));
+    const { daily, ...compact } = forecastPayload();
+    return json(compact);
+  };
+  const result = await fetchCompactForecast(place);
+  assert.equal(result.current.temperature, 28);
+  assert.equal(result.hours[1].precipitation, null);
+  assert.deepEqual(result.days, []);
+});
+
+test('compact and full forecasts do not share a truncated cached response', async () => {
+  const calls: string[] = [];
+  globalThis.fetch = async (target) => {
+    calls.push(String(target));
+    return json(forecastPayload());
+  };
+  await fetchCompactForecast(place);
+  await fetchForecast(place);
+  assert.equal(calls.length, 2);
+  assert.notEqual(calls[0], calls[1]);
 });
 
 test('unknown weather code and absent code are not displayed as clear weather', () => {

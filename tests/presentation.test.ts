@@ -61,3 +61,15 @@ test('time formatting uses explicit timezone and safe fallback', () => {
   assert.equal(age(NaN), 'Unknown age');
   assert.equal(age(0, 61000), '1m ago');
 });
+test('zone labels distinguish repeated local hours across daylight-saving changes', () => {
+  const options: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  };
+  const before = localTime(Date.UTC(2026, 10, 1, 5), 'America/New_York', options);
+  const after = localTime(Date.UTC(2026, 10, 1, 6), 'America/New_York', options);
+  assert.match(before, /01:00/);
+  assert.match(after, /01:00/);
+  assert.notEqual(before, after);
+});

@@ -257,16 +257,33 @@ function makeHour(data: RecordValue, time: number, index?: number): Hour {
 }
 
 export async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Forecast> {
+  return forecastRequest(place, signal, false);
+}
+
+/** Only the next 24 hourly steps; no weekly/daily payload or comparison models. */
+export async function fetchCompactForecast(place: Place, signal?: AbortSignal): Promise<Forecast> {
+  return forecastRequest(place, signal, true);
+}
+
+async function forecastRequest(
+  place: Place,
+  signal: AbortSignal | undefined,
+  compact: boolean,
+): Promise<Forecast> {
   const result = await requestJson(
     url(WEATHER, {
       ...coordinates(place),
       hourly: Object.values(hourFields).join(','),
       current: Object.values(hourFields).join(','),
-      daily:
-        'temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,weather_code,sunrise,sunset',
+      ...(compact
+        ? { forecast_hours: '24' }
+        : {
+            daily:
+              'temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,weather_code,sunrise,sunset',
+            forecast_days: '7',
+          }),
       timezone: 'auto',
       timeformat: 'unixtime',
-      forecast_days: '7',
       wind_speed_unit: 'kmh',
       temperature_unit: 'celsius',
       precipitation_unit: 'mm',

@@ -1,0 +1,222 @@
+.offline-briefing {
+  margin-bottom: 24px;
+}
+.offline-briefing .panel-heading > svg {
+  color: var(--mint);
+  flex-shrink: 0;
+}
+.briefing-intro,
+.briefing-help {
+  color: #b4c5cf;
+  line-height: 1.65;
+}
+.briefing-intro {
+  max-width: 76ch;
+  font-size: 14px;
+}
+.briefing-help {
+  font-size: 12px;
+  margin: 10px 0;
+}
+.briefing-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 16px 0;
+}
+.briefing-actions button,
+.briefing-actions a {
+  min-height: 44px;
+  white-space: normal;
+  text-align: left;
+}
+.briefing-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.briefing-message {
+  min-height: 1em;
+  color: #b8ebdd;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.briefing-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid #755e3f;
+  border-radius: 8px;
+  background: #30291f;
+  color: #ffdbad;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.briefing-warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.briefing-warning strong {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.briefing-warning p {
+  margin: 5px 0 0;
+}
+.briefing-empty {
+  border: 1px dashed #4b606b;
+  border-radius: 9px;
+  padding: 24px;
+  margin-top: 20px;
+  color: #b4c5cf;
+}
+.briefing-empty h3 {
+  margin: 10px 0;
+  color: #e8edf0;
+}
+.briefing-empty p {
+  line-height: 1.65;
+  max-width: 70ch;
+}
+.briefing-select-label {
+  display: block;
+  margin: 18px 0 8px;
+  font-weight: 600;
+}
+#saved-briefing {
+  min-width: 0;
+  width: 100%;
+  min-height: 46px;
+  color: #e8edf0;
+  background: #101b23;
+  border: 1px solid #607583;
+  border-radius: 7px;
+  padding: 10px;
+  font-size: 16px;
+}
+.briefing-copy {
+  min-width: 0;
+  margin-top: 18px;
+  padding: 18px;
+  background: #111d25;
+  border: 1px solid #3b505c;
+  border-radius: 9px;
+}
+.briefing-copy h3 {
+  font-size: 21px;
+  margin: 20px 0 8px;
+}
+.briefing-facts {
+  display: grid;
+  gap: 10px;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.briefing-facts > div {
+  display: grid;
+  grid-template-columns: 145px 1fr;
+  gap: 12px;
+}
+.briefing-facts dt {
+  color: #aabdc8;
+}
+.briefing-facts dd {
+  margin: 0;
+}
+.briefing-hours {
+  margin: 20px 0;
+  border-top: 1px solid #3b505c;
+  border-bottom: 1px solid #3b505c;
+}
+.briefing-hours summary,
+.briefing-alert summary {
+  padding: 14px 0;
+  min-height: 44px;
+  cursor: pointer;
+  line-height: 1.6;
+  color: #d2e5e6;
+  font-weight: 600;
+}
+.briefing-hours > p,
+.briefing-warnings p {
+  line-height: 1.65;
+  color: #c0cdd5;
+  font-size: 13px;
+}
+.briefing-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  margin: 14px 0;
+}
+.briefing-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.briefing-table-scroll caption {
+  text-align: left;
+  padding: 10px 0;
+  color: #b7cbd7;
+}
+.briefing-table-scroll th,
+.briefing-table-scroll td {
+  border-bottom: 1px solid #334650;
+  text-align: left;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+.briefing-warnings h4 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+.briefing-warnings .briefing-warning {
+  color: #ffdbad;
+}
+.briefing-alert {
+  margin: 12px 0;
+  padding: 0 14px 14px;
+  border: 1px solid #4c5962;
+  border-radius: 7px;
+}
+.briefing-alert h5 {
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.briefing-verbatim {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.briefing-copy a {
+  color: #a5eddd;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.briefing-remove {
+  color: #f7c4b8;
+  background: transparent;
+  border: 1px solid #816253;
+  padding: 10px 13px;
+  border-radius: 7px;
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+@media (max-width: 540px) {
+  .briefing-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .briefing-copy {
+    padding: 14px;
+  }
+  .briefing-facts > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .briefing-copy h3 {
+    font-size: 19px;
+  }
+}

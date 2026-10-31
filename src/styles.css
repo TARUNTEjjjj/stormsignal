@@ -193,6 +193,25 @@ nav a svg {
 .location-group {
   margin-bottom: 20px;
 }
+.location-context {
+  margin: 8px 12px 12px;
+  color: #a7b8c4;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.risk-context summary {
+  cursor: pointer;
+  color: #c8ded9;
+  padding: 6px 0;
+}
+.risk-context p {
+  margin: 8px 0;
+}
+.risk-context a {
+  color: #a7dfcf;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .location-group .saved-list button > span {
   min-width: 0;
   overflow-wrap: anywhere;

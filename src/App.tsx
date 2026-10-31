@@ -75,6 +75,16 @@ const PRESETS: Place[] = [
     admin: 'Tamil Nadu',
   },
   {
+    id: '5391959',
+    name: 'San Francisco',
+    country: 'United States',
+    countryCode: 'US',
+    latitude: 37.77493,
+    longitude: -122.41942,
+    timezone: 'America/Los_Angeles',
+    admin: 'California',
+  },
+  {
     id: '1275339',
     name: 'Mumbai',
     country: 'India',
@@ -131,6 +141,40 @@ const PRESETS: Place[] = [
     latitude: 51.5085,
     longitude: -0.1257,
     timezone: 'Europe/London',
+  },
+];
+// City examples from the top three countries in the 2026 WorldRiskIndex.
+// The index does not rank these cities or describe current warning conditions.
+const RISK_STUDY_LOCATIONS: Place[] = [
+  {
+    id: '1701668',
+    name: 'Manila',
+    country: 'Philippines',
+    countryCode: 'PH',
+    latitude: 14.6042,
+    longitude: 120.9822,
+    timezone: 'Asia/Manila',
+    admin: 'National Capital Region',
+  },
+  {
+    id: '1275004',
+    name: 'Kolkata',
+    country: 'India',
+    countryCode: 'IN',
+    latitude: 22.56263,
+    longitude: 88.36304,
+    timezone: 'Asia/Kolkata',
+    admin: 'West Bengal',
+  },
+  {
+    id: '1642911',
+    name: 'Jakarta',
+    country: 'Indonesia',
+    countryCode: 'ID',
+    latitude: -6.21462,
+    longitude: 106.84513,
+    timezone: 'Asia/Jakarta',
+    admin: 'Jakarta Special Capital Region',
   },
 ];
 type Resource<T> = { data: T | null; loading: boolean; error: string | null };
@@ -771,8 +815,9 @@ export default function App() {
         </nav>
         <div className="sidebar-divider" />
         {[
-          { label: 'Quick locations', places: PRESETS },
-          { label: 'Saved places', places: saved },
+          { label: 'Quick locations', places: PRESETS, riskStudy: false },
+          { label: 'Risk study locations', places: RISK_STUDY_LOCATIONS, riskStudy: true },
+          { label: 'Saved places', places: saved, riskStudy: false },
         ]
           .filter((group) => group.places.length)
           .map((group) => (
@@ -780,8 +825,13 @@ export default function App() {
               <div className="nav-label">
                 {group.label.toUpperCase()} <Globe2 size={13} />
               </div>
+              {group.riskStudy && (
+                <p className="location-context">
+                  City examples from the three highest-risk countries in the 2026 WorldRiskIndex.
+                </p>
+              )}
               <div className="saved-list">
-                {group.places.map((p) => {
+                {group.places.map((p, index) => {
                   const selected =
                     Math.abs(p.latitude - place.latitude) < 0.01 &&
                     Math.abs(p.longitude - place.longitude) < 0.01;
@@ -795,13 +845,43 @@ export default function App() {
                       <MapPin size={14} />
                       <span>
                         {p.name}
-                        <small>{p.country}</small>
+                        <small>
+                          {p.country}
+                          {group.riskStudy && ` · country #${index + 1}`}
+                        </small>
                       </span>
                       {selected && <i className="location-dot" />}
                     </button>
                   );
                 })}
               </div>
+              {group.riskStudy && (
+                <details className="location-context risk-context">
+                  <summary>About this selection</summary>
+                  <p>
+                    The index measures long-term national exposure and vulnerability. These cities
+                    are examples, not the world's three highest-risk cities. This is separate from
+                    live weather warnings.
+                  </p>
+                  <a
+                    href="https://www.welthungerhilfe.org/news/publications/detail/worldriskreport-2026"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    WorldRiskReport 2026 ↗
+                  </a>
+                  <p>
+                    Bündnis Entwicklung Hilft / IFHV ·{' '}
+                    <a
+                      href="https://creativecommons.org/licenses/by/4.0/"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      CC BY 4.0
+                    </a>
+                  </p>
+                </details>
+              )}
             </section>
           ))}
         <div className="sidebar-bottom">

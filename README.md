@@ -8,7 +8,8 @@ StormSignal is intended for public situational awareness and learning. It does n
 
 ## What makes it different
 
-- **Reach places quickly:** Chennai, Mumbai, Bhubaneswar (Odisha), New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
+- **Reach places quickly:** Chennai, San Francisco, Mumbai, Bhubaneswar (Odisha), New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
+- **Explore risk context:** Manila, Kolkata and Jakarta are city examples from the Philippines, India and Indonesia, the three highest-ranked countries in the [WorldRiskIndex 2026](https://www.welthungerhilfe.org/news/publications/detail/worldriskreport-2026). This is a country-level exposure/vulnerability index, not a ranking of those cities or a live warning. The sidebar includes the scope, source and attribution.
 - **Read official bulletins across regions:** US NWS point warnings, India NDMA SACHET state/territory feeds, and participating national agencies through WMO SWIC. Indian bulletins show their original affected areas; they are not automatically warnings for the selected city. Missing or partial global coverage remains explicit.
 - **Inspect the sky:** timestamped NASA GIBS satellite layers, recent geostationary frames where coverage permits, and a global daily true-color view. Images represent their displayed observation time, not an instantaneous view of a street.
 - **Compare rather than conceal disagreement:** ECMWF IFS and NOAA GFS model forecasts. Differences between two models are not calibrated forecast probabilities.

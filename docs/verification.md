@@ -1,5 +1,12 @@
 # Release verification
 
+## San Francisco and risk-study locations — 1 November 2026
+
+- Added San Francisco as a regular shortcut and Manila, Kolkata and Jakarta as city examples from the top three countries in the 2026 WorldRiskIndex. The interface labels national rank, explains the scope and links the source; it does not rank the cities or feed the index into live warning calculations.
+- Live geocoding and compact forecasts returned the expected country, coordinates, timezones, current temperatures and 24 hourly points for all four cities. Initial provider HTTP 503 responses recovered on one bounded retry.
+- Browser checks covered San Francisco, Manila and Kolkata on desktop; the ranking explanation expanded correctly. At 390 × 844, the new group remained accessible without page-level horizontal overflow; selecting Jakarta closed navigation and loaded its Asia/Jakarta forecast.
+- All 169 deterministic tests, TypeScript, production build and Worker artifact checks passed.
+
 ## International official warnings — 1 November 2026
 
 - **169 deterministic tests passed**, including CAP XML/status/namespace validation, timezones, expiry/cancellation/update references, exact geographic matching, incomplete-source responses, bounded requests, 200/304 ETag handling, failed revalidation, unsafe URLs, and India/global offline snapshots. TypeScript, production build and executable Worker artifact checks passed.

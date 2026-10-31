@@ -16,6 +16,12 @@ Data saver uses the same normalization with `forecast_hours=24`, current-conditi
 
 ## Official alerts
 
+### Location shortcuts and risk context
+
+The [WorldRiskReport 2026](https://www.welthungerhilfe.org/news/publications/detail/worldriskreport-2026) ranks the Philippines, India and Indonesia first, second and third at country level. StormSignal uses Manila, Kolkata and Jakarta as illustrative city shortcuts; it does not claim they are the highest-risk cities. San Francisco is a regular quick location and is not assigned one of these ranks. The index combines national exposure and vulnerability and cannot establish current danger at a selected point. Ranking data: Bündnis Entwicklung Hilft / IFHV, [CC BY 4.0](https://weltrisikobericht.de/worldriskreport/). No live-alert calculation uses this ranking.
+
+### Warning feeds
+
 The [U.S. National Weather Service API](https://www.weather.gov/documentation/services-web-api) provides active, point-specific U.S. warnings. The app preserves authority text and expiration, excludes cancelled/expired entries, and uses supplied geometry where available. Some warning products have no polygon in the response.
 
 India uses the official [NDMA SACHET CAP feeds](https://sachet.ndma.gov.in/CapFeed), with a fixed mapping for all 36 states/territories published there. State metadata selects the regional RSS feed; up to ten referenced CAP documents are checked, four at a time. RSS is a limited rolling history, not a complete list of current city warnings. Original issuing agencies, named areas and validity times are preserved. Region-wide selection does not imply every place in that region is affected. Choose a named Indian city with state metadata; Bhubaneswar's shortcut selects the Odisha feed while its forecast remains for Bhubaneswar.

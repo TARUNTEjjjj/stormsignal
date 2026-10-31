@@ -87,7 +87,7 @@ test('approved provider paths forbid redirect following and use bounded request 
   }
   assert.equal(calls.length, 5);
   for (const call of calls) {
-    assert.equal(call.init?.redirect, 'error');
+    assert.equal(call.init?.redirect, 'manual');
     assert.ok(call.init?.signal instanceof AbortSignal);
     assert.match(new Headers(call.init?.headers).get('accept')!, /application\/xml/);
   }

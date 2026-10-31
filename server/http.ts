@@ -113,7 +113,12 @@ async function retrieve(target: string, maxBytes: number, ttlMs: number): Promis
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const response = await fetch(target, { headers, redirect: 'error', signal: controller.signal });
+    // Cloudflare supports follow/manual only. Reject 3xx below without following.
+    const response = await fetch(target, {
+      headers,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
     if (response.status === 304 && (!old || !old.etag))
       throw new Error('Warning cache could not be revalidated');
     if (response.status !== 304 && !response.ok) {

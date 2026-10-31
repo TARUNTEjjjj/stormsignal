@@ -70,10 +70,16 @@ export async function handleAlerts(request: Request): Promise<Response> {
         : await fetchGlobalAlerts(place, controller.signal);
     return new Response(JSON.stringify(result), { headers });
   } catch (error) {
-    const detail =
-      error instanceof Error ? error.message.slice(0, 300) : 'Source could not be checked.';
+    console.warn(
+      'Official warning retrieval failed:',
+      error instanceof Error ? error.message.slice(0, 300) : 'Unknown failure',
+    );
     return new Response(
-      JSON.stringify({ error: true, reason: `Official warnings could not be verified. ${detail}` }),
+      JSON.stringify({
+        error: true,
+        reason:
+          'Official warnings could not be verified. A source could not be reached or validated. Check the official authority and try again shortly.',
+      }),
       { status: 503, headers },
     );
   } finally {

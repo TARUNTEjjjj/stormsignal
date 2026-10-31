@@ -9,6 +9,7 @@
 - A live WMO WFS timestamp differed from its original CAP timestamp by eight hours. The adapter uses only the original CAP times for displayed validity; a fixture locks this behavior in. Issuing agency text and canonical WMO copies remain attributed.
 - Browser checks: Chennai, Mumbai and Odisha showed the correct regional scope and IMD links. Mumbai's regional metadata saved in a historical briefing. Miami still displayed its live NWS rip-current and coastal-flood products at check time. No browser errors were reported in these flows.
 - Glen Innes's live BOM warning displayed its original headline, instructions and issuer and saved successfully. At 390 × 844, the warning panel fit the viewport without horizontal overflow. With the local Worker stopped, the installed dashboard reloaded in Offline only, both international/regional saved briefings remained readable, and the offline emergency kit opened. External internet remained available: this was an origin-outage check, not a radio-off device test.
+- The first hosted check exposed Cloudflare's unsupported `redirect: error` mode. Requests now use `manual` and reject 3xx status codes without following them; the HTTP regression verifies this supported mode and rejection. Provider errors remain actionable in the UI without leaking runtime diagnostics.
 
 ## Earlier weak-signal and offline baseline
 

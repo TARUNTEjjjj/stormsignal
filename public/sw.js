@@ -67,7 +67,22 @@ self.addEventListener('message', (event) => {
 async function readCache(path) {
   try {
     const cache = await caches.open(VERSION);
-    return await cache.match(path, { ignoreVary: true });
+    const response = await cache.match(path, { ignoreVary: true });
+    if (
+      response?.redirected &&
+      DOCUMENTS.includes(path) &&
+      new URL(response.url).origin === self.location.origin
+    ) {
+      // Some static hosts redirect /offline.html to /offline during addAll.
+      // A followed-redirect Response cannot satisfy a navigation request whose
+      // redirect mode is "manual". Keep the document, not its redirect history.
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    }
+    return response;
   } catch {
     return undefined;
   }

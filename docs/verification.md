@@ -4,10 +4,11 @@ Verified 1 November 2026 (Asia/Kolkata). These are observed software checks, not
 
 ## Automated checks
 
-- **103 deterministic tests passed**, including provider normalization, compact-vs-full forecast requests, request policy, warning freshness, bounded historical snapshots, multibyte storage limits, corruption/quota failure, safe exports, emergency-kit state, and service-worker routing/install/update behavior.
+- **106 deterministic tests passed**, including provider normalization, compact-vs-full forecast requests, request policy, warning freshness, bounded historical snapshots, multibyte storage limits, corruption/quota failure, safe exports, emergency-kit state, and service-worker routing/install/update behavior.
 - TypeScript check and Vite production build passed. Dependency audit reported zero vulnerabilities in both production dependencies and the full lockfile at verification time.
 - Essential application JS/CSS: approximately **103 KB gzip** as reported by Vite. Four optional map/report assets (approximately **62 KB gzip**, before remote tiles and feeds) are excluded from initial precaching. Transfer totals depend on host compression, headers, cache state and provider responses.
 - Generic self-contained emergency kit: **25,163 bytes**. No remote assets or background network APIs; static action cards remain readable without JavaScript.
+- Production uses a clean-URL redirect from `/offline.html` to `/offline`. This exposed an incompatible cached redirect response during document navigation. The worker now strips same-origin document redirect history while preserving body/status/headers; three regressions use an actual local HTTP redirect response.
 - Worker tests cover atomic failed installation, a hanging dashboard request falling back after three seconds, disabled/quota-limited caching, previous-build assets, and exclusion of external APIs/private/query-bearing URLs.
 
 ## Browser verification

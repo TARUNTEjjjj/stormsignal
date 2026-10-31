@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import vm from 'node:vm';
 
 type EventHandler = (event: any) => void;
-function harness() {
+function harness(origin = 'https://example.org') {
   const events: Record<string, EventHandler> = {};
-  const origin = 'https://example.org';
   const store = new Map<string, Response>();
   const stores = new Map<string, Map<string, Response>>([
     ['stormsignal-ancient', new Map()],
@@ -99,11 +99,11 @@ function harness() {
       timers.delete(id);
     },
   });
-  function dispatch(path: string, method = 'GET') {
+  function dispatch(path: string, method = 'GET', redirect: RequestRedirect = 'follow') {
     let response: Promise<Response> | undefined;
     const pending: Promise<unknown>[] = [];
     events.fetch({
-      request: new Request(new URL(path, origin), { method }),
+      request: new Request(new URL(path, origin), { method, redirect }),
       respondWith: (value: Promise<Response>) => {
         response = value;
       },
@@ -168,6 +168,7 @@ function harness() {
       cacheUnavailable = true;
     },
     put: (path: string, content: string) => store.set(key(path), new Response(content)),
+    putResponse: (path: string, response: Response) => store.set(key(path), response),
     putInCache: (name: string, path: string, content: string) =>
       stores.get(name)!.set(key(path), new Response(content)),
     get: async (path: string) => store.get(key(path))?.clone().text(),
@@ -175,6 +176,35 @@ function harness() {
       for (const timer of [...timers.values()]) timer.callback();
     },
   };
+}
+
+// Use a real followed redirect so clone() preserves the native Response URL and
+// redirected metadata that Cache.addAll saves on clean-URL static hosting.
+async function withRedirectedDocument(run: (origin: string, response: Response) => Promise<void>) {
+  const server = createServer((request, response) => {
+    if (request.url === '/offline.html') {
+      response.writeHead(307, { Location: '/offline' }).end();
+    } else {
+      response.writeHead(200, 'OK', {
+        'Content-Type': 'text/html; charset=utf-8',
+        'X-Kit-Version': 'test-kit',
+      });
+      response.end('<!doctype html><h1>Emergency kit</h1>');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${origin}/offline.html`);
+    assert.equal(response.redirected, true);
+    await run(origin, response);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 }
 
 test('offline installation atomically precaches core and standalone kit, not optional map code', async () => {
@@ -251,6 +281,49 @@ test('cached immutable assets and standalone documents require zero network requ
   ])
     assert.equal(await (await h.dispatch(path).done())?.text(), expected);
   assert.equal(h.counts().requests, 0);
+});
+
+test('cached clean-URL documents satisfy manual-redirect navigation without losing body or headers', async () => {
+  await withRedirectedDocument(async (origin, response) => {
+    const h = harness(origin);
+    h.putResponse('/offline.html', response);
+    h.setMode('offline');
+    for (const path of ['/offline.html', '/offline']) {
+      const result = await h.dispatch(path, 'GET', 'manual').done();
+      assert.ok(result);
+      assert.equal(result.redirected, false);
+      assert.equal(result.status, 200);
+      assert.equal(result.statusText, 'OK');
+      assert.equal(result.headers.get('content-type'), 'text/html; charset=utf-8');
+      assert.equal(result.headers.get('x-kit-version'), 'test-kit');
+      assert.equal(await result.text(), '<!doctype html><h1>Emergency kit</h1>');
+    }
+    assert.equal(h.counts().requests, 0);
+  });
+});
+
+test('the cached root fallback also removes same-origin redirect history', async () => {
+  await withRedirectedDocument(async (origin, response) => {
+    const h = harness(origin);
+    h.putResponse('/', response);
+    h.setMode('offline');
+    const result = await h.dispatch('/', 'GET', 'manual').done();
+    assert.ok(result);
+    assert.equal(result.redirected, false);
+    assert.equal(result.headers.get('x-kit-version'), 'test-kit');
+    assert.equal(await result.text(), '<!doctype html><h1>Emergency kit</h1>');
+  });
+});
+
+test('redirect normalization is limited to same-origin cached documents', async () => {
+  await withRedirectedDocument(async (origin, response) => {
+    const sameOrigin = harness(origin);
+    sameOrigin.putResponse('/assets/main-a1.js', response.clone());
+    assert.equal((await sameOrigin.dispatch('/assets/main-a1.js').done())?.redirected, true);
+    const otherOrigin = harness();
+    otherOrigin.putResponse('/offline.html', response);
+    assert.equal((await otherOrigin.dispatch('/offline.html').done())?.redirected, true);
+  });
 });
 
 test('optional map code is cached only after an explicit request', async () => {

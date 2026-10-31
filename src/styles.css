@@ -190,6 +190,13 @@ nav a svg {
   display: grid;
   gap: 5px;
 }
+.location-group {
+  margin-bottom: 20px;
+}
+.location-group .saved-list button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .saved-list button {
   background: transparent;
   border-radius: 5px;

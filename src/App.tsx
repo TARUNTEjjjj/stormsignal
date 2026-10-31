@@ -75,6 +75,26 @@ const PRESETS: Place[] = [
     admin: 'Tamil Nadu',
   },
   {
+    id: '1275339',
+    name: 'Mumbai',
+    country: 'India',
+    countryCode: 'IN',
+    latitude: 19.07283,
+    longitude: 72.88261,
+    timezone: 'Asia/Kolkata',
+    admin: 'Maharashtra',
+  },
+  {
+    id: '5128581',
+    name: 'New York City',
+    country: 'United States',
+    countryCode: 'US',
+    latitude: 40.71427,
+    longitude: -74.00597,
+    timezone: 'America/New_York',
+    admin: 'New York',
+  },
+  {
     id: 'miami',
     name: 'Miami',
     country: 'United States',
@@ -738,27 +758,40 @@ export default function App() {
             ))}
         </nav>
         <div className="sidebar-divider" />
-        <div className="nav-label">
-          QUICK LOCATIONS <Globe2 size={13} />
-        </div>
-        <div className="saved-list">
-          {[...saved, ...PRESETS.filter((p) => !saved.some((s) => s.id === p.id))]
-            .slice(0, 8)
-            .map((p) => (
-              <button
-                key={p.id}
-                className={p.id === place.id ? 'current' : ''}
-                onClick={() => selectPlace(p)}
-              >
-                <MapPin size={14} />
-                <span>
-                  {p.name}
-                  <small>{p.country}</small>
-                </span>
-                {p.id === place.id && <i className="location-dot" />}
-              </button>
-            ))}
-        </div>
+        {[
+          { label: 'Quick locations', places: PRESETS },
+          { label: 'Saved places', places: saved },
+        ]
+          .filter((group) => group.places.length)
+          .map((group) => (
+            <section className="location-group" aria-label={group.label} key={group.label}>
+              <div className="nav-label">
+                {group.label.toUpperCase()} <Globe2 size={13} />
+              </div>
+              <div className="saved-list">
+                {group.places.map((p) => {
+                  const selected =
+                    Math.abs(p.latitude - place.latitude) < 0.01 &&
+                    Math.abs(p.longitude - place.longitude) < 0.01;
+                  return (
+                    <button
+                      key={p.id}
+                      className={selected ? 'current' : ''}
+                      aria-pressed={selected}
+                      onClick={() => selectPlace(p)}
+                    >
+                      <MapPin size={14} />
+                      <span>
+                        {p.name}
+                        <small>{p.country}</small>
+                      </span>
+                      {selected && <i className="location-dot" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         <div className="sidebar-bottom">
           <div className="source-stamp">
             <i className="dot mint" /> Open data. Clear limits.

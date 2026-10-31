@@ -1,5 +1,12 @@
 # Weak-signal and offline release verification
 
+## Quick locations and global search — 1 November 2026
+
+- Added Mumbai (Maharashtra, India) and New York City (New York, United States), using coordinates and timezones returned by the configured place-search provider. Quick locations and saved places are separate so eight saved entries cannot displace defaults.
+- Live adapter checks succeeded for Mumbai, New York City (returned as “New York”), Sydney, São Paulo, Cape Town and Reykjavik. Each returned the expected country/timezone, a usable current temperature and 24 hourly forecast points. This is a representative sample, not exhaustive validation of every location.
+- Forecast requests have no country allowlist. Place search returns up to eight indexed matches; an unlisted place may require a nearby city or a map point in Full workspace. Automatic NWS warning coverage, satellite viewing limits and online/offline requirements remain separate constraints.
+- Browser checks covered both new shortcuts, a saved place remaining separate, Sydney search/selection and an unknown-place empty result. At 390 × 844, New York City selection closed navigation and loaded the forecast without page-level horizontal overflow. All 106 tests and the production build passed.
+
 Verified 1 November 2026 (Asia/Kolkata). These are observed software checks, not a guarantee of emergency readiness or weather accuracy.
 
 ## Automated checks

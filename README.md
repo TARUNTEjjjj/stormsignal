@@ -8,6 +8,7 @@ StormSignal is intended for public situational awareness and learning. It does n
 
 ## What makes it different
 
+- **Reach places quickly:** Chennai, Mumbai, New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
 - **Inspect the sky:** timestamped NASA GIBS satellite layers, recent geostationary frames where coverage permits, and a global daily true-color view. Images represent their displayed observation time, not an instantaneous view of a street.
 - **Compare rather than conceal disagreement:** ECMWF IFS and NOAA GFS model forecasts. Differences between two models are not calibrated forecast probabilities.
 - **See the evidence:** forecast-based hazard indicators are separate from official alerts; imagery capture times and unavailable feeds remain visible.

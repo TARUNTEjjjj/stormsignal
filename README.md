@@ -11,6 +11,7 @@ StormSignal is intended for public situational awareness and learning. It does n
 - **Reach places quickly:** Chennai, San Francisco, Mumbai, Bhubaneswar (Odisha), New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
 - **Explore risk context:** Manila, Kolkata and Jakarta are city examples from the Philippines, India and Indonesia, the three highest-ranked countries in the [WorldRiskIndex 2026](https://www.welthungerhilfe.org/news/publications/detail/worldriskreport-2026). This is a country-level exposure/vulnerability index, not a ranking of those cities or a live warning. The sidebar includes the scope, source and attribution.
 - **Read official bulletins across regions:** US NWS point warnings, India NDMA SACHET state/territory feeds, and participating national agencies through WMO SWIC. Indian bulletins show their original affected areas; they are not automatically warnings for the selected city. Missing or partial global coverage remains explicit.
+- **Reach the issuing authority:** direct NWS Bay Area, PAGASA Metro Manila, IMD Kolkata and BMKG Jakarta links remain available even when the integrated feed is empty or unavailable. Verified official BMKG English copies are preferred; the original warning remains when a language copy cannot be verified.
 - **Inspect the sky:** timestamped NASA GIBS satellite layers, recent geostationary frames where coverage permits, and a global daily true-color view. Images represent their displayed observation time, not an instantaneous view of a street.
 - **Compare rather than conceal disagreement:** ECMWF IFS and NOAA GFS model forecasts. Differences between two models are not calibrated forecast probabilities.
 - **See the evidence:** forecast-based hazard indicators are separate from official alerts; imagery capture times and unavailable feeds remain visible.
@@ -40,6 +41,7 @@ All interface fonts are local system fonts. **Offline only** pauses weather-prov
 npm test          # deterministic unit tests
 npm run build    # TypeScript check and production bundle in dist/
 npm run preview  # preview the production bundle locally
+node --import tsx scripts/check-live-alerts.ts --live # opt-in real-provider checks after build
 ```
 
 Tests use fixtures and mocks where appropriate. Passing them does not prove that a third-party feed is presently reachable or that a forecast is accurate. Provider responses and visual flows also need live verification before each release.
@@ -49,6 +51,8 @@ Tests use fixtures and mocks where appropriate. Passing them does not prove that
 The React + TypeScript interface is built with Vite. Leaflet renders the map. A Cloudflare Worker serves embedded static files and the fixed-source `/api/alerts` endpoint for India and WMO feeds, which do not permit direct browser access. Weather, imagery and NWS requests remain direct. There is no account database or paid API credential.
 
 The warning gateway accepts validated coordinates/country/region metadata, never an arbitrary upstream URL. It uses bounded response sizes, deadlines and concurrent-request limits. Shared edge caching and ETag revalidation reduce repeated CAP downloads; failed revalidation never serves old warnings as current. Raw public feeds may remain cached for 24 hours only to support conditional revalidation; ordinary warning checks require revalidation after 60 seconds. The WMO source registry is cached for six hours and is not a live feed-health signal. User-specific warning responses have `Cache-Control: no-store`.
+
+For BMKG warnings, up to six WMO-linked official English copies are optionally checked, three concurrently with a 1.5-second wait limit. New language checks stop after 14 seconds of the 16-second overall check budget. Matching CAP identity, reference chain, validity, hazard level and area geometry are required; a missing, late or mismatched copy cannot replace the verified original. This is publisher-provided text, not machine translation.
 
 | Area                                                        | Files                                                                                        |
 | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

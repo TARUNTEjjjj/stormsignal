@@ -336,7 +336,11 @@ test('international warning links are allowlisted and expired bulletins are excl
   };
   const response = {
     status: 'available',
-    alerts: [valid, { ...valid, id: 'old', expires: now - 1 }],
+    alerts: [
+      valid,
+      { ...valid, id: 'old', expires: now - 1 },
+      { ...valid, id: 'not-effective', effective: now + 60_000, expires: now + 600_000 },
+    ],
     fetchedAt: now,
     source: 'NDMA SACHET',
     officialUrl: 'https://sachet.ndma.gov.in/',
@@ -371,6 +375,112 @@ test('NWS filters expired, cancelled, test, duplicate, and already-ended warning
   assert.equal(result.alerts[0].severity, 'Severe');
   assert.equal(result.alerts[0].instruction, 'Official instruction text');
   assert.ok(result.alerts[0].geometry);
+});
+
+test('San Francisco warnings use the NWS latitude-longitude point and retain the official area', async () => {
+  const sanFrancisco: Place = {
+    id: '5391959',
+    name: 'San Francisco',
+    country: 'United States',
+    countryCode: 'US',
+    admin: 'California',
+    latitude: 37.77493,
+    longitude: -122.41942,
+    timezone: 'America/Los_Angeles',
+  };
+  globalThis.fetch = async (target) => {
+    const requested = new URL(String(target));
+    assert.equal(requested.origin, 'https://api.weather.gov');
+    assert.equal(requested.pathname, '/alerts/active');
+    assert.equal(requested.searchParams.get('point'), '37.7749,-122.4194');
+    return json({
+      features: [
+        alert({
+          event: 'Coastal Flood Advisory',
+          severity: 'Minor',
+          areaDesc: 'San Francisco Bay Shoreline',
+          senderName: 'NWS San Francisco CA',
+        }),
+      ],
+    });
+  };
+  const result = await fetchAlerts(sanFrancisco);
+  assert.equal(result.scopeLabel, 'San Francisco');
+  assert.equal(result.scope, 'point');
+  assert.equal(result.partial, false);
+  assert.equal(result.alerts[0].source, 'NWS San Francisco CA');
+  assert.equal(result.alerts[0].area, 'San Francisco Bay Shoreline');
+  const official = new URL(result.officialUrl);
+  assert.equal(official.hostname, 'forecast.weather.gov');
+  assert.equal(official.searchParams.get('lat'), '37.7749');
+  assert.equal(official.searchParams.get('lon'), '-122.4194');
+});
+
+test('NWS excludes future-effective records but retains current warnings for future hazards', async () => {
+  const now = Date.now();
+  globalThis.fetch = async () =>
+    json({
+      features: [
+        alert({ id: 'not-effective', effective: new Date(now + 600_000).toISOString() }),
+        alert({ id: 'future-onset', onset: new Date(now + 600_000).toISOString() }),
+      ],
+    });
+  const result = await fetchAlerts({ ...place, countryCode: 'US' });
+  assert.deepEqual(
+    result.alerts.map((item) => item.id),
+    ['future-onset'],
+  );
+});
+
+test('NWS valid hazard end shortens expiry and missing validity never becomes a warning', async () => {
+  const now = Date.now();
+  const ends = new Date(now + 300_000).toISOString();
+  globalThis.fetch = async () =>
+    json({
+      features: [
+        alert({ id: 'ends-first', ends }),
+        alert({ id: 'no-expiry', expires: null }),
+        alert({ id: 'bad-effective', effective: 'not a date' }),
+        alert({ id: 'bad-sent', sent: null }),
+      ],
+    });
+  const result = await fetchAlerts({ ...place, countryCode: 'US' });
+  assert.equal(result.alerts.length, 1);
+  assert.equal(result.alerts[0].id, 'ends-first');
+  assert.equal(result.alerts[0].expires, Date.parse(ends));
+});
+
+test('Kolkata client carries West Bengal metadata without converting regional coverage into point coverage', async () => {
+  globalThis.fetch = async (target) => {
+    const requested = new URL(String(target), 'https://stormsignal.invalid');
+    assert.equal(requested.pathname, '/api/alerts');
+    assert.equal(requested.searchParams.get('lat'), '22.5626');
+    assert.equal(requested.searchParams.get('lon'), '88.3630');
+    assert.equal(requested.searchParams.get('admin'), 'West Bengal');
+    assert.equal(requested.searchParams.get('name'), 'Kolkata');
+    return json({
+      status: 'available',
+      alerts: [],
+      fetchedAt: Date.now(),
+      source: 'NDMA SACHET',
+      officialUrl: 'https://sachet.ndma.gov.in/',
+      scope: 'region',
+      scopeLabel: 'West Bengal',
+      partial: true,
+      coverage: 'Regional coverage does not establish an all-clear for Kolkata.',
+    });
+  };
+  const result = await fetchAlerts({
+    ...place,
+    name: 'Kolkata',
+    admin: 'West Bengal',
+    latitude: 22.56263,
+    longitude: 88.36304,
+  });
+  assert.equal(result.scope, 'region');
+  assert.equal(result.scopeLabel, 'West Bengal');
+  assert.equal(result.partial, true);
+  assert.match(result.coverage, /does not establish an all-clear/);
 });
 
 test('NWS discards malformed geometry and disallows unsafe outgoing alert links', async () => {

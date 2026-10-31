@@ -60,6 +60,7 @@ import {
   clearRequestCache,
 } from './data';
 import { deriveHazards, getOutlook, FORECAST_STALE_MS } from './risk';
+import { localWarningSources, warningSourceFallback } from './warning-sources';
 import { value, finite, localTime, age, readPlaces, chartPaths, modelSpread } from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 
@@ -1461,12 +1462,7 @@ export default function App() {
                   <div className="alert-actions">
                     <a
                       className="text-link"
-                      href={
-                        alerts.data?.officialUrl ||
-                        (place.countryCode === 'IN'
-                          ? 'https://mausam.imd.gov.in/'
-                          : 'https://severeweather.wmo.int/')
-                      }
+                      href={alerts.data?.officialUrl || warningSourceFallback(place)}
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -1486,22 +1482,14 @@ export default function App() {
                       {notifications ? 'Disable alerts' : 'Enable page alerts'}
                     </button>
                   </div>
-                  {place.countryCode === 'IN' && (
+                  {!!localWarningSources(place).length && (
                     <div className="regional-warning-links">
-                      <span>Check current IMD warnings directly:</span>
-                      <a href="https://mausam.imd.gov.in/mumbai/" target="_blank" rel="noreferrer">
-                        Mumbai / Maharashtra ↗
-                      </a>
-                      <a
-                        href="https://mausam.imd.gov.in/bhubaneswar/"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Odisha ↗
-                      </a>
-                      <a href="https://mausam.imd.gov.in/chennai/" target="_blank" rel="noreferrer">
-                        Chennai / Tamil Nadu ↗
-                      </a>
+                      <span>Check the local authority directly (internet required):</span>
+                      {localWarningSources(place).map(({ label, url }) => (
+                        <a key={url} href={url} target="_blank" rel="noreferrer">
+                          {label} ↗
+                        </a>
+                      ))}
                     </div>
                   )}
                   <p className="fine-print">

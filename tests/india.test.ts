@@ -60,6 +60,54 @@ test('India warning response is explicitly regional and partial, with original a
   assert.match(result.coverage, /not establish local coverage or an all-clear/);
 });
 
+test('Kolkata selects the West Bengal feed and preserves another district without relabeling it local', async () => {
+  const calls: string[] = [];
+  const kolkata: Place = {
+    ...place,
+    id: '1275004',
+    name: 'Kolkata',
+    admin: 'West Bengal',
+    latitude: 22.56263,
+    longitude: 88.36304,
+  };
+  const source = cap().replaceAll('Raigad', 'Darjeeling').replaceAll('Maharashtra', 'West Bengal');
+  const result = await fetchIndiaAlerts(kolkata, {
+    now: NOW,
+    request: async (url) => {
+      calls.push(url);
+      return { text: url.includes('/rss/') ? feed() : source, fetchedAt: NOW };
+    },
+  });
+  assert.deepEqual(calls, [
+    'https://sachet.ndma.gov.in/cap_public_website/rss/rss_west.xml',
+    link(1),
+  ]);
+  assert.equal(result.scopeLabel, 'West Bengal');
+  assert.equal(result.scope, 'region');
+  assert.equal(result.partial, true);
+  assert.equal(result.alerts[0].area, 'Darjeeling district of West Bengal');
+  assert.match(result.coverage, /not automatically to Kolkata/);
+  assert.match(result.coverage, /does not establish local coverage or an all-clear/);
+});
+
+test('a fresh West Bengal feed does not revive an expired Kolkata bulletin', async () => {
+  const result = await fetchIndiaAlerts(
+    { ...place, name: 'Kolkata', admin: 'West Bengal' },
+    {
+      now: NOW,
+      request: request(feed(), {
+        [link(1)]: cap().replaceAll('2026-11-01', '2026-10-31'),
+      }),
+    },
+  );
+  assert.equal(result.status, 'available');
+  assert.equal(result.scopeLabel, 'West Bengal');
+  assert.equal(result.feedUpdatedAt, NOW - 3_600_000);
+  assert.deepEqual(result.alerts, []);
+  assert.equal(result.partial, true);
+  assert.match(result.coverage, /does not establish local coverage or an all-clear/);
+});
+
 test('old readable feed is historical coverage, not a fabricated current heartbeat or live warning', async () => {
   const result = await fetchIndiaAlerts(
     { ...place, name: 'Chennai', admin: 'Tamil Nadu' },

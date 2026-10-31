@@ -492,6 +492,7 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       (ends !== null && ends <= now) ||
       sent === null ||
       effective === null ||
+      effective > now ||
       sent > now + 300_000 ||
       expires <= sent ||
       expires <= effective
@@ -588,6 +589,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
       sent === null ||
       effective === null ||
       expires === null ||
+      effective > now ||
       sent > now + 300000 ||
       expires <= now ||
       expires <= sent ||

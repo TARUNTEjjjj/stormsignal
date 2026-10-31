@@ -1,5 +1,14 @@
 # Release verification
 
+## Four-city official-alert audit — 1 November 2026
+
+- **184 deterministic tests passed**, including new San Francisco NWS point/validity, Kolkata West Bengal regional scope, PAGASA empty-index limits, and BMKG official-language matching regressions. TypeScript, production build and executable Worker artifact checks passed.
+- Fixed future-effective NWS/international client records being accepted as active. Current warnings whose hazard onset is in the future remain valid; an issue time, effective time and hazard onset have different meanings.
+- Real-provider checks of the new production Worker artifact at **31 October 2026, 21:24 UTC** succeeded for all four cities: San Francisco returned one NWS Coastal Flood Advisory; Manila/PAGASA and Jakarta/BMKG returned zero point-matched bulletins in the limited WMO index; Kolkata returned zero unexpired bulletins in the West Bengal regional SACHET history (latest feed bulletin 14:17:39 UTC). Empty results do not establish safety or complete local coverage.
+- A real BMKG positive control at Labuan, Indonesia returned its official English thunderstorm warning with matching original identity, times, severity and polygons. The new adapter retains original Indonesian text on missing, mismatched or slow English copies. A regression prevents losing two distinct original information blocks with identical geometry and validity when a translation contains only one.
+- The existing live Site and the updated local interface were checked for all four location selections. Direct local NWS, PAGASA NCR, IMD Kolkata and BMKG Jabodetabek links were verified against the authorities' pages. At **390 × 844**, all four city selections and source links worked without page-level horizontal overflow. Page notifications remained disabled for partial feeds and Data saver.
+- Added an explicitly opt-in live smoke command: build, then `node --import tsx scripts/check-live-alerts.ts --live`. It checks real public providers and the local production Worker artifact, fails on unavailable/stale/invalid results, and does not require a nonempty warning list. It is separate from deterministic CI and does not certify Cloudflare edge behavior or future provider availability.
+
 ## San Francisco and risk-study locations — 1 November 2026
 
 - Added San Francisco as a regular shortcut and Manila, Kolkata and Jakarta as city examples from the top three countries in the 2026 WorldRiskIndex. The interface labels national rank, explains the scope and links the source; it does not rank the cities or feed the index into live warning calculations.

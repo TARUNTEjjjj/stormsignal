@@ -8,8 +8,15 @@ const MAX_FEATURES = 40;
 const MAX_DOCUMENTS = 6;
 type RequestText = (url: string, options?: TextOptions) => Promise<TextResult>;
 type RecordValue = Record<string, unknown>;
-type Source = { id: string; member: string; name: string };
-type Candidate = { path: string; areas: Set<string>; geocodes: Set<string>; source: Source };
+type Source = { id: string; member: string; name: string; englishId?: string };
+type Candidate = {
+  path: string;
+  englishPath?: string;
+  areas: Set<string>;
+  geocodes: Set<string>;
+  source: Source;
+};
+const CAP_PATH = /^[a-z0-9_-]+\/\d{4}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/[A-Za-z0-9_-]+\.xml$/;
 const record = (value: unknown): RecordValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {};
 const text = (value: unknown, max = 1000) => (typeof value === 'string' ? value.slice(0, max) : '');
@@ -32,7 +39,21 @@ function sourcesFor(raw: string, country: string): Source[] {
     if (!/^[a-z0-9_-]+$/.test(id) || !/^\d{1,4}$/.test(member)) return [];
     const languages = Array.isArray(source.byLanguage) ? source.byLanguage.map(record) : [];
     const preferred = languages.find((entry) => text(entry.code).startsWith('en')) ?? languages[0];
-    return [{ id, member, name: text(preferred?.name) || text(source.countryName) }];
+    return [
+      {
+        id,
+        member,
+        name: text(preferred?.name) || text(source.countryName),
+        // SWIC's BMKG registry combines Indonesian and English feeds under its Indonesian ID.
+        // Keep this an explicit issuer alias, never infer trust from an arbitrary similar prefix.
+        englishId:
+          country === 'ID' &&
+          id === 'id-inatews-id' &&
+          languages.some((entry) => text(entry.code) === 'en')
+            ? 'id-inatews-en'
+            : undefined,
+      },
+    ];
   });
 }
 
@@ -80,8 +101,7 @@ function candidatesFor(raw: string, sources: Source[]): Candidate[] {
   for (const feature of data.features.slice(0, MAX_FEATURES)) {
     const p = record(record(feature).properties),
       path = text(p.capurl, 300);
-    if (!/^[a-z0-9_-]+\/\d{4}\/\d{2}\/\d{2}\/\d{2}\/\d{2}\/[A-Za-z0-9_-]+\.xml$/.test(path))
-      continue;
+    if (!CAP_PATH.test(path)) continue;
     const source = sources.find(
       (source) => path.startsWith(`${source.id}/`) && source.member === text(p.mem),
     );
@@ -91,6 +111,15 @@ function candidatesFor(raw: string, sources: Source[]): Candidate[] {
       candidate = { path, areas: new Set<string>(), geocodes: new Set<string>(), source };
       candidates.set(path, candidate);
     }
+    const related = text(p.rlink, 300);
+    if (
+      source.englishId &&
+      CAP_PATH.test(related) &&
+      related.startsWith(`${source.englishId}/`) &&
+      related.slice(related.indexOf('/'), related.lastIndexOf('/')) ===
+        path.slice(path.indexOf('/'), path.lastIndexOf('/'))
+    )
+      candidate.englishPath = related;
     const area = clean(text(p.areadesc, 8000));
     if (area) candidate.areas.add(area);
     for (const code of text(p.gc, 1000).split(/[;,]/))
@@ -162,6 +191,54 @@ function areaMatches(area: CapArea, candidate: Candidate, place: Place): boolean
   );
 }
 
+/** Translation must describe the same CAP identity, validity and original boundaries. */
+function equivalentEnglish(original: CapDocument, translated: CapDocument): CapDocument | null {
+  if (
+    ['sender', 'identifier', 'sent', 'status', 'scope', 'msgType'].some(
+      (key) => original[key as keyof CapDocument] !== translated[key as keyof CapDocument],
+    ) ||
+    JSON.stringify(original.references) !== JSON.stringify(translated.references)
+  )
+    return null;
+  const signature = (info: CapInfo) =>
+    JSON.stringify({
+      effective: info.effective,
+      onset: info.onset,
+      expires: info.expires,
+      severity: info.severity,
+      urgency: info.urgency,
+      certainty: info.certainty,
+      areas: info.areas.map((area) => ({
+        // Without geometry/geocodes only an identical area label is independently comparable.
+        description:
+          area.polygons.length || area.circles.length || area.geocodes.length
+            ? ''
+            : area.description,
+        polygons: area.polygons,
+        circles: area.circles,
+        geocodes: area.geocodes,
+      })),
+    });
+  const counts = (infos: CapInfo[]) => {
+    const result = new Map<string, number>();
+    for (const info of infos) {
+      const value = signature(info);
+      result.set(value, (result.get(value) ?? 0) + 1);
+    }
+    return result;
+  };
+  const originals = counts(original.infos);
+  const infos = translated.infos.filter(
+    (info) => /^en(?:-|$)/i.test(info.language) && originals.has(signature(info)),
+  );
+  const translatedCounts = counts(infos);
+  // Distinct hazards may share time, severity and area; preserve every original info block.
+  return infos.length &&
+    [...originals].every(([value, count]) => translatedCounts.get(value) === count)
+    ? { ...translated, infos }
+    : null;
+}
+
 function toAlert(
   document: CapDocument,
   info: CapInfo,
@@ -204,6 +281,7 @@ export function createGlobalAlertAdapter(request: RequestText) {
     const queryUrl = globalPointUrl(place);
     const code = place.countryCode.toUpperCase();
     if (!/^[A-Z]{2}$/.test(code)) throw Error('A valid country is required for official warnings.');
+    const startedAt = Date.now();
     const controller = new AbortController();
     const abort = () => controller.abort(signal?.reason);
     if (signal?.aborted) abort();
@@ -233,7 +311,11 @@ export function createGlobalAlertAdapter(request: RequestText) {
       });
       const sources = sourcesFor(registry.text, code);
       const base = {
-        source: 'Official issuing authorities via WMO SWIC',
+        source: sources.some((source) => source.id === 'ph-pagasa-en')
+          ? 'PAGASA via WMO SWIC'
+          : sources.some((source) => source.id === 'id-inatews-id')
+            ? 'BMKG via WMO SWIC'
+            : 'Official issuing authorities via WMO SWIC',
         officialUrl: `${ORIGIN}/`,
         scope: 'point' as const,
         scopeLabel: place.name,
@@ -276,10 +358,73 @@ export function createGlobalAlertAdapter(request: RequestText) {
         );
       const now = Date.now(),
         alerts: WeatherAlert[] = [];
-      for (const document of activeCapRecords(
+      const active = activeCapRecords(
         loaded.map((item) => item.document),
         now,
-      )) {
+      );
+      const translations = new Map<
+        string,
+        { document: CapDocument; path: string; fetchedAt: number }
+      >();
+      const identity = (document: CapDocument) =>
+        `${document.sender}\u0000${document.identifier}\u0000${document.sent}`;
+      const translate = async (document: CapDocument) => {
+        const candidate = loaded.find(
+          (item) => identity(item.document) === identity(document),
+        )?.candidate;
+        if (
+          !candidate?.englishPath ||
+          document.infos.some((info) => /^en(?:-|$)/i.test(info.language)) ||
+          !document.infos.some((info) =>
+            info.areas.some((area) => areaMatches(area, candidate, place)),
+          ) ||
+          Date.now() - startedAt > 14_000 ||
+          controller.signal.aborted
+        )
+          return;
+        const optional = new AbortController();
+        const stop = () => optional.abort(controller.signal.reason);
+        controller.signal.addEventListener('abort', stop, { once: true });
+        const timeout = setTimeout(
+          () => optional.abort(new Error('Optional translation timed out.')),
+          1_500,
+        );
+        let removeAbort = () => {};
+        try {
+          const interrupted = new Promise<never>((_resolve, reject) => {
+            const abort = () => reject(optional.signal.reason);
+            optional.signal.addEventListener('abort', abort, { once: true });
+            removeAbort = () => optional.signal.removeEventListener('abort', abort);
+          });
+          const result = await Promise.race([
+            request(`${ORIGIN}/v2/cap-alerts/${candidate.englishPath}`, {
+              signal: optional.signal,
+              ttlMs: 60_000,
+              maxBytes: 256_000,
+            }),
+            interrupted,
+          ]);
+          const translated = equivalentEnglish(document, parseCap(result.text));
+          if (translated)
+            translations.set(identity(document), {
+              document: translated,
+              path: candidate.englishPath,
+              fetchedAt: result.fetchedAt,
+            });
+        } catch {
+          // An optional language failure must preserve the verified original warning.
+        } finally {
+          clearTimeout(timeout);
+          removeAbort();
+          controller.signal.removeEventListener('abort', stop);
+        }
+      };
+      for (let i = 0; i < active.length; i += 3)
+        await Promise.all(active.slice(i, i + 3).map(translate));
+      signal?.throwIfAborted();
+      for (const original of active) {
+        const translation = translations.get(identity(original));
+        const document = translation?.document ?? original;
         const candidate = loaded.find(
           (item) =>
             item.document.identifier === document.identifier &&
@@ -287,14 +432,25 @@ export function createGlobalAlertAdapter(request: RequestText) {
             item.document.sent === document.sent,
         )?.candidate;
         if (!candidate) continue;
-        const matching = document.infos.filter((info) =>
-          info.areas.some((area) => areaMatches(area, candidate, place)),
+        const matching = document.infos.filter(
+          (info) =>
+            info.expires !== null &&
+            info.expires > Date.now() &&
+            info.areas.some((area) => areaMatches(area, candidate, place)),
         );
         const preferred = matching.some((info) => /^en(?:-|$)/i.test(info.language))
           ? matching.filter((info) => /^en(?:-|$)/i.test(info.language))
           : matching.filter((info) => info.language === matching[0]?.language);
         for (const [index, info] of preferred.entries())
-          alerts.push(toAlert(document, info, index, candidate, place));
+          alerts.push(
+            toAlert(
+              document,
+              info,
+              index,
+              translation ? { ...candidate, path: translation.path } : candidate,
+              place,
+            ),
+          );
       }
       const order: Record<string, number> = {
         Extreme: 0,
@@ -308,8 +464,12 @@ export function createGlobalAlertAdapter(request: RequestText) {
         ...base,
         status: 'available',
         alerts: alerts.slice(0, 30),
-        fetchedAt: Math.min(query.fetchedAt, ...loaded.map((item) => item.fetchedAt)),
-        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${failed ? ' Some warning details could not be loaded.' : ''} Each issue time comes from the issuing authority. An empty list is not an all-clear; check local official instructions.`,
+        fetchedAt: Math.min(
+          query.fetchedAt,
+          ...loaded.map((item) => item.fetchedAt),
+          ...[...translations.values()].map((item) => item.fetchedAt),
+        ),
+        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${failed ? ' Some warning details could not be loaded.' : ''} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
       };
     } finally {
       clearTimeout(timer);

@@ -277,7 +277,10 @@ function toAlert(
 }
 
 export function createGlobalAlertAdapter(request: RequestText) {
-  return async (place: Place, signal?: AbortSignal): Promise<AlertResult> => {
+  return async (
+    place: Place,
+    signal?: AbortSignal,
+  ): Promise<AlertResult & { revokedCapKeys?: string[] }> => {
     const queryUrl = globalPointUrl(place);
     const code = place.countryCode.toUpperCase();
     if (!/^[A-Z]{2}$/.test(code)) throw Error('A valid country is required for official warnings.');
@@ -464,6 +467,18 @@ export function createGlobalAlertAdapter(request: RequestText) {
         ...base,
         status: 'available',
         alerts: alerts.slice(0, 30),
+        // Internal merge metadata: a second source must not revive a superseded CAP bulletin.
+        revokedCapKeys: [
+          ...new Set(
+            loaded.flatMap(({ document }) =>
+              document.status === 'Actual' &&
+              document.scope === 'Public' &&
+              ['Update', 'Cancel'].includes(document.msgType)
+                ? document.references.map((ref) => `${ref.sender}/${ref.identifier}/`)
+                : [],
+            ),
+          ),
+        ],
         fetchedAt: Math.min(
           query.fetchedAt,
           ...loaded.map((item) => item.fetchedAt),

@@ -387,6 +387,61 @@ test('approved NOAA and official global URLs survive both live snapshot creation
   }
 });
 
+test('direct PAGASA and BMKG source bulletins survive historical snapshot round trips', () => {
+  for (const fixture of [
+    {
+      code: 'PH',
+      name: 'Manila',
+      official: 'https://pagasa.dost.gov.ph/regional-forecast/ncrprsd',
+      bulletin:
+        'https://publicalert.pagasa.dost.gov.ph/output/gfa/12345678-1234-1234-1234-123456789abc.cap',
+    },
+    {
+      code: 'ID',
+      name: 'Jakarta',
+      official: 'https://www.bmkg.go.id/peringatan-dini',
+      bulletin: 'https://www.bmkg.go.id/alerts/nowcast/en/ABC123_alert.xml',
+    },
+  ]) {
+    const input = {
+      ...alerts,
+      partial: true,
+      scope: 'point' as const,
+      scopeLabel: fixture.name,
+      source: 'Direct authority + WMO SWIC',
+      coverage: 'Direct and supplementary coverage remains incomplete.',
+      officialUrl: fixture.official,
+      alerts: [{ ...alerts.alerts[0], url: fixture.bulletin }],
+    };
+    const item = createBriefing(
+      { ...place, countryCode: fixture.code, name: fixture.name },
+      forecast,
+      input,
+      NOW,
+    );
+    const reloaded = loadBriefings(storage(encoded([item])), NOW).briefings[0];
+    assert.equal(reloaded.warnings.officialUrl, fixture.official);
+    assert.equal(reloaded.warnings.alerts[0].url, fixture.bulletin);
+    assert.equal(reloaded.warnings.partial, true);
+    assert.match(briefingText(reloaded, NOW), /CURRENT STATUS UNKNOWN/);
+  }
+});
+
+test('direct-authority snapshot URLs reject lookalikes, credentials and unapproved subdomains', () => {
+  for (const url of [
+    'https://publicalert.pagasa.dost.gov.ph.evil.example/',
+    'https://www.bmkg.go.id.evil.example/',
+    'https://user:password@www.bmkg.go.id/',
+    'http://publicalert.pagasa.dost.gov.ph/',
+    'https://other.pagasa.dost.gov.ph/',
+    'https://www.bmkg.go.id:8443/',
+  ]) {
+    const item = pack();
+    item.warnings.alerts[0].url = url;
+    assert.throws(() => validateBriefing(item, NOW), url);
+  }
+});
+
 test('briefing storage retains three most-recent places and replaces a location in place', () => {
   const disk = storage();
   for (let i = 0; i < 4; i++) {

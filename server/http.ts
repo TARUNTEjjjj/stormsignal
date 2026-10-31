@@ -24,10 +24,18 @@ function allowed(target: string): URL {
   const ok =
     u.hostname === 'sachet.ndma.gov.in'
       ? /^\/cap_public_website\/(rss\/rss_[a-z_]+\.xml|FetchXMLFile)$/.test(u.pathname)
-      : u.hostname === 'severeweather.wmo.int' &&
-        (/^\/f\/ows\/[A-Za-z0-9_.-]+\.json$/.test(u.pathname) ||
-          u.pathname === '/json/sources.json' ||
-          /^\/v2\/cap-alerts\/[A-Za-z0-9_./%-]+\.xml$/.test(u.pathname));
+      : u.hostname === 'publicalert.pagasa.dost.gov.ph'
+        ? !u.search &&
+          (u.pathname === '/feeds/' ||
+            /^\/output\/(gfa|acp|wcp)\/[a-f0-9-]{36}\.cap$/i.test(u.pathname))
+        : u.hostname === 'www.bmkg.go.id'
+          ? !u.search && /^\/alerts\/nowcast\/en(?:\/[A-Z0-9]{3,40}_alert\.xml)?$/.test(u.pathname)
+          : u.hostname === 'mausam.imd.gov.in'
+            ? !u.search && u.pathname === '/imd_latest/contents/dist_nowcast_rss.php'
+            : u.hostname === 'severeweather.wmo.int' &&
+              (/^\/f\/ows\/[A-Za-z0-9_.-]+\.json$/.test(u.pathname) ||
+                u.pathname === '/json/sources.json' ||
+                /^\/v2\/cap-alerts\/[A-Za-z0-9_./%-]+\.xml$/.test(u.pathname));
   if (!ok || target.length > 12_000) throw new Error('Unsupported warning source');
   return u;
 }

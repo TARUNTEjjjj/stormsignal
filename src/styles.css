@@ -997,6 +997,45 @@ th {
   font-size: 12px;
   line-height: 1.6;
 }
+.source-checks {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid #3b4a50;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9d7dc;
+}
+.source-checks summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.source-checks ul {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+.source-checks li + li {
+  border-top: 1px solid #3b4a50;
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.source-checks a {
+  color: #acdfd0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.source-checks strong {
+  display: block;
+  font-size: 11px;
+  color: #acdfd0;
+}
+.source-checks .source-missing {
+  color: #f1c889;
+}
+.source-checks p {
+  margin: 6px 0;
+}
 .regional-warning-links span {
   flex-basis: 100%;
   color: #bdcbd4;

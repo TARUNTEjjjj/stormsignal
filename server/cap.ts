@@ -145,7 +145,9 @@ function area(value: unknown): CapArea {
   const a = record(value);
   return {
     description: text(a.areaDesc, 8000, true),
-    polygons: list(a.polygon, 100).map(polygon),
+    // BMKG's province-wide CAP documents can include >100 district polygons.
+    // The whole XML remains bounded to 256 KB and every ring is still validated.
+    polygons: list(a.polygon, 256).map(polygon),
     circles: list(a.circle, 100).map((value) => {
       const match = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(
         text(value, 100, true),

@@ -109,6 +109,34 @@ test('fresh memory cache preserves the actual retrieval time and respects TTL', 
   assert.equal(second.etag, '"v2"');
 });
 
+test('direct authority paths are allowlisted without accepting lookalikes or arbitrary resources', async () => {
+  mockFetch(async () => new Response('<feed/>'));
+  const good = [
+    'https://publicalert.pagasa.dost.gov.ph/feeds/',
+    'https://publicalert.pagasa.dost.gov.ph/output/gfa/12345678-1234-1234-1234-123456789abc.cap',
+    'https://www.bmkg.go.id/alerts/nowcast/en',
+    'https://www.bmkg.go.id/alerts/nowcast/en/ABC123_alert.xml',
+    'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php',
+  ];
+  for (const url of good) assert.equal((await requestText(url)).text, '<feed/>');
+  assert.equal(calls.length, good.length);
+  for (const url of [
+    'https://publicalert.pagasa.dost.gov.ph.evil.example/feeds/',
+    'https://publicalert.pagasa.dost.gov.ph/feeds/?url=https://evil.example/',
+    'https://publicalert.pagasa.dost.gov.ph/output/private.xml',
+    'https://user:pass@www.bmkg.go.id/alerts/nowcast/en',
+    'http://www.bmkg.go.id/alerts/nowcast/en',
+    'https://www.bmkg.go.id/alerts/nowcast/en/../../private.xml',
+    'https://www.bmkg.go.id/alerts/nowcast/en/ABC123_alert.xml?token=x',
+    'https://www.bmkg.go.id/alerts/nowcast/en#ignored',
+    'https://bmkg.go.id/alerts/nowcast/en',
+    'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php?query=1',
+    'https://mausam.imd.gov.in/api/districtnowcast',
+  ])
+    await assert.rejects(requestText(url), /Unsupported warning source/, url);
+  assert.equal(calls.length, good.length);
+});
+
 test('a conditional 304 retains verified text while recording the new validation time', async () => {
   mockFetch(async () => new Response('authority text', { headers: { ETag: '"v1"' } }));
   await requestText(SOURCE);

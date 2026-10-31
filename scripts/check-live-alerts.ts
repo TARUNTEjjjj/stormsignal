@@ -60,7 +60,7 @@ const cases: { place: Place; scope: 'point' | 'region'; scopeLabel: string; part
       timezone: 'Asia/Kolkata',
     },
     scope: 'region',
-    scopeLabel: 'West Bengal',
+    scopeLabel: 'Kolkata district + West Bengal',
     partial: true,
   },
   {
@@ -121,6 +121,17 @@ async function check(item: (typeof cases)[number]) {
   assert.ok(result.source?.trim(), `${place.name}: issuing source is missing`);
   assert.ok(result.coverage?.trim(), `${place.name}: coverage explanation is missing`);
   assert.equal(new URL(result.officialUrl).protocol, 'https:');
+  if (place.countryCode !== 'US') {
+    assert.equal(
+      result.checks?.length,
+      2,
+      `${place.name}: direct and supplementary checks are missing`,
+    );
+    assert.ok(
+      result.checks.every((check) => check.status === 'available'),
+      `${place.name}: a direct or supplementary source failed`,
+    );
+  }
   const seen = new Set<string>();
   for (const warning of result.alerts) {
     assert.ok(
@@ -146,6 +157,7 @@ async function check(item: (typeof cases)[number]) {
     scope: `${result.scope}: ${result.scopeLabel}`,
     partial: result.partial,
     warnings: result.alerts.length,
+    sources: result.checks?.map((check) => ({ name: check.name, status: check.status })),
     checkedAt: new Date(result.fetchedAt).toISOString(),
     latestBulletin: result.feedUpdatedAt ? new Date(result.feedUpdatedAt).toISOString() : null,
     meaning: result.alerts.length

@@ -136,6 +136,10 @@ function safeUrl(value: unknown, place: Place): string {
     'mausam.imd.gov.in',
     'sachet.ndma.gov.in',
     'severeweather.wmo.int',
+    'publicalert.pagasa.dost.gov.ph',
+    'pagasa.dost.gov.ph',
+    'www.pagasa.dost.gov.ph',
+    'www.bmkg.go.id',
   ];
   if (
     u.protocol !== 'https:' ||

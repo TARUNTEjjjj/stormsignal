@@ -80,6 +80,16 @@ export interface AlertResult {
   scopeLabel?: string;
   partial?: boolean;
   feedUpdatedAt?: number | null;
+  checks?: AlertSourceCheck[];
+}
+export interface AlertSourceCheck {
+  id: string;
+  name: string;
+  url: string;
+  status: 'available' | 'unavailable' | 'unsupported';
+  fetchedAt: number | null;
+  feedUpdatedAt?: number | null;
+  coverage: string;
 }
 export interface Hazard {
   kind: 'rain' | 'wind' | 'heat' | 'cold' | 'uv' | 'thunder';

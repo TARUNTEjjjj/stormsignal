@@ -357,6 +357,109 @@ test('international warning links are allowlisted and expired bulletins are excl
   await assert.rejects(fetchAlerts(place), /invalid source link/);
 });
 
+test('direct-source check metadata preserves partial failures and verified authority URLs', async () => {
+  const now = Date.now();
+  const response = {
+    status: 'available',
+    alerts: [],
+    fetchedAt: now - 1000,
+    source: 'BMKG direct + WMO SWIC',
+    officialUrl: 'https://www.bmkg.go.id/peringatan-dini',
+    scope: 'point',
+    scopeLabel: 'Jakarta',
+    partial: true,
+    coverage: 'Incomplete coverage.',
+    checks: [
+      {
+        id: 'national',
+        name: 'BMKG CAP feed · direct',
+        url: 'https://www.bmkg.go.id/peringatan-dini',
+        status: 'available',
+        fetchedAt: now - 1000,
+        feedUpdatedAt: now - 300000,
+        coverage: 'Partial nowcasts.',
+      },
+      {
+        id: 'wmo',
+        name: 'WMO SWIC',
+        url: 'https://severeweather.wmo.int/',
+        status: 'unavailable',
+        fetchedAt: null,
+        coverage: 'Could not verify.',
+      },
+    ],
+  };
+  globalThis.fetch = async () => json(response);
+  const received = await fetchAlerts({ ...place, name: 'Jakarta', countryCode: 'ID' });
+  assert.equal(received.checks?.[0].fetchedAt, now - 1000);
+  assert.equal(received.checks?.[0].feedUpdatedAt, now - 300000);
+  assert.equal(received.checks?.[1].status, 'unavailable');
+  assert.equal(received.checks?.[1].fetchedAt, null);
+  assert.equal(received.partial, true);
+  for (const checks of [
+    {},
+    Array.from({ length: 5 }, () => response.checks[0]),
+    [{ ...response.checks[0], status: 'safe' }],
+    [{ ...response.checks[0], fetchedAt: now - 300000 }],
+    [{ ...response.checks[0], fetchedAt: now + 300000 }],
+    [{ ...response.checks[0], name: '' }],
+    [{ ...response.checks[0], url: 'https://www.bmkg.go.id.evil.example/' }],
+    [{ ...response.checks[0], url: 'https://user:pass@www.bmkg.go.id/' }],
+  ]) {
+    clearRequestCache();
+    globalThis.fetch = async () => json({ ...response, checks });
+    await assert.rejects(fetchAlerts(place), /source (checks|link)/);
+  }
+});
+
+test('PAGASA and BMKG bulletin URLs are accepted while credentialed and lookalike URLs fail closed', async () => {
+  const now = Date.now();
+  const bulletin = {
+    id: 'agency/123/0',
+    title: 'Official title',
+    event: 'Thunderstorm',
+    severity: 'Moderate',
+    area: 'Named area',
+    sent: now - 60000,
+    effective: now - 60000,
+    expires: now + 60000,
+    description: 'Official text',
+    instruction: 'Official instructions',
+    source: 'Weather authority',
+    geometry: null,
+  };
+  const response = {
+    status: 'available',
+    fetchedAt: now,
+    source: 'Direct authority',
+    scope: 'point',
+    scopeLabel: 'Test city',
+    partial: true,
+    coverage: 'Incomplete.',
+  };
+  for (const url of [
+    'https://publicalert.pagasa.dost.gov.ph/output/gfa/12345678-1234-1234-1234-123456789abc.cap',
+    'https://www.bmkg.go.id/alerts/nowcast/en/ABC123_alert.xml',
+  ]) {
+    clearRequestCache();
+    globalThis.fetch = async () =>
+      json({ ...response, officialUrl: url, alerts: [{ ...bulletin, url }] });
+    const received = await fetchAlerts(place);
+    assert.equal(received.alerts[0].url, url);
+  }
+  for (const url of [
+    'https://publicalert.pagasa.dost.gov.ph.evil.example/alert.cap',
+    'https://www.bmkg.go.id.evil.example/alert.xml',
+    'https://user:secret@publicalert.pagasa.dost.gov.ph/alert.cap',
+    'http://www.bmkg.go.id/alert.xml',
+  ]) {
+    clearRequestCache();
+    globalThis.fetch = async () =>
+      json({ ...response, officialUrl: 'https://www.bmkg.go.id/', alerts: [{ ...bulletin, url }] });
+    await assert.rejects(fetchAlerts(place), /invalid source link/);
+  }
+});
+
 test('NWS filters expired, cancelled, test, duplicate, and already-ended warnings', async () => {
   globalThis.fetch = async () =>
     json({

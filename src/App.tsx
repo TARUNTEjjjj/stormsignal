@@ -1381,7 +1381,7 @@ export default function App() {
                       )}
                       {alerts.data.feedUpdatedAt && (
                         <span>
-                          Latest bulletin in feed:{' '}
+                          Latest bulletin in {alerts.data.checks ? 'checked feeds' : 'feed'}:{' '}
                           {localTime(alerts.data.feedUpdatedAt, tz, {
                             day: '2-digit',
                             month: 'short',
@@ -1395,6 +1395,49 @@ export default function App() {
                     </p>
                   )}
                   <ErrorNote error={alerts.error} />
+                  {!!alerts.data?.checks?.length && (
+                    <details className="source-checks">
+                      <summary>
+                        Source checks ·{' '}
+                        {alerts.data.checks.filter((check) => check.status === 'available').length}/
+                        {alerts.data.checks.length} retrieved
+                        {alerts.data.checks.some((check) => check.status !== 'available') &&
+                          ' · missing source'}
+                      </summary>
+                      <p>
+                        Retrieval confirms a response, not complete coverage or safe conditions.
+                      </p>
+                      <ul>
+                        {alerts.data.checks.map((check) => (
+                          <li key={check.id}>
+                            <a href={check.url} target="_blank" rel="noreferrer">
+                              {check.name} ↗
+                            </a>
+                            <strong
+                              className={check.status === 'available' ? '' : 'source-missing'}
+                            >
+                              {check.status === 'available'
+                                ? `Retrieved ${age(check.fetchedAt!, now)}`
+                                : 'Could not verify'}
+                            </strong>
+                            <p>{check.coverage}</p>
+                            {check.feedUpdatedAt && (
+                              <small>
+                                Latest source bulletin:{' '}
+                                {localTime(check.feedUpdatedAt, tz, {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </small>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                   {alerts.data?.status === 'available' && !alertsRecent && (
                     <p className="wide-notice" role="status">
                       This alert check is more than two minutes old. Current warning status is
@@ -1653,9 +1696,10 @@ export default function App() {
                 <span className="source-index">03 / ALERTS & AIR</span>
                 <h3>Official bulletins. Explicit coverage.</h3>
                 <p>
-                  Official bulletins: US NWS, India NDMA SACHET regional feeds, and participating
-                  national authorities through WMO SWIC. Global coverage is incomplete. Air quality
-                  is CAMS ENSEMBLE modeled data via Open-Meteo; it can miss local pollution spikes.
+                  Official bulletins: US NWS; direct PAGASA and BMKG CAP feeds; IMD Kolkata district
+                  nowcasts; India NDMA SACHET regional feeds; and participating authorities through
+                  WMO SWIC. Global coverage is incomplete. Air quality is CAMS ENSEMBLE modeled data
+                  via Open-Meteo; it can miss local pollution spikes.
                 </p>
                 <a
                   href="https://www.weather.gov/documentation/services-web-api"

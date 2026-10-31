@@ -1,6 +1,7 @@
 import type {
   AirQuality,
   AlertResult,
+  AlertSourceCheck,
   Day,
   Forecast,
   Hour,
@@ -546,7 +547,15 @@ function warningLink(candidate: unknown): string {
     u.username ||
     u.password ||
     u.port ||
-    !['severeweather.wmo.int', 'sachet.ndma.gov.in', 'mausam.imd.gov.in'].includes(u.hostname)
+    ![
+      'severeweather.wmo.int',
+      'sachet.ndma.gov.in',
+      'mausam.imd.gov.in',
+      'publicalert.pagasa.dost.gov.ph',
+      'pagasa.dost.gov.ph',
+      'www.pagasa.dost.gov.ph',
+      'www.bmkg.go.id',
+    ].includes(u.hostname)
   )
     throw new WeatherDataError('The warning service returned an invalid source link.');
   return u.href;
@@ -614,6 +623,33 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
     });
   }
   const feedUpdatedAt = number(result.feedUpdatedAt);
+  let checks: AlertSourceCheck[] | undefined;
+  if (result.checks !== undefined) {
+    if (!Array.isArray(result.checks) || result.checks.length > 4)
+      throw new WeatherDataError('The warning service returned invalid source checks.');
+    checks = result.checks.map((raw) => {
+      const check = record(raw),
+        checkedAt = number(check.fetchedAt),
+        published = number(check.feedUpdatedAt);
+      if (
+        !['available', 'unavailable', 'unsupported'].includes(String(check.status)) ||
+        !str(check.id, 80) ||
+        !str(check.name, 200) ||
+        (check.status === 'available' &&
+          (checkedAt === null || checkedAt > now + 5000 || now - checkedAt > 120000))
+      )
+        throw new WeatherDataError('The warning service returned incomplete source checks.');
+      return {
+        id: str(check.id, 80),
+        name: str(check.name, 200),
+        url: warningLink(check.url),
+        status: check.status as AlertSourceCheck['status'],
+        fetchedAt: checkedAt,
+        feedUpdatedAt: published !== null && published <= now + 300000 ? published : null,
+        coverage: str(check.coverage, 2500),
+      };
+    });
+  }
   return {
     status: result.status as AlertResult['status'],
     alerts: result.status === 'available' ? alerts : [],
@@ -625,6 +661,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
     scopeLabel: str(result.scopeLabel),
     partial: result.partial,
     feedUpdatedAt: feedUpdatedAt !== null && feedUpdatedAt <= now + 300000 ? feedUpdatedAt : null,
+    ...(checks ? { checks } : {}),
   };
 }
 

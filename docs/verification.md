@@ -1,5 +1,14 @@
 # Release verification
 
+## Direct local warning feeds — 1 November 2026
+
+- **227 deterministic tests passed**, including direct PAGASA Atom and BMKG RSS/CAP parsing, hostile XML/URLs, geographic matching, cancellation across sources, partial outages, duplicate identifiers, Kolkata district scope/timezones/onset/expiry, source-check validation and historical direct-source links. TypeScript, production build and Worker artifact checks passed.
+- Real checks against the production Worker artifact at **31 October 2026, 21:35 UTC** returned both direct and supplementary sources successfully for Manila, Kolkata and Jakarta. Manila verified 20 selected PAGASA documents and explicitly disclosed 31 unchecked older entries. Jakarta verified all eight listed BMKG documents. Kolkata's public IMD rolling RSS had no Kolkata entry; its SACHET West Bengal regional feed also responded. All three returned zero matched unexpired bulletins in these limited feeds, not an all-clear. San Francisco's NWS control still returned its Coastal Flood Advisory.
+- A real BMKG positive control at Labuan returned one English thunderstorm bulletin linked directly to BMKG. Its indexed WMO copy had a regenerated identifier; exact issuer/text/area/validity deduplication retained one direct bulletin. A province source document containing 197 polygons exposed the former 100-polygon parser limit; the limit is now 256 within the unchanged 256 KB document bound, with a regression test.
+- PAGASA's newest retrieved bulletin was already expired at verification time. Its positive parsing/matching control was an explicitly historical replay of real source text at 31 October 09:10 UTC; this was not represented as a current warning.
+- Desktop browser checks exercised all three new direct-source panels, expandable per-source status, original issue times and scope limits. At **390 × 844**, all three locations and source-check panels worked without page-level horizontal overflow; no browser console errors were observed. A Kolkata briefing saved the combined district/state scope and remained readable in Offline only with CURRENT STATUS UNKNOWN. This was an application-mode check with internet still available, not a radio-off test.
+- Newer IMD JSON APIs returned authentication requirements and were not bypassed. The public documented district RSS is intentionally partial; no warning/expiry/severity is fabricated when an entry is absent or malformed. Independent source failures are tested using fixtures; future upstream availability and complete city coverage are not guaranteed.
+
 ## Four-city official-alert audit — 1 November 2026
 
 - **184 deterministic tests passed**, including new San Francisco NWS point/validity, Kolkata West Bengal regional scope, PAGASA empty-index limits, and BMKG official-language matching regressions. TypeScript, production build and executable Worker artifact checks passed.

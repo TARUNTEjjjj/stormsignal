@@ -43,6 +43,15 @@ test('CAP parser rejects malformed XML, entities, oversized payloads and invalid
   assert.throws(() => parseCap(xml(), NaN));
 });
 
+test('province bulletins retain 197 district polygons without dropping original boundaries', () => {
+  // Regression for BMKG Papua Pegunungan's 197-polygon source document.
+  const ring = '<polygon>-5,105 -5,106 -6,106 -5,105</polygon>';
+  const parsed = parseCap(xml(info(ring.repeat(197))), NOW);
+  assert.equal(parsed.infos[0].areas[0].polygons.length, 197);
+  assert.deepEqual(parsed.infos[0].areas[0].polygons[196][0], [-5, 105]);
+  assert.throws(() => parseCap(xml(info(ring.repeat(257))), NOW), /bound/);
+});
+
 test('CAP dates require valid dates and explicit timezones; enum and geographic validation fail closed', () => {
   const malformed = [
     xml().replace('2026-11-01T00:00:00Z', '2026-02-30T00:00:00Z'),

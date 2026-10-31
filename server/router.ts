@@ -1,6 +1,8 @@
 import type { Place } from '../src/types';
 import { fetchIndiaAlerts } from './india';
 import { fetchGlobalAlerts } from './global';
+import { fetchLocalAlerts } from './local-alerts';
+import { supportsKolkata } from './kolkata';
 
 export function alertPlace(url: URL): Place {
   const p = url.searchParams;
@@ -65,10 +67,15 @@ export async function handleAlerts(request: Request): Promise<Response> {
   );
   try {
     const result =
-      place.countryCode === 'IN'
-        ? await fetchIndiaAlerts(place, { signal: controller.signal })
-        : await fetchGlobalAlerts(place, controller.signal);
-    return new Response(JSON.stringify(result), { headers });
+      ['PH', 'ID'].includes(place.countryCode) || supportsKolkata(place)
+        ? await fetchLocalAlerts(place, controller.signal)
+        : place.countryCode === 'IN'
+          ? await fetchIndiaAlerts(place, { signal: controller.signal })
+          : await fetchGlobalAlerts(place, controller.signal);
+    const { revokedCapKeys: _internal, ...publicResult } = result as typeof result & {
+      revokedCapKeys?: string[];
+    };
+    return new Response(JSON.stringify(publicResult), { headers });
   } catch (error) {
     console.warn(
       'Official warning retrieval failed:',

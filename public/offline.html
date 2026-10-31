@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0c171d">
+  <meta name="description" content="A small, self-contained emergency field kit. Keep a local plan, checklist and basic hazard guidance without an internet connection.">
+  <title>Offline field kit · StormSignal</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0c171d;--panel:#14252d;--line:#38505b;--text:#f0f6f5;--muted:#b7c9cf;--mint:#99ecd7;--amber:#ffce86;font:16px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}a{color:var(--mint);text-underline-offset:4px}button,input,textarea{font:inherit}button,a,input,textarea,summary{outline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--amber)}button,.button{display:inline-flex;justify-content:center;align-items:center;min-height:48px;padding:11px 17px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font-weight:650;text-decoration:none;cursor:pointer}button.primary{background:var(--mint);border-color:var(--mint);color:#102a29}button:disabled{opacity:.6;cursor:default}[hidden]{display:none!important}.wrap{max-width:1080px;margin:auto;padding:24px clamp(16px,4vw,36px) 40px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:20px;border-bottom:1px solid var(--line)}.brand{font-weight:800;letter-spacing:-.03em;color:var(--text);font-size:22px}.brand span{color:var(--mint);font-weight:450}.badge,.eyebrow{font-size:12px;font-weight:750;letter-spacing:.1em;text-transform:uppercase}.badge{color:var(--mint);border:1px solid var(--line);border-radius:30px;padding:5px 10px}.eyebrow{color:var(--mint);margin:0 0 10px}header{padding:36px 0 22px;max-width:760px}h1{font-size:clamp(34px,6vw,56px);line-height:1.08;letter-spacing:-.045em;margin:0 0 16px}header p{font-size:18px;color:var(--muted);margin:0}.priority{padding:18px 20px;border-left:4px solid var(--amber);background:#30291e;border-radius:4px 12px 12px 4px;color:#ffe6be}.priority p{margin:6px 0 0}.jump{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}.jump a{padding:9px 14px;border:1px solid var(--line);border-radius:30px;min-height:44px;color:var(--text);text-decoration:none}.section{margin-top:32px;scroll-margin-top:16px}.section-head{margin-bottom:18px}h2{font-size:26px;letter-spacing:-.025em;margin:0 0 6px}h3{font-size:18px;margin:0}.muted,.section-head p,.hint{color:var(--muted)}.section-head p{margin:0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;min-width:0}.card p{margin:9px 0}.card ol{padding-left:22px;margin:12px 0}.card li{padding-left:2px;margin-bottom:9px}.source{font-size:13px;color:var(--muted)}.source a{color:var(--muted)}.label-line{display:flex;gap:10px;align-items:center}.number{color:var(--mint);font:14px ui-monospace,monospace;letter-spacing:.05em}.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.field{display:grid;gap:7px}.field.full{grid-column:1/-1}.field label{font-size:14px;font-weight:650}input[type=text],input[type=tel],textarea{width:100%;min-height:48px;border:1px solid #6b818a;background:#0c1a22;color:var(--text);border-radius:8px;padding:11px 12px;font-size:16px}textarea{resize:vertical;min-height:110px}.hint{font-size:13px;margin:10px 0}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.status{min-height:24px;margin:14px 0 0;color:var(--mint);font-size:14px;overflow-wrap:anywhere}.status.error{color:var(--amber)}.check-list{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}.check-list label{display:flex;align-items:flex-start;gap:12px;min-height:56px;padding:15px 0;border-bottom:1px solid var(--line);cursor:pointer}.check-list input{width:22px;height:22px;margin-top:2px;flex:none;accent-color:var(--mint)}.check-list span{flex:1}.check-list label:has(input:checked){color:var(--mint)}.check-count{font-size:14px;color:var(--mint);margin:10px 0 0}.file-control{display:block;margin-top:18px}.file-control input{display:block;max-width:100%;margin-top:8px;font-size:14px}.file-control input::file-selector-button{min-height:44px;background:var(--panel);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:8px 12px;margin-right:10px}.footer{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}.footer p{margin:7px 0}.skip{position:absolute;left:-9999px}.skip:focus{left:16px;top:8px;z-index:2;background:var(--bg);padding:12px}.print-plan{display:none}.print-plan dd{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 12px}.print-plan dt{font-weight:750}details{margin-top:16px}summary{cursor:pointer;min-height:44px;padding:10px 0;color:var(--mint)}.download-note{font-size:13px;color:var(--muted);margin-top:12px}.noscript{border:1px solid var(--amber);padding:16px;margin-top:16px}
+    @media(max-width:650px){.grid,.plan-grid,.check-list{grid-template-columns:1fr}.top{align-items:flex-start}.badge{max-width:150px;font-size:10px;text-align:center}.card{padding:18px}.field.full{grid-column:auto}.actions>*{flex:1 1 170px}header{padding-top:28px}.priority{padding:16px}.source{overflow-wrap:anywhere}}
+    @media print{*{color:#111!important;background:#fff!important;box-shadow:none!important}.wrap{max-width:none;padding:0}body{font-size:11pt}.top{padding-bottom:8px}header{padding:18px 0;max-width:none}h1{font-size:28pt}header p{font-size:11pt}.priority{border:1px solid #555;padding:10px}.section{margin-top:18px}.section-head{margin-bottom:10px}.no-print,.actions,.status,.file-control,.jump,.plan-grid,.skip,.download-note{display:none!important}.grid{grid-template-columns:1fr 1fr;gap:10px}.card{border:1px solid #aaa;padding:12px;break-inside:avoid}h2{font-size:18pt}h3{font-size:13pt}.source{font-size:9pt}.print-plan{display:block}.check-list label{min-height:40px;padding:9px 0}.footer{margin-top:16px;font-size:9pt}input[type=checkbox]{appearance:none;border:1px solid #111;width:14px;height:14px;position:relative}input:checked:after{content:'✓';position:absolute;left:0;top:-7px;font-size:18px}details{display:none}}
+  </style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to field kit</a>
+<main class="wrap" id="main">
+  <div class="top"><div class="brand">storm<span>signal</span></div><span class="badge">Offline field kit · no live data</span></div>
+  <header><p class="eyebrow">Keep the essentials close</p><h1>When the signal drops,<br>your plan stays.</h1><p>Short action cards, a personal plan, and a checklist. These essentials work without a connection after you download this file.</p></header>
+  <aside class="priority" aria-label="Immediate danger"><strong>In immediate danger, act on official instructions.</strong><p>Contact your local emergency services when you can. This kit cannot send a distress signal, receive new warnings, locate open shelters, or confirm a safe route. A quiet phone does not mean danger has passed.</p></aside>
+  <nav class="jump no-print" aria-label="Field kit sections"><a href="#actions">What to do</a><a href="#plan">My emergency plan</a><a href="#checklist">My checklist</a><a href="#keep">Keep an offline copy</a></nav>
+  <noscript><p class="noscript">The action cards are available without JavaScript. For a copy, use your browser’s Print or Save Page command. Editing, saving, and downloads below need JavaScript.</p></noscript>
+  <section class="section" id="actions" aria-labelledby="actions-title">
+    <div class="section-head"><p class="eyebrow">Start with the hazard</p><h2 id="actions-title">A few actions that matter.</h2><p>General guidance, not a live assessment. Local authorities’ current instructions take precedence. Source links need internet.</p></div>
+    <div class="grid">
+      <article class="card"><div class="label-line"><span class="number">01</span><h3>Flooding</h3></div><ol><li>Avoid floodwater on foot and in vehicles. Turn back from flooded roads and obey barriers.</li><li>Move away from low-lying areas toward higher ground before water cuts off access. Follow evacuation instructions.</li><li>Stay away from submerged electrical equipment and fallen power lines.</li></ol><p class="source">Source: <a href="https://www.weather.gov/safety/flood-during" rel="noreferrer" target="_blank">NWS flood guidance ↗</a></p></article>
+      <article class="card"><div class="label-line"><span class="number">02</span><h3>Thunder &amp; lightning</h3></div><ol><li>When thunder is audible, enter a substantial building or an enclosed, metal-roofed vehicle with its windows closed.</li><li>Inside, avoid plumbing, corded equipment, windows, and doors. An isolated tree is not shelter.</li><li>Remain sheltered for at least 30 minutes after the last thunder.</li></ol><p class="source">Source: <a href="https://www.weather.gov/safety/lightning-tips" rel="noreferrer" target="_blank">NWS lightning guidance ↗</a></p></article>
+      <article class="card"><div class="label-line"><span class="number">03</span><h3>Earthquake shaking</h3></div><ol><li>Drop, cover, and hold on. Protect your head and neck; use a sturdy table for cover if one is close. If you cannot get down, remain seated and protect your head and neck.</li><li>If indoors, stay inside during shaking and away from glass. Do not run outside or use lifts.</li><li>If already outdoors, stay outside in an open area away from buildings, poles, and wires.</li></ol><p class="source">Source: <a href="https://www.cdc.gov/earthquakes/safety/stay-safe-during-an-earthquake.html" rel="noreferrer" target="_blank">CDC earthquake guidance ↗</a></p></article>
+      <article class="card"><div class="label-line"><span class="number">04</span><h3>Wildfire nearby</h3></div><ol><li>Leave promptly when officials order evacuation. If you feel unsafe, do not wait for an order before leaving.</li><li>Use current official evacuation directions. Bring your prepared bag and household members if doing so does not delay departure.</li><li>Do not return until authorities say you may. A saved map or old message cannot confirm an open route.</li></ol><p class="source">Source: <a href="https://www.usfa.fema.gov/wui/outreach/wildfire-evacuation.html" rel="noreferrer" target="_blank">U.S. Fire Administration evacuation guidance ↗</a></p></article>
+      <article class="card"><div class="label-line"><span class="number">05</span><h3>Cyclone &amp; severe wind</h3></div><ol><li>Follow evacuation orders immediately, especially in areas threatened by storm surge or flooding.</li><li>If officials advise staying, shelter inside away from windows and glass. Use their designated shelter arrangements.</li><li>A brief lull can be the eye of a storm. Do not assume it is over; keep listening for official updates.</li></ol><p class="source">Source: <a href="https://www.weather.gov/safety/hurricane-action" rel="noreferrer" target="_blank">NWS tropical-storm guidance ↗</a></p></article>
+      <article class="card"><div class="label-line"><span class="number">06</span><h3>Little signal or battery</h3></div><ol><li>Keep this downloaded file and important numbers available. A battery-powered radio offers another information channel.</li><li>For non-urgent check-ins, try a brief text to your trusted contact. Delivery is not guaranteed; this page does not send messages.</li><li>Reduce screen brightness and unnecessary streaming. Keep official emergency alerts enabled on your phone.</li></ol><p class="source">Sources: <a href="https://www.readync.gov/stay-informed/tips-communicating" rel="noreferrer" target="_blank">Ready NC communication guidance ↗</a> · <a href="https://www.weather.gov/wrn/wea" rel="noreferrer" target="_blank">NWS wireless alerts ↗</a></p></article>
+    </div>
+  </section>
+  <section class="section card" id="plan" aria-labelledby="plan-title">
+    <div class="section-head"><p class="eyebrow">Agree on this before an emergency</p><h2 id="plan-title">My emergency plan.</h2><p>Keep only the details you need. This page stores them on this device when you choose Save. Nothing is uploaded.</p></div>
+    <form id="plan-form" autocomplete="off">
+      <div class="plan-grid">
+        <div class="field"><label for="contact">Trusted contact / name</label><input id="contact" name="contact" type="text" maxlength="80" placeholder="An out-of-area contact"></div>
+        <div class="field"><label for="phone">Trusted contact / phone</label><input id="phone" name="phone" type="tel" maxlength="40" placeholder="Include the country code if needed"></div>
+        <div class="field full"><label for="meeting">Agreed meeting place</label><input id="meeting" name="meeting" type="text" maxlength="180" placeholder="An agreed place and a backup plan"></div>
+        <div class="field full"><label for="authority">Local authority / emergency contact</label><input id="authority" name="authority" type="text" maxlength="180" placeholder="Record a verified local number or radio channel"></div>
+        <div class="field full"><label for="notes">Household needs and useful notes</label><textarea id="notes" name="notes" maxlength="1200" rows="4" placeholder="Transport, accessibility needs, pets, or important arrangements"></textarea></div>
+      </div>
+      <div class="actions no-print"><button class="primary" type="submit">Save plan on this device</button><a class="button" id="call-contact" hidden>Call saved contact</a></div>
+    </form>
+    <dl class="print-plan" id="print-plan"></dl>
+    <p class="status" id="plan-status" role="status" aria-live="polite"></p>
+    <p class="hint">Local storage and downloaded copies are not encrypted by this app. Anyone with access to them can read the plan. Calls require phone service and your action; the saved contact is not automatically an emergency service.</p>
+  </section>
+  <section class="section card" id="checklist" aria-labelledby="checklist-title">
+    <div class="section-head"><p class="eyebrow">Before conditions worsen</p><h2 id="checklist-title">Ready to leave or stay.</h2><p>Prepare in advance and adapt to official local advice. Checkboxes record preparation, not safety.</p></div>
+    <div class="check-list" id="kit-checks">
+      <label><input type="checkbox" value="radio"><span>A radio or another independent source of official instructions.</span></label>
+      <label><input type="checkbox" value="charge"><span>Charged phone, power bank, torch, and spare batteries.</span></label>
+      <label><input type="checkbox" value="supplies"><span>Water, food, required medicines, and essentials for household members and pets.</span></label>
+      <label><input type="checkbox" value="contacts"><span>Important phone numbers and the agreed meeting plan on paper.</span></label>
+      <label><input type="checkbox" value="route"><span>Official evacuation arrangements, including transport and accessibility needs.</span></label>
+      <label><input type="checkbox" value="copy"><span>This field kit downloaded and opened once from Files / Downloads.</span></label>
+    </div>
+    <p class="check-count" id="check-count" role="status" aria-live="polite">0 of 6 preparations checked</p>
+    <p class="status" id="check-status" role="status" aria-live="polite"></p>
+  </section>
+  <section class="section card" id="keep" aria-labelledby="keep-title">
+    <div class="section-head"><p class="eyebrow">A copy you can carry</p><h2 id="keep-title">Save it before you need it.</h2><p>The downloaded HTML contains these action cards, your current plan fields, and checklist. Open it from Files / Downloads in a browser; no sign-in, app installation, or connection is needed.</p></div>
+    <div class="actions no-print"><button class="primary" type="button" id="download-kit">Download offline HTML</button><button type="button" id="print-kit">Print / save PDF</button><button type="button" id="export-plan">Export plan backup</button></div>
+    <p class="download-note">Browser support for opening local HTML varies. Test the downloaded file now, and keep a printed copy or PDF as a fallback. Source links and phone calls need their respective connection. New warnings are never downloaded automatically into this file.</p>
+    <details class="no-print"><summary>Restore a plan backup</summary><p class="hint">Choose a StormSignal field-kit JSON backup. It replaces the fields and checklist on this page. Use Save to keep it on this device; nothing is uploaded.</p><label class="file-control" for="import-plan">Plan backup file<input id="import-plan" type="file" accept="application/json,.json"></label></details>
+    <p class="status" id="file-status" role="status" aria-live="polite"></p>
+  </section>
+  <footer class="footer"><p>StormSignal · Independent preparation aid · Guidance reviewed 1 November 2026</p><p>This static kit makes no background data requests. It contains no current forecast, warning feed, shelter list, or route guidance. Official instructions and your independent warning channels come first.</p><p class="no-print"><a href="https://stormsignal-weather.gardenroot512.chatgpt.site/" rel="noreferrer">Open the online StormSignal dashboard ↗</a> · <a href="https://github.com/TARUNTEjjjj/stormsignal" rel="noreferrer">Source code ↗</a></p></footer>
+</main>
+<script id="kit-seed" type="application/json">{"version":1,"savedAt":null,"plan":{"contact":"","phone":"","meeting":"","authority":"","notes":""},"checked":[]}</script>
+<script id="kit-core">
+const StormKitCore = (() => {
+  'use strict';
+  const limits = { contact:80, phone:40, meeting:180, authority:180, notes:1200 };
+  const ids = ['radio','charge','supplies','contacts','route','copy'];
+  const empty = () => ({version:1,savedAt:null,plan:{contact:'',phone:'',meeting:'',authority:'',notes:''},checked:[]});
+  function normalize(value, now=Date.now()) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 || !value.plan || typeof value.plan !== 'object' || Array.isArray(value.plan)) throw Error('Choose a valid StormSignal field-kit backup.');
+    if (value.savedAt !== null && (!Number.isSafeInteger(value.savedAt) || value.savedAt < 946684800000 || value.savedAt > now + 300000)) throw Error('The backup has an invalid save time.');
+    const plan = {};
+    for (const [key,max] of Object.entries(limits)) {
+      const text=value.plan[key];
+      if (typeof text !== 'string' || text.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw Error('A plan field is missing or too long.');
+      plan[key]=text;
+    }
+    if (!Array.isArray(value.checked) || value.checked.length > ids.length || !value.checked.every(id => ids.includes(id)) || new Set(value.checked).size !== value.checked.length) throw Error('The checklist in this backup is invalid.');
+    return {version:1,savedAt:value.savedAt,plan,checked:[...value.checked]};
+  }
+  function parse(raw, now=Date.now()) {
+    if (typeof raw !== 'string' || raw.length > 12000) throw Error('Choose a field-kit JSON file smaller than 12 KB.');
+    return normalize(JSON.parse(raw),now);
+  }
+  function embed(value) {
+    return JSON.stringify(normalize(value)).replace(/[<>&\u2028\u2029]/g, c => '\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
+  }
+  function phoneHref(phone) {
+    if (typeof phone !== 'string' || phone.length > 40 || !/^\+?[0-9 ()-]+$/.test(phone.trim())) return null;
+    const number=phone.trim().replace(/[ ()-]/g,'');
+    return /^\+?\d{3,20}$/.test(number) ? 'tel:'+number : null;
+  }
+  return {empty,normalize,parse,embed,phoneHref};
+})();
+</script>
+<script>
+(() => {
+  'use strict';
+  const core=StormKitCore, key='stormsignal:field-kit:v1';
+  const byId=id=>document.getElementById(id);
+  const fields=['contact','phone','meeting','authority','notes'];
+  const boxes=[...document.querySelectorAll('#kit-checks input')];
+  let state=core.empty();
+  function announce(id,message,error=false){const node=byId(id);node.textContent=message;node.classList.toggle('error',error);}
+  function capture(){return core.normalize({version:1,savedAt:Date.now(),plan:Object.fromEntries(fields.map(id=>[id,byId(id).value])),checked:boxes.filter(b=>b.checked).map(b=>b.value)});}
+  function printPlan(){const target=byId('print-plan');target.replaceChildren();for(const id of fields){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=document.querySelector('label[for="'+id+'"]').textContent;dd.textContent=byId(id).value||'Not recorded';target.append(dt,dd);}}
+  function updateCount(){byId('check-count').textContent=boxes.filter(b=>b.checked).length+' of 6 preparations checked';}
+  function contactLink(){const link=byId('call-contact'),href=core.phoneHref(state.plan.phone);link.hidden=!href;if(href){link.href=href;link.textContent='Call '+(state.plan.contact||'saved contact');}else link.removeAttribute('href');}
+  function render(){for(const id of fields)byId(id).value=state.plan[id];for(const box of boxes)box.checked=state.checked.includes(box.value);updateCount();printPlan();contactLink();}
+  try {
+    const embedded=core.parse(byId('kit-seed').textContent);
+    if(embedded.savedAt!==null){state=embedded;announce('plan-status','Loaded the plan included in this offline copy.');}
+    try{const saved=localStorage.getItem(key);if(saved){const stored=core.parse(saved);if(state.savedAt===null||(stored.savedAt!==null&&stored.savedAt>=state.savedAt)){state=stored;announce('plan-status','Loaded your latest saved plan on this device.');}}}catch{announce('plan-status','Device storage could not be read. Any plan included in this file is still available; you can edit, print, and download a copy.',true);}
+  } catch {announce('plan-status','The saved copy could not be read. The action cards remain available.',true);}
+  render();
+  let persistedPlan=state.plan;
+  byId('plan-form').addEventListener('submit',event=>{event.preventDefault();try{const next=capture();localStorage.setItem(key,JSON.stringify(next));state=next;persistedPlan=next.plan;contactLink();printPlan();announce('plan-status','Plan and checklist saved only on this device. Keep a downloaded or printed copy too.');}catch{announce('plan-status','This browser could not save the plan. Your fields remain here; download or print a copy before closing.',true);}});
+  for(const id of fields)byId(id).addEventListener('input',()=>{printPlan();announce('plan-status','Unsaved changes. Choose Save or download an updated copy.');});
+  for(const box of boxes)box.addEventListener('change',()=>{updateCount();state={...state,checked:boxes.filter(b=>b.checked).map(b=>b.value),savedAt:Date.now()};try{localStorage.setItem(key,JSON.stringify({...state,plan:persistedPlan}));announce('check-status','Checklist saved on this device. Plan edits still need Save.');}catch{announce('check-status','Checklist changed here but could not be saved. Download a copy to keep it.',true);}});
+  function download(contents,type,name){const blob=new Blob([contents],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+  byId('download-kit').addEventListener('click',()=>{try{const data=capture();const clone=document.documentElement.cloneNode(true);clone.querySelector('#kit-seed').textContent=core.embed(data);for(const id of ['plan-status','file-status','check-status'])clone.querySelector('#'+id).textContent='';download('<!doctype html>\n'+clone.outerHTML,'text/html;charset=utf-8','stormsignal-offline-kit.html');announce('file-status','Offline copy prepared with your current fields. Open the downloaded HTML from Files / Downloads to test it.');}catch{announce('file-status','The file could not be created. Try Print / save PDF instead.',true);}});
+  byId('export-plan').addEventListener('click',()=>{try{download(JSON.stringify(capture(),null,2),'application/json','stormsignal-field-plan.json');announce('file-status','Plan backup prepared. It contains your contact and meeting details; keep it private.');}catch{announce('file-status','The backup could not be created. Your fields remain on this page.',true);}});
+  byId('print-kit').addEventListener('click',()=>{printPlan();window.print();});
+  window.addEventListener('beforeprint',printPlan);
+  byId('import-plan').addEventListener('change',async event=>{const file=event.target.files?.[0];if(!file)return;try{if(file.size>12000)throw Error('Choose a field-kit JSON file smaller than 12 KB.');const next=core.parse(await file.text());state=next;render();announce('file-status','Backup loaded into this page. Choose Save plan to keep it on this device.');announce('plan-status','Restored fields are not saved yet. Choose Save or download a new copy.');}catch(error){announce('file-status',error instanceof Error?error.message:'The backup could not be read. Your current plan is unchanged.',true);}finally{event.target.value='';}});
+})();
+</script>
+</body>
+</html>

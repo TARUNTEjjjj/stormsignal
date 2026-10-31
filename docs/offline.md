@@ -27,7 +27,7 @@ The dashboard's direct **Download offline-only kit** link downloads the generic 
 
 Every saved briefing is marked **SAVED COPY · CURRENT STATUS UNKNOWN**. It shows when it was saved, when the forecast was retrieved, the model time, and each hourly forecast's valid time. Warning copies retain their original issue, effective and stated-expiry times. A warning past its recorded expiry is labelled accordingly; an unexpired copy still is not verified as current. Warnings can change or be cancelled before their recorded expiry.
 
-Automatic warning retrieval is currently supported only through the NWS coverage implemented by the application. Other locations retain an explicit unsupported-coverage message and official-source link. Missing, failed or stale warning retrieval is recorded as unavailable. **No warning text saved does not mean no danger.** Reading, exporting or selecting a saved briefing never refreshes its original source time.
+Warning retrieval uses NWS, Indian regional SACHET feeds and participating WMO SWIC sources. Saved copies retain regional/point scope, incomplete-coverage notices and original bulletin times. A regional warning is not automatically a warning for the saved city. Unsupported locations retain an explicit message and official-source link. Missing, failed or stale warning retrieval is recorded as unavailable. **No warning text saved does not mean no danger.** Reading, exporting or selecting a saved briefing never refreshes its original source time.
 
 When signal returns, select Data saver or Full workspace, refresh, and read the newly retrieved data before saving an updated briefing. Saving over a location is deliberate. Stored briefings are not automatically replaced by network responses.
 

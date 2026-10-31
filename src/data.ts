@@ -142,10 +142,13 @@ async function requestJson(target: string, ttl: number, signal?: AbortSignal): P
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', onAbort, { once: true });
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, 15_000);
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      controller.abort();
+    },
+    target.startsWith('/api/alerts') ? 25_000 : 15_000,
+  );
   try {
     const response = await fetch(target, {
       signal: controller.signal,
@@ -153,6 +156,13 @@ async function requestJson(target: string, ttl: number, signal?: AbortSignal): P
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
     });
+    if (!response.ok && target.startsWith('/api/alerts')) {
+      const failure = record(await boundedJson(response));
+      throw new WeatherDataError(
+        str(failure.reason, 400) || 'Official warning sources could not be checked.',
+        response.status,
+      );
+    }
     if (!response.ok)
       throw new WeatherDataError(
         response.status === 429
@@ -452,19 +462,8 @@ function alertGeometry(value: unknown): unknown | null {
 export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<AlertResult> {
   const location = coordinates(place);
   const code = place.countryCode.toUpperCase();
-  const officialUrl =
-    code === 'IN' ? 'https://mausam.imd.gov.in/' : 'https://severeweather.wmo.int/';
   if (!['US', 'PR', 'VI', 'GU', 'AS', 'MP'].includes(code))
-    return {
-      status: 'unsupported',
-      alerts: [],
-      fetchedAt: Date.now(),
-      source:
-        code === 'IN' ? 'India Meteorological Department' : 'WMO Severe Weather Information Centre',
-      officialUrl,
-      coverage:
-        'Automatic warning integration is not available in this location. Check the official authority; missing warnings do not mean safe conditions.',
-    };
+    return fetchInternationalAlerts(place, signal);
   const result = await requestJson(
     url(NWS, { point: `${location.latitude},${location.longitude}` }),
     60_000,
@@ -482,7 +481,7 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
   for (const raw of features.slice(0, 100)) {
     const feature = record(raw),
       p = record(feature.properties);
-    if (p.status !== 'Actual' || p.messageType === 'Cancel') continue;
+    if (p.status !== 'Actual' || !['Alert', 'Update'].includes(String(p.messageType))) continue;
     const expires = stamp(p.expires),
       ends = stamp(p.ends),
       effective = stamp(p.effective),
@@ -492,7 +491,10 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       expires <= now ||
       (ends !== null && ends <= now) ||
       sent === null ||
-      effective === null
+      effective === null ||
+      sent > now + 300_000 ||
+      expires <= sent ||
+      expires <= effective
     )
       continue;
     const id = str(p.id, 2000) || str(feature.id, 2000);
@@ -528,8 +530,99 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
     fetchedAt: result.fetchedAt,
     source: 'US National Weather Service',
     officialUrl: fallback,
+    scope: 'point',
+    scopeLabel: place.name,
+    partial: false,
     coverage:
       'NWS point warnings in the United States and supported territories. An empty response is not a safety guarantee.',
+  };
+}
+
+function warningLink(candidate: unknown): string {
+  const u = new URL(str(candidate, 4000));
+  if (
+    u.protocol !== 'https:' ||
+    u.username ||
+    u.password ||
+    u.port ||
+    !['severeweather.wmo.int', 'sachet.ndma.gov.in', 'mausam.imd.gov.in'].includes(u.hostname)
+  )
+    throw new WeatherDataError('The warning service returned an invalid source link.');
+  return u.href;
+}
+
+async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Promise<AlertResult> {
+  const params = new URLSearchParams({
+    lat: place.latitude.toFixed(4),
+    lon: place.longitude.toFixed(4),
+    country: place.countryCode.toUpperCase(),
+    admin: (place.admin ?? '').slice(0, 100),
+    name: place.name.slice(0, 100),
+  });
+  const response = await requestJson(`/api/alerts?${params}`, 60_000, signal);
+  const result = record(response.value);
+  const fetchedAt = number(result.fetchedAt),
+    now = Date.now();
+  if (
+    !['available', 'unsupported'].includes(String(result.status)) ||
+    !Array.isArray(result.alerts) ||
+    result.alerts.length > 100 ||
+    fetchedAt === null ||
+    fetchedAt > now + 5000 ||
+    (result.status === 'available' && now - fetchedAt > 120_000) ||
+    !['point', 'region', 'country'].includes(String(result.scope)) ||
+    typeof result.partial !== 'boolean'
+  )
+    throw new WeatherDataError('The warning service returned an incomplete or stale response.');
+  const alerts: WeatherAlert[] = [];
+  const seen = new Set<string>();
+  for (const raw of result.alerts) {
+    const a = record(raw),
+      sent = number(a.sent),
+      effective = number(a.effective),
+      expires = number(a.expires),
+      id = str(a.id, 2000);
+    if (
+      !id ||
+      seen.has(id) ||
+      sent === null ||
+      effective === null ||
+      expires === null ||
+      sent > now + 300000 ||
+      expires <= now ||
+      expires <= sent ||
+      expires <= effective
+    )
+      continue;
+    seen.add(id);
+    alerts.push({
+      id,
+      sent,
+      effective,
+      expires,
+      title: str(a.title, 1000),
+      event: str(a.event),
+      severity: str(a.severity, 100),
+      area: str(a.area, 4000),
+      description: str(a.description, 20000),
+      instruction: str(a.instruction, 20000),
+      source: str(a.source),
+      url: warningLink(a.url),
+      geometry: alertGeometry(a.geometry),
+    });
+  }
+  const feedUpdatedAt = number(result.feedUpdatedAt);
+  return {
+    status: result.status as AlertResult['status'],
+    alerts: result.status === 'available' ? alerts : [],
+    fetchedAt,
+    source: str(result.source),
+    coverage: str(result.coverage, 4000),
+    officialUrl: warningLink(result.officialUrl),
+    scope: result.scope as AlertResult['scope'],
+    scopeLabel: str(result.scopeLabel),
+    partial: result.partial,
+    feedUpdatedAt: feedUpdatedAt !== null && feedUpdatedAt <= now + 300000 ? feedUpdatedAt : null,
   };
 }
 

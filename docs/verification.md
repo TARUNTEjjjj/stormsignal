@@ -1,4 +1,16 @@
-# Weak-signal and offline release verification
+# Release verification
+
+## International official warnings — 1 November 2026
+
+- **169 deterministic tests passed**, including CAP XML/status/namespace validation, timezones, expiry/cancellation/update references, exact geographic matching, incomplete-source responses, bounded requests, 200/304 ETag handling, failed revalidation, unsafe URLs, and India/global offline snapshots. TypeScript, production build and executable Worker artifact checks passed.
+- Existing static content was moved into a self-contained Worker on the same Site identity. Asset/HTML/offline aliases and conditional reads passed; source/config paths return 404. The warning endpoint returns `no-store`; the service worker does not intercept warning API requests. Dependency installation/audit reported zero vulnerabilities.
+- Live India adapter checks: Mumbai/Maharashtra, Bhubaneswar/Odisha and Chennai/Tamil Nadu returned readable regional feeds. All had zero unexpired bulletins in the bounded source history at check time. This does not establish an absence of current warnings. Chennai's latest publication was 26 October; the interface explicitly displays its age and unverified coverage.
+- Live global checks: Glen Innes, Australia returned an Australian Bureau of Meteorology warning with source issue/expiry times; London returned a limited empty result; Tokyo was explicitly unsupported because no matching operating official CAP source was listed. These representative checks do not certify every source/country.
+- A live WMO WFS timestamp differed from its original CAP timestamp by eight hours. The adapter uses only the original CAP times for displayed validity; a fixture locks this behavior in. Issuing agency text and canonical WMO copies remain attributed.
+- Browser checks: Chennai, Mumbai and Odisha showed the correct regional scope and IMD links. Mumbai's regional metadata saved in a historical briefing. Miami still displayed its live NWS rip-current and coastal-flood products at check time. No browser errors were reported in these flows.
+- Glen Innes's live BOM warning displayed its original headline, instructions and issuer and saved successfully. At 390 × 844, the warning panel fit the viewport without horizontal overflow. With the local Worker stopped, the installed dashboard reloaded in Offline only, both international/regional saved briefings remained readable, and the offline emergency kit opened. External internet remained available: this was an origin-outage check, not a radio-off device test.
+
+## Earlier weak-signal and offline baseline
 
 ## Quick locations and global search — 1 November 2026
 

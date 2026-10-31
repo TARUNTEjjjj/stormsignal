@@ -952,6 +952,41 @@ th {
 .coverage-banner.available p {
   color: #9cb5c0;
 }
+.coverage-banner.partial {
+  background: #29281e;
+  border-color: #716747;
+  color: #f2dfaa;
+}
+.coverage-banner.partial p {
+  color: #ded5bd;
+}
+.warning-scope {
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9d7dc;
+}
+.warning-scope strong,
+.warning-scope span {
+  display: block;
+}
+.regional-warning-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 16px 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.regional-warning-links span {
+  flex-basis: 100%;
+  color: #bdcbd4;
+}
+.regional-warning-links a {
+  color: #acdfd0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .alert-actions {
   display: flex;
   align-items: center;

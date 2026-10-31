@@ -245,14 +245,112 @@ test('air quality carries estimate time and preserves missing pollutant', async 
   assert.ok(air.time > 1e12);
 });
 
-test('unsupported alert regions do not make requests or imply safe conditions', async () => {
-  globalThis.fetch = async () => {
-    throw Error('Should not call');
+test('India uses the owned warning API and preserves incomplete regional coverage', async () => {
+  globalThis.fetch = async (target) => {
+    const params = new URL(String(target), 'https://stormsignal.invalid').searchParams;
+    assert.equal(params.get('country'), 'IN');
+    assert.equal(params.get('name'), 'Chennai');
+    return json({
+      status: 'available',
+      alerts: [],
+      fetchedAt: Date.now(),
+      source: 'NDMA SACHET',
+      officialUrl: 'https://sachet.ndma.gov.in/',
+      scope: 'region',
+      scopeLabel: 'Tamil Nadu',
+      partial: true,
+      feedUpdatedAt: Date.now() - 86400000,
+      coverage: 'Regional feed is incomplete; missing warnings do not mean safe conditions.',
+    });
   };
   const result = await fetchAlerts(place);
-  assert.equal(result.status, 'unsupported');
-  assert.equal(result.officialUrl, 'https://mausam.imd.gov.in/');
+  assert.equal(result.status, 'available');
+  assert.equal(result.officialUrl, 'https://sachet.ndma.gov.in/');
+  assert.equal(result.scope, 'region');
+  assert.equal(result.partial, true);
   assert.match(result.coverage, /missing warnings do not mean safe/);
+});
+
+test('international warnings keep the original server check time across client cache hits', async () => {
+  const checked = Date.now() - 30_000;
+  globalThis.fetch = async () =>
+    json({
+      status: 'available',
+      alerts: [],
+      fetchedAt: checked,
+      source: 'WMO SWIC',
+      officialUrl: 'https://severeweather.wmo.int/',
+      scope: 'point',
+      scopeLabel: 'Tokyo',
+      partial: true,
+      coverage: 'Participating sources only.',
+    });
+  const first = await fetchAlerts({ ...place, countryCode: 'JP' });
+  const second = await fetchAlerts({ ...place, countryCode: 'JP' });
+  assert.equal(first.fetchedAt, checked);
+  assert.equal(second.fetchedAt, checked);
+});
+
+test('stale international checks and incomplete response shapes fail closed', async () => {
+  for (const value of [
+    { status: 'available' },
+    {
+      status: 'available',
+      alerts: [],
+      fetchedAt: Date.now() - 300_000,
+      scope: 'point',
+      partial: true,
+    },
+  ]) {
+    clearRequestCache();
+    globalThis.fetch = async () => json(value);
+    await assert.rejects(fetchAlerts(place), /incomplete or stale/);
+  }
+});
+
+test('international warning API failures retain actionable source failure messages', async () => {
+  globalThis.fetch = async () =>
+    json(
+      { error: true, reason: 'Official warnings could not be verified. Source timed out.' },
+      503,
+    );
+  await assert.rejects(fetchAlerts(place), /Source timed out/);
+});
+
+test('international warning links are allowlisted and expired bulletins are excluded', async () => {
+  const now = Date.now();
+  const valid = {
+    id: 'sachet:123',
+    title: 'Official title',
+    event: 'Rain',
+    severity: 'Severe',
+    area: 'Named district',
+    sent: now - 60000,
+    effective: now - 60000,
+    expires: now + 60000,
+    description: 'Source text',
+    instruction: 'Source instruction',
+    source: 'IMD',
+    url: 'https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=123',
+    geometry: null,
+  };
+  const response = {
+    status: 'available',
+    alerts: [valid, { ...valid, id: 'old', expires: now - 1 }],
+    fetchedAt: now,
+    source: 'NDMA SACHET',
+    officialUrl: 'https://sachet.ndma.gov.in/',
+    scope: 'region',
+    scopeLabel: 'Maharashtra',
+    partial: true,
+    coverage: 'Limited regional feed.',
+  };
+  globalThis.fetch = async () => json(response);
+  assert.equal((await fetchAlerts(place)).alerts.length, 1);
+  clearRequestCache();
+  globalThis.fetch = async () =>
+    json({ ...response, alerts: [{ ...valid, url: 'https://evil.example/' }] });
+  await assert.rejects(fetchAlerts(place), /invalid source link/);
 });
 
 test('NWS filters expired, cancelled, test, duplicate, and already-ended warnings', async () => {

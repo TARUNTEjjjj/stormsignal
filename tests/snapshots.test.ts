@@ -145,6 +145,116 @@ test('unsupported regional warning coverage remains unsupported in saved briefin
   assert.equal(officialBriefingUrl(india), 'https://mausam.imd.gov.in/');
 });
 
+test('India and global official warnings round-trip with scope and incomplete-feed limitations', () => {
+  const fixtures = [
+    {
+      place: {
+        ...place,
+        name: 'Chennai',
+        country: 'India',
+        countryCode: 'IN',
+        latitude: 13,
+        longitude: 80,
+      },
+      url: 'https://sachet.ndma.gov.in/',
+      source: 'NDMA Sachet',
+      scope: 'region' as const,
+      scopeLabel: 'Tamil Nadu',
+    },
+    {
+      place: {
+        ...place,
+        name: 'Paris',
+        country: 'France',
+        countryCode: 'FR',
+        latitude: 48.85,
+        longitude: 2.35,
+      },
+      url: 'https://severeweather.wmo.int/',
+      source: 'WMO severe weather feed',
+      scope: 'country' as const,
+      scopeLabel: 'France',
+    },
+  ];
+  const disk = storage();
+  for (const fixture of fixtures) {
+    const input = {
+      ...alerts,
+      source: fixture.source,
+      officialUrl: fixture.url,
+      coverage: 'Regional bulletins; incomplete feed. Not an exact point match or an all-clear.',
+      partial: true,
+      scope: fixture.scope,
+      scopeLabel: fixture.scopeLabel,
+      feedUpdatedAt: NOW - 24 * HOUR,
+      alerts: [{ ...alerts.alerts[0], source: fixture.source, url: fixture.url }],
+    };
+    const item = createBriefing(fixture.place, forecast, input, NOW);
+    assert.equal(item.warnings.status, 'available');
+    assert.equal(item.warnings.partial, true);
+    assert.equal(item.warnings.scope, fixture.scope);
+    assert.equal(item.warnings.scopeLabel, fixture.scopeLabel);
+    assert.equal(item.warnings.feedUpdatedAt, NOW - 24 * HOUR);
+    assert.equal(item.warnings.fetchedAt, NOW);
+    assert.equal(item.warnings.alerts[0].url, fixture.url);
+    assert.equal(saveBriefing(disk, item, NOW).error, null);
+    const reloaded = loadBriefings(disk, NOW + 10 * 86400000).briefings.find(
+      (b) => b.id === item.id,
+    );
+    assert.deepEqual(reloaded, item);
+    const exported = briefingText(reloaded!, NOW + 10 * 86400000);
+    assert.match(exported, /NOT LIVE/);
+    assert.match(exported, /Incomplete warning feed at save/);
+    assert.match(exported, /Warning scope saved: (REGION|COUNTRY)/);
+    assert.match(exported, /Authority feed update time saved: 2026-10-31 03:00:00 UTC/);
+    assert.match(exported, /Warning feed retrieved: 2026-11-01 03:00:00 UTC/);
+    assert.match(exported, /Do not enter floodwater/);
+  }
+});
+
+test('old packs remain readable without inventing optional warning metadata', () => {
+  const original = pack();
+  const item = loadBriefings(storage(encoded([original])), NOW + HOUR).briefings[0];
+  assert.deepEqual(item, original);
+  for (const key of ['partial', 'scope', 'scopeLabel', 'feedUpdatedAt'])
+    assert.equal(Object.hasOwn(item.warnings, key), false);
+  assert.doesNotMatch(briefingText(item, NOW + HOUR), /Authority feed update time saved/);
+});
+
+test('explicit unknown feed times and complete point metadata are preserved without new timestamps', () => {
+  const input = { ...alerts, partial: false, scope: 'point' as const, feedUpdatedAt: null };
+  const item = createBriefing(place, forecast, input, NOW);
+  assert.equal(item.warnings.partial, false);
+  assert.equal(item.warnings.scope, 'point');
+  assert.equal(item.warnings.feedUpdatedAt, null);
+  assert.match(briefingText(item, NOW + HOUR), /Authority feed update time was not available/);
+  assert.doesNotMatch(briefingText(item, NOW + HOUR), /Incomplete warning feed at save/);
+});
+
+test('optional coverage metadata rejects malformed scope and falsely future source timestamps', () => {
+  for (const [key, value] of [
+    ['partial', 'false'],
+    ['scope', 'world'],
+    ['scope', null],
+    ['scopeLabel', ''],
+    ['scopeLabel', 'x'.repeat(401)],
+    ['feedUpdatedAt', NOW + 300001],
+    ['feedUpdatedAt', 'today'],
+    ['feedUpdatedAt', NaN],
+  ] as const) {
+    const item = pack();
+    Object.assign(item.warnings, { [key]: value });
+    assert.throws(() => validateBriefing(item, NOW), key);
+  }
+});
+
+test('global available coverage still requires a real retrieval time', () => {
+  const item = pack();
+  item.place.countryCode = 'FR';
+  item.warnings.fetchedAt = null;
+  assert.throws(() => validateBriefing(item, NOW), /Invalid automatic coverage/);
+});
+
 test('old saved briefing remains historical and expiry status changes without refreshing time', () => {
   const item = validateBriefing(pack(), NOW + 20 * 86400000);
   assert.equal(item.savedAt, NOW);
@@ -242,6 +352,13 @@ test('source links cannot execute script or lead to arbitrary sites', () => {
     'https://evil.example',
     'https://user:pass@weather.gov/',
     'http://weather.gov/',
+    'https://sachet.ndma.gov.in.evil.example/',
+    'https://user:pass@sachet.ndma.gov.in/',
+    'https://sachet.ndma.gov.in:8443/',
+    'http://sachet.ndma.gov.in/',
+    'https://subdomain.sachet.ndma.gov.in/',
+    'https://severeweather.wmo.int.evil.example/',
+    'https://evil.noaa.gov.evil.example/',
   ]) {
     const item = pack();
     item.warnings.alerts[0].url = bad;
@@ -253,6 +370,21 @@ test('source links cannot execute script or lead to arbitrary sites', () => {
   const item = pack();
   item.warnings.alerts[0].url = 'https://forecast.weather.gov/MapClick.php?lat=25&lon=-80';
   assert.ok(validateBriefing(item, NOW));
+});
+
+test('approved NOAA and official global URLs survive both live snapshot creation and loading', () => {
+  for (const url of [
+    'https://noaa.gov/',
+    'https://www.nhc.noaa.gov/',
+    'https://sachet.ndma.gov.in/',
+    'https://severeweather.wmo.int/',
+  ]) {
+    const input = { ...alerts, officialUrl: url, alerts: [{ ...alerts.alerts[0], url }] };
+    const item = createBriefing(place, forecast, input, NOW);
+    const reloaded = loadBriefings(storage(encoded([item])), NOW).briefings[0];
+    assert.equal(reloaded.warnings.officialUrl, url);
+    assert.equal(reloaded.warnings.alerts[0].url, url);
+  }
 });
 
 test('briefing storage retains three most-recent places and replaces a location in place', () => {

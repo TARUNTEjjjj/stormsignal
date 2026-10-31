@@ -1,6 +1,6 @@
 # Privacy and local data
 
-StormSignal is a static weather application. This release has no StormSignal login, advertising, analytics SDK or app-operated account database. This does not mean browsing it is anonymous to its hosting or data providers.
+StormSignal serves its interface and a public-warning gateway through a Cloudflare Worker. This release has no StormSignal login, advertising, analytics SDK or app-operated account database. This does not mean browsing it is anonymous to its hosting or data providers.
 
 ## What leaves your browser
 
@@ -16,6 +16,8 @@ Your browser contacts the host to download the application. It also makes HTTPS 
 | OpenStreetMap tile service          | Base map                                          | Viewed tile coordinates and network information                                                                                                      |
 
 Map requests can reveal the area you are viewing. A searched location need not be your current location. Do not enter home addresses or other sensitive information merely to obtain a city-level forecast.
+
+For India and other international warning checks, the browser sends selected coordinates, country, region and place name to StormSignal's `/api/alerts` endpoint. The gateway sends the selected point to WMO for geographic matching, or requests the appropriate Indian state/territory SACHET feed. Providers see the gateway's network request. There is no application analytics or location-history database; hosting access/security logs may contain request metadata. Public upstream warning responses and ETags are cached at the server/edge for revalidation, bounded to 24-hour retention; WMO source metadata is reused for six hours. User-specific API responses use `no-store`. No emergency-plan, contact or saved-briefing content is uploaded by this gateway.
 
 The GDACS panel downloads a bounded global report snapshot and computes nearby results locally. Opening an official report link makes a separate request to GDACS for the chosen event.
 
@@ -51,4 +53,4 @@ See [Offline and weak-signal use](offline.md) for preparation, storage limits an
 
 ## Changes to this policy
 
-Adding accounts, push subscriptions, telemetry, paid-provider credentials or a server would change this data flow. Document those changes and obtain appropriate permission before shipping them. No paid secret should be embedded in a public client bundle.
+Adding accounts, push subscriptions, telemetry or paid-provider credentials would change this data flow. Document those changes and obtain appropriate permission before shipping them. No paid secret should be embedded in a public client bundle.

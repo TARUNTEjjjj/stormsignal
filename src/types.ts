@@ -75,6 +75,11 @@ export interface AlertResult {
   source: string;
   coverage: string;
   officialUrl: string;
+  /** Feed scope is distinct from forecast coordinates. */
+  scope?: 'point' | 'region' | 'country';
+  scopeLabel?: string;
+  partial?: boolean;
+  feedUpdatedAt?: number | null;
 }
 export interface Hazard {
   kind: 'rain' | 'wind' | 'heat' | 'cold' | 'uv' | 'thunder';

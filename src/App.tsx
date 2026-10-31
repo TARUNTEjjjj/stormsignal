@@ -85,6 +85,16 @@ const PRESETS: Place[] = [
     admin: 'Maharashtra',
   },
   {
+    id: 'bhubaneswar-odisha',
+    name: 'Bhubaneswar (Odisha)',
+    country: 'India',
+    countryCode: 'IN',
+    latitude: 20.2724,
+    longitude: 85.8339,
+    timezone: 'Asia/Kolkata',
+    admin: 'Odisha',
+  },
+  {
     id: '5128581',
     name: 'New York City',
     country: 'United States',
@@ -598,6 +608,8 @@ export default function App() {
       !alertsRecent ||
       !alerts.data ||
       alerts.data.status !== 'available' ||
+      alerts.data.partial ||
+      alerts.data.scope !== 'point' ||
       !('Notification' in window) ||
       Notification.permission !== 'granted'
     )
@@ -1252,7 +1264,7 @@ export default function App() {
                     <ShieldCheck size={22} className="mint-text" />
                   </PanelHeader>
                   <div
-                    className={`coverage-banner ${alerts.data?.status === 'available' ? 'available' : ''}`}
+                    className={`coverage-banner ${alerts.data?.status === 'available' ? 'available' : ''} ${alerts.data?.partial ? 'partial' : ''}`}
                   >
                     <Radio size={17} />
                     <div>
@@ -1262,7 +1274,7 @@ export default function App() {
                           : alerts.error
                             ? 'Alert feed unavailable'
                             : alerts.data?.status === 'available'
-                              ? 'US National Weather Service'
+                              ? alerts.data.source
                               : 'Official feed not integrated here'}
                       </strong>
                       <p>
@@ -1271,6 +1283,36 @@ export default function App() {
                       </p>
                     </div>
                   </div>
+                  {alerts.data?.scopeLabel && (
+                    <p className="warning-scope">
+                      <strong>
+                        {alerts.data.scope === 'region'
+                          ? 'Regional bulletins'
+                          : alerts.data.scope === 'country'
+                            ? 'Country bulletins'
+                            : 'Point lookup'}
+                        : {alerts.data.scopeLabel}
+                      </strong>
+                      {alerts.data.partial && (
+                        <span>
+                          Incomplete coverage · check the named affected areas and official source.
+                        </span>
+                      )}
+                      {alerts.data.feedUpdatedAt && (
+                        <span>
+                          Latest bulletin in feed:{' '}
+                          {localTime(alerts.data.feedUpdatedAt, tz, {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                          . This is an issue time, not a feed-health guarantee.
+                        </span>
+                      )}
+                    </p>
+                  )}
                   <ErrorNote error={alerts.error} />
                   {alerts.data?.status === 'available' && !alertsRecent && (
                     <p className="wide-notice" role="status">
@@ -1331,8 +1373,9 @@ export default function App() {
                   ))}
                   {alertsRecent && alerts.data?.status === 'available' && !activeAlerts.length && (
                     <p className="empty-alert">
-                      No active alerts returned for this point. Conditions can change; this is not
-                      an assurance of safety.
+                      {alerts.data.partial || alerts.data.scope !== 'point'
+                        ? 'No unexpired bulletins were matched in this limited feed. Current warning status is not confirmed; check the official sources below.'
+                        : 'No active alerts returned for this point. Conditions can change; this is not an assurance of safety.'}
                     </p>
                   )}
                   <div className="alert-actions">
@@ -1352,12 +1395,43 @@ export default function App() {
                     <button
                       className="quiet-button"
                       onClick={enableNotifications}
-                      disabled={alerts.data?.status !== 'available' || !policy.polling}
+                      disabled={
+                        alerts.data?.status !== 'available' ||
+                        alerts.data.partial ||
+                        alerts.data.scope !== 'point' ||
+                        !policy.polling
+                      }
                     >
                       <Bell size={14} />
                       {notifications ? 'Disable alerts' : 'Enable page alerts'}
                     </button>
                   </div>
+                  {place.countryCode === 'IN' && (
+                    <div className="regional-warning-links">
+                      <span>Check current IMD warnings directly:</span>
+                      <a href="https://mausam.imd.gov.in/mumbai/" target="_blank" rel="noreferrer">
+                        Mumbai / Maharashtra ↗
+                      </a>
+                      <a
+                        href="https://mausam.imd.gov.in/bhubaneswar/"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Odisha ↗
+                      </a>
+                      <a href="https://mausam.imd.gov.in/chennai/" target="_blank" rel="noreferrer">
+                        Chennai / Tamil Nadu ↗
+                      </a>
+                    </div>
+                  )}
+                  <p className="fine-print">
+                    Worldwide coverage depends on participating authorities, available CAP feeds and
+                    geographic matching. Regional bulletins are not automatic warnings for every
+                    city in the region.{' '}
+                    <a href="https://severeweather.wmo.int/" target="_blank" rel="noreferrer">
+                      Open WMO's global warning map ↗
+                    </a>
+                  </p>
                   <p className="fine-print">
                     Notifications work only while this page is open, on supported browsers. Not an
                     emergency dispatch service.{' '}
@@ -1365,6 +1439,9 @@ export default function App() {
                       ? 'Alert feeds refresh every minute while visible.'
                       : 'Data saver pauses automatic checks and notifications. Use Refresh data for another check.'}
                     {alerts.data && <> Last checked {age(alerts.data.fetchedAt, now)}.</>}
+                    {alerts.data?.partial && (
+                      <> Page notifications are disabled for incomplete or regional feeds.</>
+                    )}
                   </p>
                 </section>
                 <section className="panel hazards-panel">
@@ -1508,9 +1585,9 @@ export default function App() {
                 <span className="source-index">03 / ALERTS & AIR</span>
                 <h3>Official bulletins. Explicit coverage.</h3>
                 <p>
-                  Integrated alerts: US NWS only. Elsewhere, follow the linked local authority. Air
-                  quality is CAMS ENSEMBLE modeled data via Open-Meteo; it can miss local pollution
-                  spikes.
+                  Official bulletins: US NWS, India NDMA SACHET regional feeds, and participating
+                  national authorities through WMO SWIC. Global coverage is incomplete. Air quality
+                  is CAMS ENSEMBLE modeled data via Open-Meteo; it can miss local pollution spikes.
                 </p>
                 <a
                   href="https://www.weather.gov/documentation/services-web-api"

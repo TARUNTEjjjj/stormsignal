@@ -17,6 +17,12 @@ export interface BriefingHour {
   gust: number | null;
 }
 export type BriefingAlert = Omit<WeatherAlert, 'geometry'>;
+interface WarningCoverageMetadata {
+  partial?: boolean;
+  scope?: 'point' | 'region' | 'country';
+  scopeLabel?: string;
+  feedUpdatedAt?: number | null;
+}
 export interface OfflineBriefingData {
   version: 1;
   id: string;
@@ -29,7 +35,7 @@ export interface OfflineBriefingData {
     current: BriefingHour;
     hours: BriefingHour[];
   };
-  warnings: {
+  warnings: WarningCoverageMetadata & {
     status: 'available' | 'unsupported' | 'unavailable';
     fetchedAt: number | null;
     source: string;
@@ -124,18 +130,49 @@ export function officialBriefingUrl(place: Place): string {
 function safeUrl(value: unknown, place: Place): string {
   const candidate = text(value, 4000);
   const u = new URL(candidate);
-  const hosts = ['weather.gov', 'mausam.imd.gov.in', 'severeweather.wmo.int'];
+  const hosts = [
+    'weather.gov',
+    'noaa.gov',
+    'mausam.imd.gov.in',
+    'sachet.ndma.gov.in',
+    'severeweather.wmo.int',
+  ];
   if (
     u.protocol !== 'https:' ||
     u.username ||
     u.password ||
+    u.port ||
     !hosts.some(
       (host) =>
-        u.hostname === host || (host === 'weather.gov' && u.hostname.endsWith('.weather.gov')),
+        u.hostname === host ||
+        (['weather.gov', 'noaa.gov'].includes(host) && u.hostname.endsWith(`.${host}`)),
     )
   )
     throw new Error('Invalid source URL');
   return u.href;
+}
+function warningMetadata(value: unknown, savedAt: number): WarningCoverageMetadata {
+  const w = record(value);
+  const result: WarningCoverageMetadata = {};
+  // Optional fields keep existing version-1 packs readable. Missing metadata
+  // means unknown; never turn it into complete coverage or a new source time.
+  if (w.partial !== undefined) {
+    if (typeof w.partial !== 'boolean') throw new Error('Invalid partial coverage');
+    result.partial = w.partial;
+  }
+  if (w.scope !== undefined) {
+    if (!['point', 'region', 'country'].includes(w.scope as string))
+      throw new Error('Invalid warning scope');
+    result.scope = w.scope as WarningCoverageMetadata['scope'];
+  }
+  if (w.scopeLabel !== undefined) result.scopeLabel = text(w.scopeLabel, 400);
+  if (w.feedUpdatedAt !== undefined) {
+    const updatedAt = w.feedUpdatedAt === null ? null : time(w.feedUpdatedAt);
+    if (updatedAt !== null && updatedAt > savedAt + 300000)
+      throw new Error('Invalid feed update time');
+    result.feedUpdatedAt = updatedAt;
+  }
+  return result;
 }
 function cleanAlert(value: unknown, place: Place, savedAt: number): BriefingAlert {
   const a = record(value);
@@ -207,10 +244,7 @@ export function validateBriefing(value: unknown, now = Date.now()): OfflineBrief
     (w.omitted as number) > 100
   )
     throw new Error('Invalid warning list');
-  if (
-    w.status === 'available' &&
-    (!NWS_COUNTRIES.includes(place.countryCode) || warningFetchedAt === null)
-  )
+  if (w.status === 'available' && warningFetchedAt === null)
     throw new Error('Invalid automatic coverage');
   if (w.status !== 'available' && (w.alerts.length || w.omitted))
     throw new Error('Unsupported warning content');
@@ -231,6 +265,7 @@ export function validateBriefing(value: unknown, now = Date.now()): OfflineBrief
       hours,
     },
     warnings: {
+      ...warningMetadata(w, savedAt),
       status: w.status as OfflineBriefingData['warnings']['status'],
       fetchedAt: warningFetchedAt,
       source: text(w.source, 400),
@@ -254,6 +289,7 @@ export function createBriefing(
     alerts && alerts.fetchedAt <= now + 300000 && now - alerts.fetchedAt <= 5 * 60000;
   const warnings: OfflineBriefingData['warnings'] = warningFresh
     ? {
+        ...warningMetadata(alerts, now),
         status: alerts.status,
         fetchedAt: alerts.fetchedAt,
         source: alerts.source,
@@ -410,6 +446,20 @@ export function briefingText(briefing: OfflineBriefingData, now = Date.now()): s
       : `Warning feed retrieved: ${utc(b.warnings.fetchedAt)}`,
     `Official source (internet required): ${b.warnings.officialUrl}`,
   ];
+  if (b.warnings.scope)
+    lines.push(
+      `Warning scope saved: ${b.warnings.scope.toUpperCase()}${b.warnings.scopeLabel ? ` — ${b.warnings.scopeLabel}` : ''}`,
+    );
+  else if (b.warnings.scopeLabel)
+    lines.push(`Warning coverage area saved: ${b.warnings.scopeLabel}`);
+  if (b.warnings.partial)
+    lines.push('Incomplete warning feed at save: relevant bulletins may be missing.');
+  if (b.warnings.feedUpdatedAt !== undefined)
+    lines.push(
+      b.warnings.feedUpdatedAt === null
+        ? 'Authority feed update time was not available.'
+        : `Authority feed update time saved: ${utc(b.warnings.feedUpdatedAt)}`,
+    );
   if (!b.warnings.alerts.length)
     lines.push('No warning text was saved. This does not mean no danger.');
   for (const a of b.warnings.alerts)

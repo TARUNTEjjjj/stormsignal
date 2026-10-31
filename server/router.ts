@@ -1,0 +1,83 @@
+import type { Place } from '../src/types';
+import { fetchIndiaAlerts } from './india';
+import { fetchGlobalAlerts } from './global';
+
+export function alertPlace(url: URL): Place {
+  const p = url.searchParams;
+  const allowed = new Set(['lat', 'lon', 'country', 'admin', 'name']);
+  if ([...p.keys()].some((k) => !allowed.has(k) || p.getAll(k).length !== 1))
+    throw new Error('Invalid alert query');
+  const latitude = Number(p.get('lat')),
+    longitude = Number(p.get('lon'));
+  const countryCode = p.get('country') ?? '';
+  if (
+    !p.get('lat')?.trim() ||
+    !p.get('lon')?.trim() ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180 ||
+    !/^([A-Z]{2})?$/.test(countryCode) ||
+    (p.get('admin')?.length ?? 0) > 100 ||
+    (p.get('name')?.length ?? 0) > 100
+  )
+    throw new Error('Invalid alert location');
+  return {
+    id: 'warning-query',
+    latitude,
+    longitude,
+    countryCode,
+    country: countryCode,
+    admin: p.get('admin') ?? '',
+    name: p.get('name') || 'Selected point',
+  };
+}
+const headers = {
+  'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+};
+export async function handleAlerts(request: Request): Promise<Response> {
+  if (request.method !== 'GET')
+    return new Response(JSON.stringify({ error: true, reason: 'Use GET for warning checks.' }), {
+      status: 405,
+      headers: { ...headers, Allow: 'GET' },
+    });
+  let place: Place;
+  try {
+    place = alertPlace(new URL(request.url));
+  } catch {
+    return new Response(
+      JSON.stringify({
+        error: true,
+        reason: 'Choose a valid location to check official warnings.',
+      }),
+      { status: 400, headers },
+    );
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(request.signal.reason);
+  request.signal.addEventListener('abort', onAbort, { once: true });
+  if (request.signal.aborted) onAbort();
+  const timeout = setTimeout(
+    () => controller.abort(new Error('Warning sources timed out. Check the authority directly.')),
+    18_000,
+  );
+  try {
+    const result =
+      place.countryCode === 'IN'
+        ? await fetchIndiaAlerts(place, { signal: controller.signal })
+        : await fetchGlobalAlerts(place, controller.signal);
+    return new Response(JSON.stringify(result), { headers });
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.slice(0, 300) : 'Source could not be checked.';
+    return new Response(
+      JSON.stringify({ error: true, reason: `Official warnings could not be verified. ${detail}` }),
+      { status: 503, headers },
+    );
+  } finally {
+    clearTimeout(timeout);
+    request.signal.removeEventListener('abort', onAbort);
+  }
+}

@@ -340,6 +340,23 @@ export default function OfflineBriefing({
             <div className="briefing-warnings">
               <h4>Warning text saved at that time</h4>
               <p>{selected.warnings.coverage}</p>
+              {selected.warnings.scopeLabel && (
+                <p>
+                  Saved coverage: {selected.warnings.scopeLabel} ({selected.warnings.scope}).
+                </p>
+              )}
+              {selected.warnings.partial && (
+                <p className="briefing-warning">
+                  This saved feed had incomplete coverage. Regional bulletins do not apply to every
+                  place in the region.
+                </p>
+              )}
+              {selected.warnings.feedUpdatedAt && (
+                <p>
+                  Latest feed bulletin when saved: {stamp(selected.warnings.feedUpdatedAt)}. This is
+                  not a new check.
+                </p>
+              )}
               <p>
                 {selected.warnings.fetchedAt === null
                   ? 'The warning feed was not verified when saved.'

@@ -2,6 +2,7 @@ import { defineConfig, type Manifest } from 'vite';
 import react from '@vitejs/plugin-react';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { handleAlerts } from './server/router';
 
 // Follow static imports only: optional satellite code must not consume a field
 // user's bandwidth just because the app is preparing itself for offline use.
@@ -62,6 +63,23 @@ const offlineShell = {
   },
 };
 export default defineConfig({
-  plugins: [react(), offlineShell],
+  plugins: [
+    react(),
+    offlineShell,
+    {
+      name: 'official-warning-api',
+      configureServer(server) {
+        server.middlewares.use('/api/alerts', async (req, res) => {
+          const result = await handleAlerts(
+            new Request(`http://localhost/api/alerts${req.url === '/' ? '' : req.url}`, {
+              method: req.method,
+            }),
+          );
+          res.writeHead(result.status, Object.fromEntries(result.headers));
+          res.end(Buffer.from(await result.arrayBuffer()));
+        });
+      },
+    },
+  ],
   build: { target: 'es2022', manifest: true },
 });

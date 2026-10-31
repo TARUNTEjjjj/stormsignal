@@ -8,7 +8,8 @@ StormSignal is intended for public situational awareness and learning. It does n
 
 ## What makes it different
 
-- **Reach places quickly:** Chennai, Mumbai, New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
+- **Reach places quickly:** Chennai, Mumbai, Bhubaneswar (Odisha), New York City, Miami, Tokyo and London stay available as quick locations. Your saved places have a separate list. Worldwide place search supports locations beyond these shortcuts, subject to the geocoding provider's index; warning coverage is separate from forecast coverage.
+- **Read official bulletins across regions:** US NWS point warnings, India NDMA SACHET state/territory feeds, and participating national agencies through WMO SWIC. Indian bulletins show their original affected areas; they are not automatically warnings for the selected city. Missing or partial global coverage remains explicit.
 - **Inspect the sky:** timestamped NASA GIBS satellite layers, recent geostationary frames where coverage permits, and a global daily true-color view. Images represent their displayed observation time, not an instantaneous view of a street.
 - **Compare rather than conceal disagreement:** ECMWF IFS and NOAA GFS model forecasts. Differences between two models are not calibrated forecast probabilities.
 - **See the evidence:** forecast-based hazard indicators are separate from official alerts; imagery capture times and unavailable feeds remain visible.
@@ -44,19 +45,23 @@ Tests use fixtures and mocks where appropriate. Passing them does not prove that
 
 ## Architecture
 
-The app is a static React + TypeScript application built with Vite. Leaflet renders the map. Browser data adapters request public endpoints directly; there is no StormSignal account database or secret-bearing server in this release.
+The React + TypeScript interface is built with Vite. Leaflet renders the map. A Cloudflare Worker serves embedded static files and the fixed-source `/api/alerts` endpoint for India and WMO feeds, which do not permit direct browser access. Weather, imagery and NWS requests remain direct. There is no account database or paid API credential.
 
-| Area                                                      | Files                                                                         |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Provider validation, requests and data normalization      | `src/data.ts`, `src/types.ts`                                                 |
-| Transparent forecast-based hazard indicators              | `src/risk.ts`                                                                 |
-| Satellite layer selection and available observation times | `src/imagery.ts`                                                              |
-| Interactive satellite map and alert geometries            | `src/components/WeatherMap.tsx`                                               |
-| GDACS report retrieval and local distance filtering       | `src/disasters.ts`, `src/components/DisasterWatch.tsx`                        |
-| Self-contained emergency plan and preparedness            | `public/offline.html`, `public/preparedness.html`                             |
-| Connection policy and historical briefings                | `src/connectivity.ts`, `src/offline.ts`, `src/components/OfflineBriefing.tsx` |
-| Atomic offline shell and optional-download isolation      | `public/sw.js`, `vite.config.ts`, `src/components/OptionalPanel.tsx`          |
-| Unit tests                                                | `tests/`                                                                      |
+The warning gateway accepts validated coordinates/country/region metadata, never an arbitrary upstream URL. It uses bounded response sizes, deadlines and concurrent-request limits. Shared edge caching and ETag revalidation reduce repeated CAP downloads; failed revalidation never serves old warnings as current. Raw public feeds may remain cached for 24 hours only to support conditional revalidation; ordinary warning checks require revalidation after 60 seconds. The WMO source registry is cached for six hours and is not a live feed-health signal. User-specific warning responses have `Cache-Control: no-store`.
+
+| Area                                                        | Files                                                                                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Provider validation, requests and data normalization        | `src/data.ts`, `src/types.ts`                                                                |
+| Official warning gateway, CAP parsing and regional matching | `server/http.ts`, `server/cap.ts`, `server/india.ts`, `server/global.ts`, `server/router.ts` |
+| Worker hosting, embedded assets and artifact smoke checks   | `server/index.ts`, `scripts/`                                                                |
+| Transparent forecast-based hazard indicators                | `src/risk.ts`                                                                                |
+| Satellite layer selection and available observation times   | `src/imagery.ts`                                                                             |
+| Interactive satellite map and alert geometries              | `src/components/WeatherMap.tsx`                                                              |
+| GDACS report retrieval and local distance filtering         | `src/disasters.ts`, `src/components/DisasterWatch.tsx`                                       |
+| Self-contained emergency plan and preparedness              | `public/offline.html`, `public/preparedness.html`                                            |
+| Connection policy and historical briefings                  | `src/connectivity.ts`, `src/offline.ts`, `src/components/OfflineBriefing.tsx`                |
+| Atomic offline shell and optional-download isolation        | `public/sw.js`, `vite.config.ts`, `src/components/OptionalPanel.tsx`                         |
+| Unit tests                                                  | `tests/`                                                                                     |
 
 The map uses source-provided alert geometry when available. Some valid official alerts have no polygon; a missing outline does not invalidate their text. Location search results and forecast grids can differ from exact GPS coordinates.
 
@@ -66,21 +71,21 @@ GDACS regional reports refresh every 10 minutes while visible and online. The ad
 
 ## Coverage and limits
 
-| Feature                               | Coverage                                                     | Important limit                                                                                                              |
-| ------------------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Forecasts and model comparison        | Global forecast grids via Open-Meteo                         | Modeled estimates, not local instrument observations; resolution and update times vary.                                      |
-| Air quality                           | CAMS model output via Open-Meteo                             | Regional/global grid estimates; not a street-level air sensor.                                                               |
-| Near-real-time satellite              | Supported geostationary viewing areas                        | Capture delay, limb distortion, missing frames and viewing limits apply.                                                     |
-| Daily true-color satellite            | Global NASA GIBS product                                     | Clouds, polar night, orbital gaps and processing delays affect availability.                                                 |
-| In-app official warnings              | United States NWS coverage                                   | Other regions are explicitly marked unsupported and linked to an official service.                                           |
-| Regional disaster reports             | Retrieved GDACS cyclone, flood and wildfire reports          | Recent reports, not a complete global warning feed; 200-record retrieval cap and representative-point distance limits apply. |
-| Offline field kit and saved briefings | General preparation and explicitly saved, dated local copies | No new warnings offline. Local authorities' current instructions take precedence. No live shelter or evacuation routing.     |
+| Feature                               | Coverage                                                                 | Important limit                                                                                                                                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Forecasts and model comparison        | Global forecast grids via Open-Meteo                                     | Modeled estimates, not local instrument observations; resolution and update times vary.                                                                                                                         |
+| Air quality                           | CAMS model output via Open-Meteo                                         | Regional/global grid estimates; not a street-level air sensor.                                                                                                                                                  |
+| Near-real-time satellite              | Supported geostationary viewing areas                                    | Capture delay, limb distortion, missing frames and viewing limits apply.                                                                                                                                        |
+| Daily true-color satellite            | Global NASA GIBS product                                                 | Clouds, polar night, orbital gaps and processing delays affect availability.                                                                                                                                    |
+| In-app official warnings              | US NWS; Indian regional SACHET feeds; participating WMO SWIC authorities | Global coverage is incomplete. India is regional, not city-specific. Up to 10 Indian feed entries or 6 WMO source documents are checked; missing/unmapped feeds and invalid or absent expiry can omit warnings. |
+| Regional disaster reports             | Retrieved GDACS cyclone, flood and wildfire reports                      | Recent reports, not a complete global warning feed; 200-record retrieval cap and representative-point distance limits apply.                                                                                    |
+| Offline field kit and saved briefings | General preparation and explicitly saved, dated local copies             | No new warnings offline. Local authorities' current instructions take precedence. No live shelter or evacuation routing.                                                                                        |
 
 See [data sources and licensing](docs/data-sources.md) and [imagery details](docs/imagery.md). The app cannot guarantee notification delivery, availability, or detection of every hazard. Do not rely on it as your only warning channel.
 
 ### Hosting and traffic
 
-`npm run build` produces static files that can be hosted over HTTPS. Direct-browser requests depend on the providers' CORS policies. Open-Meteo's free API is for **non-commercial use** and currently requires fewer than **10,000 calls/day**, **5,000/hour**, and **600/minute**, with limits applied by IP and application. An open-source code license does not remove those service limits. Do not assume this deployment supports an arbitrary number of simultaneous users.
+`npm run build` produces the interface plus `dist/server/index.js`, a self-contained Worker with embedded assets. `npm run preview` exercises that Worker locally; `npm run dev` includes the warning API middleware. Publishing only static files will not provide the India/WMO endpoint. The retained Sites project ID keeps the existing public URL. Direct-browser requests still depend on the providers' CORS policies. Open-Meteo's free API is for **non-commercial use** and currently requires fewer than **10,000 calls/day**, **5,000/hour**, and **600/minute**, with limits applied by IP and application. An open-source code license does not remove those service limits. Do not assume this deployment supports an arbitrary number of simultaneous users.
 
 For a commercial or high-traffic deployment, arrange suitable provider access, review map tile policies, implement an appropriate server cache and rate limits, and measure capacity. Keep paid API credentials server-side; Vite environment variables are included in the browser bundle. This repository contains no paid credentials.
 

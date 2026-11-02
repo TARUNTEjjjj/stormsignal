@@ -1,6 +1,6 @@
 # StormSignal
 
-[Open the live website](https://stormsignal-weather.gardenroot512.chatgpt.site) · [Verification notes](docs/verification.md)
+[Open the live website](https://stormsignal-weather.pages.dev) · [Verification notes](docs/verification.md)
 
 Weather with evidence. An open-source weather workspace that puts forecasts, satellite imagery, model disagreement, and official warning coverage in one view.
 
@@ -47,9 +47,39 @@ node --import tsx scripts/check-live-alerts.ts --live # opt-in real-provider che
 
 Tests use fixtures and mocks where appropriate. Passing them does not prove that a third-party feed is presently reachable or that a forecast is accurate. Provider responses and visual flows also need live verification before each release.
 
+## Publish an update
+
+The existing Cloudflare Pages project is `stormsignal-weather`, with production
+branch `main`. Keep the project and canonical address stable. Use the owner's
+Cloudflare account; credentials must never be committed.
+
+```sh
+npm ci
+npm test
+npm run build
+npx wrangler@4.153.0 pages deploy pages-dist --project-name stormsignal-weather --branch main
+```
+
+This is a Wrangler Direct Upload project. A Git push alone does not publish the
+website. The Pages output includes the warning API; do not upload `dist/` or omit
+`_worker.js`. No database, application secret or additional resource binding is
+required. `ASSETS` is the built-in Pages static-file binding. API requests are
+subject to the account's Pages Functions limits; static files do not invoke it.
+
+### Browser data after the address change
+
+Saved places, settings, dated briefings, emergency-kit plans and offline caches
+belong to the website address where they were created. They are not automatically
+copied to this new address. Existing data remains in the previous website's
+browser storage. Before switching, download any needed text briefings and use
+**Export plan backup** or **Download offline HTML** in the old emergency kit.
+Use **Restore a plan backup** in the new kit, then save it on the device. Saved
+places and display preferences can be selected again. Do not clear the previous
+site's storage until the copies you need have been verified.
+
 ## Architecture
 
-The React + TypeScript interface is built with Vite. Leaflet renders the map. A Cloudflare Worker serves embedded static files and the fixed-source `/api/alerts` endpoint for India and WMO feeds, which do not permit direct browser access. Weather, imagery and NWS requests remain direct. There is no account database or paid API credential.
+The React + TypeScript interface is built with Vite. Leaflet renders the map. Cloudflare Pages serves the static interface, and a Pages Function handles the fixed-source `/api/alerts` endpoint for India and WMO feeds, which do not permit direct browser access. Weather, imagery and NWS requests remain direct. There is no account database or paid API credential.
 
 The warning gateway accepts validated coordinates/country/region metadata, never an arbitrary upstream URL. It uses bounded response sizes, deadlines and concurrent-request limits. Shared edge caching and ETag revalidation reduce repeated CAP downloads; failed revalidation never serves old warnings as current. Raw public feeds may remain cached for 24 hours only to support conditional revalidation; ordinary warning checks require revalidation after 60 seconds. The WMO source registry is cached for six hours and is not a live feed-health signal. User-specific warning responses have `Cache-Control: no-store`.
 
@@ -93,7 +123,7 @@ See [data sources and licensing](docs/data-sources.md) and [imagery details](doc
 
 ### Hosting and traffic
 
-`npm run build` produces the interface plus `dist/server/index.js`, a self-contained Worker with embedded assets. `npm run preview` exercises that Worker locally; `npm run dev` includes the warning API middleware. Publishing only static files will not provide the India/WMO endpoint. The retained Sites project ID keeps the existing public URL. Direct-browser requests still depend on the providers' CORS policies. Open-Meteo's free API is for **non-commercial use** and currently requires fewer than **10,000 calls/day**, **5,000/hour**, and **600/minute**, with limits applied by IP and application. An open-source code license does not remove those service limits. Do not assume this deployment supports an arbitrary number of simultaneous users.
+`npm run build` produces the deployable `pages-dist/` directory: static files, an advanced-mode `_worker.js` for the warning API, and `_routes.json` restricting Function invocations to `/api/*`. Static requests bypass Functions. The build excludes internal preview bundles and build metadata from the deployment. It also produces `dist/server/index.js`, a self-contained Worker with embedded assets for `npm run preview` and release verification; `npm run dev` includes the warning API middleware. Publishing only static files without the Pages Worker will not provide the India/WMO endpoint. Direct-browser requests still depend on the providers' CORS policies. Open-Meteo's free API is for **non-commercial use** and currently requires fewer than **10,000 calls/day**, **5,000/hour**, and **600/minute**, with limits applied by IP and application. An open-source code license does not remove those service limits. Do not assume this deployment supports an arbitrary number of simultaneous users.
 
 For a commercial or high-traffic deployment, arrange suitable provider access, review map tile policies, implement an appropriate server cache and rate limits, and measure capacity. Keep paid API credentials server-side; Vite environment variables are included in the browser bundle. This repository contains no paid credentials.
 

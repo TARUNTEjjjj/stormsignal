@@ -1,8 +1,9 @@
 node_modules/
 dist/
+pages-dist/
+.wrangler/
 .env
 .env.*
 !.env.example
 .DS_Store
-.openai/*.local.*
 *.log

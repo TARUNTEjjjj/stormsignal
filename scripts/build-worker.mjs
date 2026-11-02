@@ -1,7 +1,7 @@
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
-// Port the existing static application into the Sites single-ESM Worker contract.
+// Build a self-contained Worker for local preview and release verification.
 // Assets are embedded so this build requires no additional storage binding.
 const types = {
   '.html': 'text/html; charset=utf-8',
@@ -34,7 +34,6 @@ await collect();
 if (!assets['/index.html'] || !assets['/sw.js'] || !assets['/offline.html'])
   throw new Error('Missing required application assets');
 await mkdir('dist/server', { recursive: true });
-await mkdir('dist/.openai', { recursive: true });
 await build({
   entryPoints: ['server/index.ts'],
   outfile: 'dist/server/index.js',
@@ -59,5 +58,4 @@ await build({
     },
   ],
 });
-await writeFile('dist/.openai/hosting.json', await readFile('.openai/hosting.json'));
 console.log(`Worker built with ${Object.keys(assets).length} embedded static assets.`);

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build && node scripts/build-worker.mjs && node scripts/verify-build.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-worker.mjs && node scripts/verify-build.mjs && node scripts/build-pages.mjs && node scripts/verify-pages.mjs",
     "test": "tsx --test tests/*.test.ts",
     "preview": "node scripts/preview-worker.mjs",
     "typecheck": "tsc --noEmit"

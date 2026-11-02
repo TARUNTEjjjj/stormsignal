@@ -167,7 +167,7 @@ test('cancellation and expired updates suppress original and emit WMO exclusion 
   ]);
 });
 
-test('national work is bounded at20 unique documents and4 simultaneous requests', async () => {
+test('national work is bounded at 20 unique documents and 4 simultaneous requests', async () => {
   const docs = new Map(Array.from({ length: 25 }, (_, i) => [ph(i + 1), cap(i + 1)]));
   const h = harness(atom([ph(1), ...docs.keys()]), docs);
   const r = await h.fetch(manila);

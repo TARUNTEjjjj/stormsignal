@@ -1684,7 +1684,7 @@ export default function App() {
                   the map.
                 </p>
                 <a
-                  href="https://www.earthdata.nasa.gov/data/tools/gibs"
+                  href="https://nasa-gibs.github.io/gibs-api-docs/access-basics/"
                   target="_blank"
                   rel="noreferrer"
                 >

@@ -296,7 +296,7 @@ function ForecastChart({
   return (
     <>
       <div className="chart-tools">
-        <div className="segmented" aria-label="Chart metric">
+        <div className="segmented" role="group" aria-label="Chart metric">
           {(['temperature', 'precipitation', 'wind'] as const).map((m) => (
             <button
               key={m}
@@ -308,7 +308,7 @@ function ForecastChart({
             </button>
           ))}
         </div>
-        <div className="segmented compact" aria-label="Forecast duration">
+        <div className="segmented compact" role="group" aria-label="Forecast duration">
           {[24, 72].map((h) => (
             <button
               key={h}

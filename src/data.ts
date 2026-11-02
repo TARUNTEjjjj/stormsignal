@@ -467,7 +467,7 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
     return fetchInternationalAlerts(place, signal);
   const result = await requestJson(
     url(NWS, { point: `${location.latitude},${location.longitude}` }),
-    60_000,
+    30_000,
     signal,
   );
   const features = record(result.value).features;
@@ -569,7 +569,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
     admin: (place.admin ?? '').slice(0, 100),
     name: place.name.slice(0, 100),
   });
-  const response = await requestJson(`/api/alerts?${params}`, 60_000, signal);
+  const response = await requestJson(`/api/alerts?${params}`, 30_000, signal);
   const result = record(response.value);
   const fetchedAt = number(result.fetchedAt),
     now = Date.now();
@@ -578,7 +578,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
     !Array.isArray(result.alerts) ||
     result.alerts.length > 100 ||
     fetchedAt === null ||
-    fetchedAt > now + 5000 ||
+    fetchedAt > now + 60_000 ||
     (result.status === 'available' && now - fetchedAt > 120_000) ||
     !['point', 'region', 'country'].includes(String(result.scope)) ||
     typeof result.partial !== 'boolean'
@@ -636,7 +636,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
         !str(check.id, 80) ||
         !str(check.name, 200) ||
         (check.status === 'available' &&
-          (checkedAt === null || checkedAt > now + 5000 || now - checkedAt > 120000))
+          (checkedAt === null || checkedAt > now + 60_000 || now - checkedAt > 120000))
       )
         throw new WeatherDataError('The warning service returned incomplete source checks.');
       return {

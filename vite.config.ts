@@ -81,5 +81,5 @@ export default defineConfig({
       },
     },
   ],
-  build: { target: 'es2022', manifest: true },
+  build: { target: 'es2022', manifest: true, license: { fileName: 'third-party-licenses.md' } },
 });

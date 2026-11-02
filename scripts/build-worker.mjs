@@ -10,6 +10,7 @@ const types = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
+  '.md': 'text/markdown; charset=utf-8',
 };
 const assets = {};
 async function collect(dir = '') {

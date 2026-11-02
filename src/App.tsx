@@ -1698,8 +1698,9 @@ export default function App() {
                 <p>
                   Official bulletins: US NWS; direct PAGASA and BMKG CAP feeds; IMD Kolkata district
                   nowcasts; India NDMA SACHET regional feeds; and participating authorities through
-                  WMO SWIC. Global coverage is incomplete. Air quality is CAMS ENSEMBLE modeled data
-                  via Open-Meteo; it can miss local pollution spikes.
+                  WMO SWIC. Global coverage is incomplete. Air quality is CAMS modeled data via
+                  Open-Meteo (CAMS European ENSEMBLE in Europe, CAMS global forecasts elsewhere); it
+                  can miss local pollution spikes.
                 </p>
                 <a
                   href="https://www.weather.gov/documentation/services-web-api"

@@ -330,7 +330,7 @@ export function createGlobalAlertAdapter(request: RequestText) {
           ...base,
           status: 'unsupported',
           alerts: [],
-          fetchedAt: registry.fetchedAt,
+          fetchedAt: Date.now(),
           coverage:
             'No operating official CAP source for this country is listed in the connected WMO registry. Check the official authority. Missing warnings never mean safe conditions.',
         };

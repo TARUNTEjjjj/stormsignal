@@ -145,9 +145,12 @@ test('original CAP publisher timestamps override known incorrect WFS timestamps'
 
 test('unsupported countries return coverage limitation without querying a location', async () => {
   const h = harness();
+  const before = Date.now();
   const result = await h.fetch({ ...place, countryCode: 'ZZ' });
   assert.equal(result.status, 'unsupported');
   assert.equal(h.calls.length, 1);
+  // The check time is this support decision, not the age of the cached source registry.
+  assert.ok(result.fetchedAt >= before);
   assert.match(result.coverage, /Missing warnings never mean safe/);
 });
 

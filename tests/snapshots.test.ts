@@ -558,3 +558,18 @@ test('text export includes original source times, location, warning instructions
   assert.match(text, /internet required/);
   assert.doesNotMatch(text, /ACTIVE ALERT|ALL CLEAR/);
 });
+
+test('text export prints whole-second UTC times when real clocks carry milliseconds', () => {
+  const saved = NOW + 123;
+  const item = createBriefing(
+    place,
+    { ...forecast, fetchedAt: saved - 456, current: hour(saved - 1000) },
+    { ...alerts, fetchedAt: saved - 789 },
+    saved,
+  );
+  const text = briefingText(item, saved + 5000);
+  assert.match(text, /Saved: 2026-11-01 03:00:00 UTC \| Exported: 2026-11-01 03:00:05 UTC/);
+  assert.match(text, /Forecast retrieved: 2026-11-01 02:59:59 UTC/);
+  assert.match(text, /Warning feed retrieved: 2026-11-01 02:59:59 UTC/);
+  assert.doesNotMatch(text, /\d{2}:\d{2}:\d{2}\.\d+Z/);
+});

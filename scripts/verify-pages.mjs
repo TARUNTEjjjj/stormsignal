@@ -31,4 +31,23 @@ assert.equal((await check('/api/unknown')).status, 404);
 const headers = await readFile('pages-dist/_headers', 'utf8');
 assert.match(headers, /X-Content-Type-Options: nosniff/);
 assert.match(headers, /\/assets\/\*\s+Cache-Control: public, max-age=31536000, immutable/);
-console.log('Pages artifact: API validation, static parity, routing and output isolation passed.');
+
+const notices = await readFile('pages-dist/third-party-licenses.md', 'utf8');
+for (const name of [
+  'react',
+  'leaflet',
+  'lucide-react',
+  'fast-xml-parser',
+  '@nodable/entities',
+  'xml-naming',
+  'anynum',
+  'strnum',
+  'path-expression-matcher',
+  'is-unsafe',
+])
+  assert.ok(notices.includes(name), `Missing shipped dependency notice: ${name}`);
+assert.match(notices, /Copyright \(c\) 2026 Nodable/);
+assert.match(notices, /Permission is hereby granted, free of charge/);
+console.log(
+  'Pages artifact: API validation, static parity, routing, notices and output isolation passed.',
+);

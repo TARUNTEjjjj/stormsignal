@@ -1,6 +1,6 @@
 # Security
 
-StormSignal's current architecture is a static browser application using public data endpoints. It does not need provider secrets. No vulnerability response SLA is promised.
+StormSignal's current architecture is a static browser application using public data endpoints, plus a small Cloudflare Pages Function (`/api/alerts`) that reads fixed public warning feeds. It does not need provider secrets. No vulnerability response SLA is promised.
 
 ## Reporting
 
@@ -16,7 +16,7 @@ For an inaccurate active warning, contact the issuing weather authority and foll
 - Validate persisted local data and handle storage being disabled or full.
 - Do not cache private data or third-party map tiles in a service worker without reviewing their terms.
 - Do not put secret keys in `VITE_*` variables; they are public client code.
-- Recheck provider terms and permissions before introducing telemetry, push subscriptions, paid APIs or a server.
+- Recheck provider terms and permissions before introducing telemetry, push subscriptions, paid APIs, or new server endpoints or server-side provider requests beyond the existing `/api/alerts` gateway.
 - Use a Content Security Policy appropriate to the actual hosting environment and required providers. Avoid weakening a host policy without a concrete need.
 
 Report only tests actually run. A passing build or unit-test suite is not a security audit or certification for use in emergencies.

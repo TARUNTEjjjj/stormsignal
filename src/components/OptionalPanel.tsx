@@ -23,6 +23,10 @@ export default class OptionalPanel extends Component<Props, { failed: boolean }>
             This optional tool could not load. Your essential forecast, saved briefings, and
             emergency kit remain available. Live information still needs a working connection.
           </p>
+          <p>Once your connection returns, reload the dashboard to retry this download.</p>
+          <button className="secondary-button" onClick={() => location.reload()}>
+            Reload dashboard
+          </button>{' '}
           <button className="secondary-button" onClick={this.props.onUseEssentials}>
             Use data saver
           </button>{' '}

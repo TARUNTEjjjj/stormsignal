@@ -316,6 +316,10 @@ nav a svg {
   gap: 9px;
   color: #7d919f;
 }
+.search-area form:focus-within {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
 .search-area input {
   width: 100%;
   border: 0;

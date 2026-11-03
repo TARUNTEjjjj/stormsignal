@@ -1,6 +1,8 @@
 import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
+import { writeWorkerLicenses } from './worker-licenses.mjs';
+await writeWorkerLicenses();
 // Build a self-contained Worker for local preview and release verification.
 // Assets are embedded so this build requires no additional storage binding.
 const types = {
@@ -10,6 +12,7 @@ const types = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
+  '.md': 'text/markdown; charset=utf-8',
 };
 const assets = {};
 async function collect(dir = '') {

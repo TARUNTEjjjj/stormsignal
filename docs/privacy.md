@@ -1,6 +1,6 @@
 # Privacy and local data
 
-StormSignal serves its interface and a public-warning gateway through a Cloudflare Worker. This release has no StormSignal login, advertising, analytics SDK or app-operated account database. This does not mean browsing it is anonymous to its hosting or data providers.
+StormSignal's interface is served as static files by Cloudflare Pages, and a Cloudflare Pages Function provides its public-warning gateway (`/api/alerts`). This release has no StormSignal login, advertising, analytics SDK or app-operated account database. This does not mean browsing it is anonymous to its hosting or data providers.
 
 ## What leaves your browser
 

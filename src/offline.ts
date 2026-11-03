@@ -423,8 +423,9 @@ export function clearBriefings(storage: StorageAccess): BriefingResult {
     return { briefings: [], error: 'Browser storage could not be cleared.' };
   }
 }
+// Saved and retrieval times carry milliseconds; print whole seconds with an explicit zone.
 const utc = (value: number) =>
-  new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+  `${new Date(value).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 const numberText = (value: number | null, suffix: string) =>
   value === null ? 'unavailable' : `${value}${suffix}`;
 export function briefingText(briefing: OfflineBriefingData, now = Date.now()): string {

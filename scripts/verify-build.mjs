@@ -11,6 +11,7 @@ for (const path of [
   '/sw.js',
   '/icon.svg',
   '/manifest.webmanifest',
+  '/third-party-licenses.md',
 ]) {
   const response = await check(path);
   assert.equal(response.status, 200, path);

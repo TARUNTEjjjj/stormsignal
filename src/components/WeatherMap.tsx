@@ -174,7 +174,7 @@ export default function WeatherMap({ place, alerts, lowBandwidth, onSelect }: Pr
       opacity: 0.86,
       updateWhenIdle: true,
       keepBuffer: 1,
-      attribution: `<a href="https://www.earthdata.nasa.gov/centers/gibs" target="_blank" rel="noopener noreferrer">${source.attribution}</a>`,
+      attribution: `<a href="https://nasa-gibs.github.io/gibs-api-docs/access-basics/" target="_blank" rel="noopener noreferrer">${source.attribution}</a>`,
     });
     layer.on('tileerror', () => setTileError(true));
     layer.on('load', () => setLoading(false));

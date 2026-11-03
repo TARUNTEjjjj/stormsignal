@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import {
   clearRequestCache,
+  WeatherDataError,
   fetchAirQuality,
   fetchAlerts,
   fetchForecast,
@@ -21,9 +22,11 @@ const place: Place = {
   longitude: 80.27,
 };
 const originalFetch = globalThis.fetch;
+const originalNow = Date.now;
 beforeEach(() => clearRequestCache());
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  Date.now = originalNow;
   clearRequestCache();
 });
 const json = (value: unknown, status = 200) =>
@@ -289,6 +292,65 @@ test('international warnings keep the original server check time across client c
   const second = await fetchAlerts({ ...place, countryCode: 'JP' });
   assert.equal(first.fetchedAt, checked);
   assert.equal(second.fetchedAt, checked);
+});
+
+test('alert checks one minute apart reach the network again after a slow response', async () => {
+  let now = Date.now();
+  Date.now = () => now;
+  for (const target of [{ ...place, countryCode: 'US' }, place]) {
+    clearRequestCache();
+    let calls = 0;
+    globalThis.fetch = async (input) => {
+      calls++;
+      now += 400; // the response arrives after a short network delay
+      if (!String(input).startsWith('/api/alerts')) return json({ features: [] });
+      return json({
+        status: 'available',
+        alerts: [],
+        fetchedAt: now,
+        source: 'NDMA SACHET',
+        officialUrl: 'https://sachet.ndma.gov.in/',
+        scope: 'region',
+        scopeLabel: 'Tamil Nadu',
+        partial: true,
+        coverage: 'Regional feed is incomplete.',
+      });
+    };
+    const start = now;
+    await fetchAlerts(target);
+    now = start + 60_000;
+    await fetchAlerts(target);
+    assert.equal(calls, 2, target.countryCode);
+  }
+});
+
+test('international checks accept a device clock running a few seconds behind the server', async () => {
+  const ahead = Date.now() + 10_000;
+  globalThis.fetch = async () =>
+    json({
+      status: 'available',
+      alerts: [],
+      fetchedAt: ahead,
+      source: 'BMKG direct + WMO SWIC',
+      officialUrl: 'https://www.bmkg.go.id/peringatan-dini',
+      scope: 'point',
+      scopeLabel: 'Jakarta',
+      partial: true,
+      coverage: 'Incomplete coverage.',
+      checks: [
+        {
+          id: 'national',
+          name: 'BMKG CAP feed · direct',
+          url: 'https://www.bmkg.go.id/peringatan-dini',
+          status: 'available',
+          fetchedAt: ahead,
+          coverage: 'Partial nowcasts.',
+        },
+      ],
+    });
+  const result = await fetchAlerts({ ...place, name: 'Jakarta', countryCode: 'ID' });
+  assert.equal(result.fetchedAt, ahead);
+  assert.equal(result.checks?.[0].fetchedAt, ahead);
 });
 
 test('stale international checks and incomplete response shapes fail closed', async () => {
@@ -633,4 +695,22 @@ test('negative pollutant values do not appear as clean air', async () => {
   assert.equal(result.usAqi, null);
   assert.equal(result.pm25, null);
   assert.equal(result.pm10, 13);
+});
+
+test('a coordinate-only location requires country metadata without blaming an upstream outage', async () => {
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw Error('No upstream should be contacted');
+  };
+  await assert.rejects(
+    fetchAlerts({ ...place, countryCode: '', country: '', name: 'Selected point' }),
+    (error: unknown) => {
+      assert.ok(error instanceof WeatherDataError);
+      assert.equal(error.status, 400);
+      assert.match(error.message, /Choose a city.*No warning source was checked/);
+      return true;
+    },
+  );
+  assert.equal(called, false);
 });

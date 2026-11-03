@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import {
   clearRequestCache,
+  WeatherDataError,
   fetchAirQuality,
   fetchAlerts,
   fetchForecast,
@@ -694,4 +695,22 @@ test('negative pollutant values do not appear as clean air', async () => {
   assert.equal(result.usAqi, null);
   assert.equal(result.pm25, null);
   assert.equal(result.pm10, 13);
+});
+
+test('a coordinate-only location requires country metadata without blaming an upstream outage', async () => {
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw Error('No upstream should be contacted');
+  };
+  await assert.rejects(
+    fetchAlerts({ ...place, countryCode: '', country: '', name: 'Selected point' }),
+    (error: unknown) => {
+      assert.ok(error instanceof WeatherDataError);
+      assert.equal(error.status, 400);
+      assert.match(error.message, /Choose a city.*No warning source was checked/);
+      return true;
+    },
+  );
+  assert.equal(called, false);
 });

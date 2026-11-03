@@ -34,3 +34,28 @@ test('warning route allows only reads and preserves bounded region metadata', as
   assert.equal(place.admin, 'Odisha');
   assert.equal(place.latitude, 20.2724);
 });
+
+test('country-less map and GPS points are input limitations, not provider outages', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => {
+    called = true;
+    throw Error('No upstream should be contacted');
+  };
+  try {
+    for (const country of ['', '&country=']) {
+      const response = await handleAlerts(
+        new Request(`https://stormsignal.invalid/api/alerts?lat=13.08&lon=80.27${country}`),
+      );
+      assert.equal(response.status, 400);
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      const result = await response.json();
+      assert.equal(result.error, true);
+      assert.match(result.reason, /Choose a city.*No warning source was checked/);
+      assert.equal(result.status, undefined); // Neither an all-clear nor "unsupported".
+    }
+    assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

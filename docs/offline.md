@@ -60,3 +60,6 @@ Hosted offline caching depends on a successful earlier visit, completed service-
 Opening a local `file://` HTML document differs between browsers and mobile file viewers. It may not share local storage with the hosted website, and local saves may be blocked or handled differently for each file. The personalized HTML includes the plan so it can still be read without that storage. Test the actual downloaded file on the intended device; use Print / save PDF or paper if the file viewer does not support it. Download an updated copy after changing your plan.
 
 Briefings, plan records and downloaded files are not encrypted by StormSignal. They can reveal selected coordinates, contacts and meeting details to anyone who can access the browser profile or file. Keep copies private, delete obsolete downloads separately, and use browser site-data controls to remove local records and cached files. See [Privacy and local data](privacy.md).
+
+
+If an optional map or regional-report download fails, the essentials remain usable. After the connection returns, use **Reload dashboard** in that panel to retry. Browsers can remember a failed module download for the current page, so switching panels alone may not retry it. Saved briefings and explicitly saved emergency-kit records stay on the device.

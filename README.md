@@ -101,7 +101,7 @@ For BMKG warnings, up to six WMO-linked official English copies are optionally c
 | Atomic offline shell and optional-download isolation        | `public/sw.js`, `vite.config.ts`, `src/components/OptionalPanel.tsx`                                                                                              |
 | Unit tests                                                  | `tests/`                                                                                                                                                          |
 
-The map uses source-provided alert geometry when available. Some valid official alerts have no polygon; a missing outline does not invalidate their text. Location search results and forecast grids can differ from exact GPS coordinates.
+The map uses source-provided alert geometry when available. Some valid official alerts have no polygon; a missing outline does not invalidate their text. Location search results and forecast grids can differ from exact GPS coordinates. A GPS fix or map click has no verified country metadata, so official warnings ask you to select a city from search or quick locations; no warning source is checked for an unidentified country. This is not an unsupported-country result or an all-clear.
 
 In Full workspace, supported alert feeds are checked every minute while the dashboard is visible and online. Weather panels refresh every 15 minutes, with bounded in-memory caches; returning to the visible dashboard requests another refresh. Satellite metadata has its own refresh cadence. Data saver requests essentials on load, location change, reconnection or deliberate refresh; it does not poll. A warning check older than two minutes is shown as needing refresh, rather than continuing to claim a current warning status. Fetch time is not a provider model-run or observation time.
 
@@ -134,3 +134,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Improvements to alert coverage, accessib
 ## License
 
 Original application code is available under the [MIT license](LICENSE). Weather data, imagery, map tiles, provider names and third-party libraries retain their respective terms and attribution requirements. MIT licensing of the code is not a redistribution license for every displayed dataset.
+
+
+Release builds include `/third-party-licenses.md` for both the browser bundles and the warning gateway, including their emitted transitive dependencies. The gateway notice is derived from the bundle metadata and installed package licenses; the upstream MIT notice omitted from the published `@nodable/entities@3.1.0` package is preserved under `scripts/licenses/`.

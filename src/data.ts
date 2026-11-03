@@ -463,6 +463,11 @@ function alertGeometry(value: unknown): unknown | null {
 export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<AlertResult> {
   const location = coordinates(place);
   const code = place.countryCode.toUpperCase();
+  if (!code)
+    throw new WeatherDataError(
+      'This point has no country information. Choose a city from search or quick locations to check official warnings. No warning source was checked.',
+      400,
+    );
   if (!['US', 'PR', 'VI', 'GU', 'AS', 'MP'].includes(code))
     return fetchInternationalAlerts(place, signal);
   const result = await requestJson(

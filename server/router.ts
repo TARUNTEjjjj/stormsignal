@@ -57,6 +57,15 @@ export async function handleAlerts(request: Request): Promise<Response> {
       { status: 400, headers },
     );
   }
+  if (!place.countryCode)
+    return new Response(
+      JSON.stringify({
+        error: true,
+        reason:
+          'This point has no country information. Choose a city from search or quick locations to check official warnings. No warning source was checked.',
+      }),
+      { status: 400, headers },
+    );
   const controller = new AbortController();
   const onAbort = () => controller.abort(request.signal.reason);
   request.signal.addEventListener('abort', onAbort, { once: true });

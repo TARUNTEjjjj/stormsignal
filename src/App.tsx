@@ -63,6 +63,7 @@ import { deriveHazards, getOutlook, FORECAST_STALE_MS } from './risk';
 import { localWarningSources, warningSourceFallback } from './warning-sources';
 import { value, finite, localTime, age, readPlaces, chartPaths, modelSpread } from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
+import { placeResourceKey, nextSearchIndex } from './place-navigation';
 
 const PRESETS: Place[] = [
   {
@@ -185,7 +186,7 @@ function useResource<T>(
   loader: (p: Place, s?: AbortSignal) => Promise<T>,
   enabled = true,
 ): Resource<T> {
-  const key = `${place.latitude},${place.longitude},${place.countryCode}`;
+  const key = placeResourceKey(place);
   const [state, setState] = useState<Resource<T> & { key: string; loader: typeof loader }>({
     data: null,
     loading: true,
@@ -219,7 +220,7 @@ function useResource<T>(
       active = false;
       controller.abort();
     };
-  }, [place.latitude, place.longitude, place.countryCode, revision, loader, enabled]);
+  }, [key, revision, loader, enabled]);
   return enabled && state.key === key && state.loader === loader
     ? state
     : { data: null, loading: enabled, error: null };
@@ -462,8 +463,37 @@ export default function App() {
   const [results, setResults] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [searchIndex, setSearchIndex] = useState(-1);
   const [mobileNav, setMobileNav] = useState(false);
   const [narrow, setNarrow] = useState(window.innerWidth <= 800);
+  const navigationRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerOpen = narrow && mobileNav;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const drawer = navigationRef.current;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    drawer?.querySelector<HTMLButtonElement>('.mobile-close')?.focus();
+    const keys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setMobileNav(false); }
+      if (event.key !== 'Tab' || !drawer) return;
+      const items = [...drawer.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), summary')]
+        .filter((element) => element.getClientRects().length > 0);
+      const first = items[0], last = items.at(-1);
+      if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) {
+        event.preventDefault(); first?.focus();
+      }
+    };
+    document.addEventListener('keydown', keys);
+    return () => {
+      document.removeEventListener('keydown', keys);
+      document.body.style.overflow = oldOverflow;
+      if (menuButtonRef.current?.getClientRects().length) menuButtonRef.current.focus();
+    };
+  }, [drawerOpen]);
   const [active, setActive] = useState('overview');
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>(() => {
     try {
@@ -535,6 +565,10 @@ export default function App() {
   }, []);
   const alerted = useRef(new Set<string>());
   const searchArea = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (searchIndex >= 0) searchArea.current?.querySelector(`#city-option-${searchIndex}`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [searchIndex]);
   const forecast = useResource<Forecast>(
     place,
     revision,
@@ -607,6 +641,8 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
   useEffect(() => {
+    setSearchIndex(-1);
+    setSearchError('');
     if (!policy.essentials || query.trim().length < 2) {
       setResults([]);
       setSearchError('');
@@ -764,11 +800,15 @@ export default function App() {
   ] as const;
   return (
     <div className={`app-shell ${lowBandwidth ? 'field-mode' : ''}`}>
-      <a className="skip-link" href="#main">
+      <a className="skip-link" href="#main" inert={drawerOpen}>
         Skip to weather dashboard
       </a>
       <aside
+        ref={navigationRef}
         id="side-menu"
+        role={drawerOpen ? 'dialog' : undefined}
+        aria-modal={drawerOpen || undefined}
+        aria-label={drawerOpen ? 'Navigation' : undefined}
         inert={narrow && !mobileNav}
         className={`sidebar ${mobileNav ? 'open' : ''}`}
       >
@@ -895,9 +935,10 @@ export default function App() {
           </a>
         </div>
       </aside>
-      <div className="workspace">
+      <div className="workspace" inert={drawerOpen}>
         <header className="topbar">
           <button
+            ref={menuButtonRef}
             className="mobile-menu icon-button"
             aria-label="Open navigation"
             aria-controls="side-menu"
@@ -914,13 +955,19 @@ export default function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!searching && results[0]) selectPlace(results[0]);
+                const selected = results[searchIndex < 0 ? 0 : searchIndex];
+                if (!searching && selected) selectPlace(selected);
               }}
               role="search"
             >
               <Search size={17} />
               <input
                 aria-label="Search any city"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={query.trim().length >= 2}
+                aria-controls="city-search-results"
+                aria-activedescendant={results[searchIndex] ? `city-option-${searchIndex}` : undefined}
                 value={query}
                 placeholder="Search any city…"
                 disabled={!policy.essentials}
@@ -929,8 +976,12 @@ export default function App() {
                     ? 'Search needs a connection. Use saved or quick locations instead.'
                     : undefined
                 }
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => { setQuery(e.target.value); setResults([]); setSearchIndex(-1); }}
                 onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSearchIndex((index) => nextSearchIndex(index, results.length, e.key));
+                  }
                   if (e.key === 'Escape') {
                     setQuery('');
                     setResults([]);
@@ -944,8 +995,11 @@ export default function App() {
               <div className="search-results" aria-live="polite">
                 {searching && <p>Searching places…</p>}
                 {searchError && <p>{searchError}</p>}
-                {results.map((p) => (
-                  <button key={p.id} onClick={() => selectPlace(p)}>
+                <div id="city-search-results" role="listbox" aria-label="Matching cities">
+                {results.map((p, index) => (
+                  <button key={p.id} id={`city-option-${index}`} role="option"
+                    aria-selected={searchIndex === index} tabIndex={-1}
+                    onClick={() => selectPlace(p)}>
                     <MapPin size={16} />
                     <span>
                       {p.name}
@@ -954,6 +1008,7 @@ export default function App() {
                     <ArrowUpRight size={14} />
                   </button>
                 ))}
+                </div>
               </div>
             )}
           </div>

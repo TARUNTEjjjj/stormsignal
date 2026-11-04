@@ -360,7 +360,8 @@ kbd {
   padding: 13px;
   border-bottom: 1px solid #2d3c47;
 }
-.search-results button:hover {
+.search-results button:hover,
+.search-results button[aria-selected='true'] {
   background: #263e45;
 }
 .search-results button span {

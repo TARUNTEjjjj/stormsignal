@@ -25,6 +25,8 @@ StormSignal is intended for public situational awareness and learning. It does n
 
 ## Run locally
 
+City search supports Arrow Up/Down, Enter and Escape. Mobile navigation keeps keyboard focus inside the drawer, closes with Escape and restores focus to its opener. A changed city name or administrative region starts a new warning lookup even when the coordinates are unchanged.
+
 Use Node.js 22.12 or newer (Node 24 LTS also works with the build toolchain).
 
 ```sh

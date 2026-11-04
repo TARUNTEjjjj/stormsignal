@@ -21,7 +21,7 @@ const env = {
 };
 const check = (path, options) =>
   worker.fetch(new Request(`https://stormsignal.invalid${path}`, options), env);
-const invalid = await check('/api/alerts?lat=bad&lon=0');
+const invalid = await check('/api/alerts?lat=bad&lon=0&country=US');
 assert.equal(invalid.status, 400);
 assert.match(invalid.headers.get('Content-Type'), /application\/json/);
 assert.equal(invalid.headers.get('Cache-Control'), 'no-store');
@@ -44,8 +44,14 @@ for (const name of [
   'strnum',
   'path-expression-matcher',
   'is-unsafe',
-])
-  assert.ok(notices.includes(name), `Missing shipped dependency notice: ${name}`);
+]) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  assert.match(
+    notices,
+    new RegExp(`^## ${esc}(?: - |@)`, 'm'),
+    `Missing shipped dependency notice: ${name}`,
+  );
+}
 assert.match(notices, /Copyright \(c\) 2026 Nodable/);
 assert.match(notices, /Permission is hereby granted, free of charge/);
 console.log(

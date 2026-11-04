@@ -44,8 +44,14 @@ for (const name of [
   'strnum',
   'path-expression-matcher',
   'is-unsafe',
-])
-  assert.ok(notices.includes(name), `Missing shipped dependency notice: ${name}`);
+]) {
+  const esc = name.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  assert.match(
+    notices,
+    new RegExp(`^## ${esc}(?: - |@)`, 'm'),
+    `Missing shipped dependency notice: ${name}`,
+  );
+}
 assert.match(notices, /Copyright \(c\) 2026 Nodable/);
 assert.match(notices, /Permission is hereby granted, free of charge/);
 console.log(

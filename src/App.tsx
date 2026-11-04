@@ -18,7 +18,6 @@ import {
   Droplets,
   ExternalLink,
   Eye,
-  Code2,
   Globe2,
   Layers,
   LocateFixed,
@@ -930,9 +929,6 @@ export default function App() {
             <i className="dot mint" /> Open data. Clear limits.
           </div>
           <p>Independent situational awareness. Always follow local authorities.</p>
-          <a href="https://github.com/TARUNTEjjjj/stormsignal" target="_blank" rel="noreferrer">
-            <Code2 size={15} /> Open-source project <ArrowUpRight size={13} />
-          </a>
         </div>
       </aside>
       <div className="workspace" inert={drawerOpen}>
@@ -1784,9 +1780,14 @@ export default function App() {
               <div>
                 <p>
                   Signals use fixed screening thresholds, not a validated impact model. Terrain,
-                  drainage, buildings, vulnerability, and local warnings determine actual risk. See
-                  the open-source risk module for exact thresholds. Model disagreement is not a
-                  probability of danger.
+                  drainage, buildings, vulnerability, and local warnings determine actual risk.
+                  Model disagreement is not a probability of danger.
+                </p>
+                <p>
+                  Elevated / high screening thresholds: hourly rain 5 / 15 mm; wind gusts 50 / 75
+                  km/h; feels-like temperature 35 / 40 °C; air temperature −5 / −15 °C; UV index 6 / 8.
+                  Thunderstorm forecast code 95 is elevated; codes 96 and 99 are high. These are
+                  application indicators, not official warning levels or safe limits.
                 </p>
                 <p>
                   City search uses GeoNames via Open-Meteo. Searches, selected coordinates, and your
@@ -1816,13 +1817,6 @@ export default function App() {
                   availability guarantee. Data gaps never mean safety. Use local emergency
                   authorities for decisions.
                 </p>
-                <a
-                  href="https://github.com/TARUNTEjjjj/stormsignal/blob/main/docs/data-sources.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Read data licenses, coverage and limitations <ArrowUpRight size={13} />
-                </a>
               </div>
             </details>
           </section>
@@ -1834,9 +1828,6 @@ export default function App() {
               <Radio size={16} /> stormsignal{' '}
               <small>Independent weather situational awareness</small>
             </span>
-            <a href="https://github.com/TARUNTEjjjj/stormsignal" target="_blank" rel="noreferrer">
-              Built in the open <Code2 size={14} />
-            </a>
           </footer>
         </main>
       </div>

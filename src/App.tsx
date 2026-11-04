@@ -1352,15 +1352,19 @@ export default function App() {
                       <strong>
                         {alerts.loading
                           ? 'Checking official alert coverage…'
-                          : alerts.error
-                            ? 'Alert feed unavailable'
-                            : alerts.data?.status === 'available'
-                              ? alerts.data.source
-                              : 'Official feed not integrated here'}
+                          : !place.countryCode
+                            ? 'Official warnings not checked for this point'
+                            : alerts.error
+                              ? 'Alert feed unavailable'
+                              : alerts.data?.status === 'available'
+                                ? alerts.data.source
+                                : 'Official feed not integrated here'}
                       </strong>
                       <p>
-                        {alerts.data?.coverage ||
-                          'Do not assume there are no warnings when this feed is unavailable.'}
+                        {!place.countryCode
+                          ? 'Choose a named city from search or quick locations to check official warnings. This is not an all-clear.'
+                          : alerts.data?.coverage ||
+                            'Do not assume there are no warnings when this feed is unavailable.'}
                       </p>
                     </div>
                   </div>

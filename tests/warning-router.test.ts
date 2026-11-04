@@ -18,6 +18,11 @@ test('warning route validates location inputs without making upstream requests',
     );
     assert.equal(result.status, 400, query);
     assert.equal(result.headers.get('Cache-Control'), 'no-store');
+    assert.equal(
+      (await result.json()).reason,
+      'Choose a valid location to check official warnings.',
+      query,
+    );
   }
 });
 test('warning route allows only reads and preserves bounded region metadata', async () => {

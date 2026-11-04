@@ -21,7 +21,7 @@ const env = {
 };
 const check = (path, options) =>
   worker.fetch(new Request(`https://stormsignal.invalid${path}`, options), env);
-const invalid = await check('/api/alerts?lat=bad&lon=0');
+const invalid = await check('/api/alerts?lat=bad&lon=0&country=US');
 assert.equal(invalid.status, 400);
 assert.match(invalid.headers.get('Content-Type'), /application\/json/);
 assert.equal(invalid.headers.get('Cache-Control'), 'no-store');

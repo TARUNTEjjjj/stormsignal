@@ -29,7 +29,7 @@ const conditional = await check('/offline.html', {
   headers: { 'If-None-Match': kit.headers.get('ETag') },
 });
 assert.equal(conditional.status, 304);
-assert.equal((await check('/api/alerts?lat=bad&lon=0')).status, 400);
+assert.equal((await check('/api/alerts?lat=bad&lon=0&country=US')).status, 400);
 assert.equal((await check('/api/alerts', { method: 'POST' })).status, 405);
 assert.equal((await check('/missing')).status, 404);
 assert.equal((await check('/server/index.js')).status, 404);

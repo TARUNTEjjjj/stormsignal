@@ -142,12 +142,41 @@ export function domainUrl(source: ImagerySource, now = Date.now()): string {
   // GIBS' CGI requires literal ISO separators in TIME (percent-encoded ':'/'/' return 400).
   return `${NASA}/wmts.cgi?${new URLSearchParams({ SERVICE: 'WMTS', REQUEST: 'DescribeDomains', VERSION: '1.0.0', LAYER: source.id, TILEMATRIXSET: source.matrix })}&TIME=${start}/${end}`;
 }
+const MAX_METADATA_BYTES = 200_000;
+async function readMetadata(response: Response): Promise<string> {
+  if (Number(response.headers.get('content-length')) > MAX_METADATA_BYTES) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error('Imagery metadata exceeded the size limit.');
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_METADATA_BYTES) throw new Error('Imagery metadata exceeded the size limit.');
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 const domainCache = new Map<string, { at: number; frames: string[] }>();
 export async function fetchImageryFrames(
   source: ImagerySource,
   signal?: AbortSignal,
   force = false,
 ): Promise<string[]> {
+  signal?.throwIfAborted();
   const cached = domainCache.get(source.id);
   if (!force && cached && Date.now() - cached.at < 5 * 60_000) return cached.frames;
   const controller = new AbortController();
@@ -161,10 +190,12 @@ export async function fetchImageryFrames(
   }, 15_000);
   try {
     const response = await fetch(domainUrl(source), { signal: controller.signal });
-    if (!response.ok) throw new Error(`NASA imagery metadata unavailable (${response.status}).`);
-    const length = Number(response.headers.get('content-length'));
-    if (length > 200_000) throw new Error('Imagery metadata exceeded the size limit.');
-    const frames = parseDomainTimes(await response.text(), source);
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      throw new Error(`NASA imagery metadata unavailable (${response.status}).`);
+    }
+    const frames = parseDomainTimes(await readMetadata(response), source);
+    signal?.throwIfAborted();
     if (!frames.length) throw new Error('NASA has not advertised recent imagery for this layer.');
     domainCache.set(source.id, { at: Date.now(), frames });
     return frames;

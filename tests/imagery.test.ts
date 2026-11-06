@@ -128,3 +128,62 @@ test('imagery metadata cancelled by the caller still rejects as an abort', async
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
 });
+
+test('an already-cancelled imagery request cannot receive cached frames', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  let requests = 0;
+  globalThis.fetch = (async () => {
+    requests++;
+    return new Response(`<Domain>${today}</Domain>`);
+  }) as typeof fetch;
+  assert.deepEqual(await fetchImageryFrames(DAILY_IMAGERY, undefined, true), [today]);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(fetchImageryFrames(DAILY_IMAGERY, controller.signal), {
+    name: 'AbortError',
+  });
+  assert.equal(requests, 1);
+});
+
+test('imagery metadata enforces the byte limit on chunked UTF-8 and cancels unread data', async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const encoder = new TextEncoder();
+  let cancelled = false;
+  globalThis.fetch = (async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`<Domain>${today}</Domain>`));
+          // Fewer than 200,000 characters, but more than 200,000 UTF-8 bytes.
+          controller.enqueue(encoder.encode('é'.repeat(100_001)));
+          controller.enqueue(encoder.encode('unread tail'));
+          controller.close();
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    )) as typeof fetch;
+  await assert.rejects(
+    fetchImageryFrames(DAILY_IMAGERY, undefined, true),
+    /Imagery metadata exceeded the size limit/,
+  );
+  assert.equal(cancelled, true);
+});
+
+test('rejected imagery responses cancel their unread body', async () => {
+  for (const options of [{ status: 503 }, { headers: { 'content-length': '200001' } }]) {
+    let cancelled = false;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        options,
+      )) as typeof fetch;
+    await assert.rejects(fetchImageryFrames(DAILY_IMAGERY, undefined, true));
+    assert.equal(cancelled, true);
+  }
+});

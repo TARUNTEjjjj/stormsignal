@@ -1,6 +1,6 @@
-import type { AlertResult, Place, WeatherAlert } from '../src/types';
-import { activeCapRecords, parseCap, parseRss, type CapDocument } from './cap';
-import { requestText } from './http';
+import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
+import { activeCapRecords, parseCap, parseRss, type CapDocument } from './cap.ts';
+import { requestText } from './http.ts';
 
 const BASE = 'https://sachet.ndma.gov.in/cap_public_website/';
 const OFFICIAL = 'https://sachet.ndma.gov.in/';

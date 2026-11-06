@@ -1,9 +1,9 @@
-import type { AlertResult, AlertSourceCheck, Place, WeatherAlert } from '../src/types';
-import { fetchGlobalAlerts } from './global';
-import { fetchIndiaAlerts } from './india';
-import { fetchNationalAlerts } from './national';
-import { fetchKolkataAlerts, supportsKolkata } from './kolkata';
-import { warningSourceFallback } from '../src/warning-sources';
+import type { AlertResult, AlertSourceCheck, Place, WeatherAlert } from '../src/types.ts';
+import { fetchGlobalAlerts } from './global.ts';
+import { fetchIndiaAlerts } from './india.ts';
+import { fetchNationalAlerts } from './national.ts';
+import { fetchKolkataAlerts, supportsKolkata } from './kolkata.ts';
+import { warningSourceFallback } from '../src/warning-sources.ts';
 
 type SourceResult = AlertResult & { excludedCapKeys?: string[]; revokedCapKeys?: string[] };
 type Loader = (place: Place, signal?: AbortSignal) => Promise<SourceResult>;

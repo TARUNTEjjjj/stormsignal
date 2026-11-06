@@ -496,6 +496,8 @@ export default function App() {
       !notifications ||
       !policy.polling ||
       !alertsRecent ||
+      alerts.loading ||
+      alerts.error ||
       !alerts.data ||
       alerts.data.status !== 'available' ||
       alerts.data.partial ||
@@ -517,7 +519,15 @@ export default function App() {
         setToast('Notifications are unavailable in this browser.');
       }
     }
-  }, [notifications, alerts.data, place.name, policy.polling, alertsRecent]);
+  }, [
+    notifications,
+    alerts.data,
+    alerts.loading,
+    alerts.error,
+    place.name,
+    policy.polling,
+    alertsRecent,
+  ]);
   function changeConnectionMode(mode: ConnectionMode) {
     setConnectionMode(mode);
     setQuery('');

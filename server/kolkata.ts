@@ -1,6 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { AlertResult, Place, WeatherAlert } from '../src/types';
-import { requestText, type TextOptions, type TextResult } from './http';
+import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
+import { requestText, type TextOptions, type TextResult } from './http.ts';
 
 // Public RSS endpoint documented by IMD's API list. The authenticated JSON API is not used.
 const FEED = 'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php';

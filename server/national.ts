@@ -1,8 +1,8 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { AlertResult, Place, WeatherAlert } from '../src/types';
-import { activeCapRecords, parseCap, parseRss, type CapArea, type CapDocument } from './cap';
-import { capPolygonContains } from './global';
-import { requestText, type TextOptions, type TextResult } from './http';
+import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
+import { activeCapRecords, parseCap, parseRss, type CapArea, type CapDocument } from './cap.ts';
+import { capPolygonContains } from './global.ts';
+import { requestText, type TextOptions, type TextResult } from './http.ts';
 
 type RequestText = (url: string, options?: TextOptions) => Promise<TextResult>;
 export interface NationalAlertResult extends AlertResult {

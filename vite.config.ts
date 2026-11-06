@@ -2,7 +2,7 @@ import { defineConfig, type Manifest } from 'vite';
 import react from '@vitejs/plugin-react';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { handleAlerts } from './server/router';
+import { handleAlerts } from './server/router.ts';
 
 // Follow static imports only: optional satellite code must not consume a field
 // user's bandwidth just because the app is preparing itself for offline use.

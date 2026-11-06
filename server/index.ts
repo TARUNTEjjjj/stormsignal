@@ -1,5 +1,5 @@
 import assets from 'stormsignal:assets';
-import { handleAlerts } from './router';
+import { handleAlerts } from './router.ts';
 
 const aliases: Record<string, string> = {
   '/': '/index.html',

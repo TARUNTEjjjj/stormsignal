@@ -1,6 +1,6 @@
-import type { AlertResult, Place, WeatherAlert } from '../src/types';
-import { activeCapRecords, parseCap, type CapArea, type CapDocument, type CapInfo } from './cap';
-import { requestText, type TextOptions, type TextResult } from './http';
+import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
+import { activeCapRecords, parseCap, type CapArea, type CapDocument, type CapInfo } from './cap.ts';
+import { requestText, type TextOptions, type TextResult } from './http.ts';
 
 const ORIGIN = 'https://severeweather.wmo.int';
 const SOURCES = `${ORIGIN}/json/sources.json`;

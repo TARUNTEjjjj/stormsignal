@@ -1,4 +1,4 @@
-import { handleAlerts } from './router';
+import { handleAlerts } from './router.ts';
 
 interface PagesEnvironment {
   ASSETS: { fetch(request: Request): Promise<Response> };

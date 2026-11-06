@@ -1,8 +1,8 @@
-import type { Place } from '../src/types';
-import { fetchIndiaAlerts } from './india';
-import { fetchGlobalAlerts } from './global';
-import { fetchLocalAlerts } from './local-alerts';
-import { supportsKolkata } from './kolkata';
+import type { Place } from '../src/types.ts';
+import { fetchIndiaAlerts } from './india.ts';
+import { fetchGlobalAlerts } from './global.ts';
+import { fetchLocalAlerts } from './local-alerts.ts';
+import { supportsKolkata } from './kolkata.ts';
 
 export function alertPlace(url: URL): Place {
   const p = url.searchParams;

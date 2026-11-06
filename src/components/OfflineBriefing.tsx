@@ -324,6 +324,7 @@ export default function OfflineBriefing({
                             month: 'short',
                             hour: '2-digit',
                             minute: '2-digit',
+                            timeZoneName: 'short',
                           })}
                         </th>
                         <td>{value(hour.temperature)}</td>

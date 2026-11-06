@@ -1,4 +1,4 @@
-import type { Place } from './types';
+import type { Place } from './types.ts';
 
 export interface WarningSourceLink {
   label: string;

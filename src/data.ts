@@ -158,7 +158,9 @@ async function requestJson(target: string, ttl: number, signal?: AbortSignal): P
       referrerPolicy: 'no-referrer',
     });
     if (!response.ok && target.startsWith('/api/alerts')) {
-      const failure = record(await boundedJson(response));
+      // A gateway or static host can answer with an HTML or empty error page.
+      // Keep the warning-specific message and status instead of a parse error.
+      const failure = record(await boundedJson(response).catch(() => null));
       throw new WeatherDataError(
         str(failure.reason, 400) || 'Official warning sources could not be checked.',
         response.status,

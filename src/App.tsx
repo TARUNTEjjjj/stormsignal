@@ -63,6 +63,7 @@ import { localWarningSources, warningSourceFallback } from './warning-sources';
 import { value, finite, localTime, age, readPlaces, chartPaths, modelSpread } from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 import { placeResourceKey, nextSearchIndex } from './place-navigation';
+import { focusableControls } from './focus-trap';
 import {
   currentResource,
   loadResource,
@@ -458,8 +459,7 @@ export default function App() {
     const keys = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); setMobileNav(false); }
       if (event.key !== 'Tab' || !drawer) return;
-      const items = [...drawer.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), summary')]
-        .filter((element) => element.getClientRects().length > 0);
+      const items = focusableControls(drawer);
       const first = items[0], last = items.at(-1);
       if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
         event.preventDefault(); last?.focus();

@@ -14,12 +14,57 @@ interface SourceSpec {
   load: Loader;
 }
 
-export function createLocalAlertAdapter(dependencies: {
-  national: Loader;
-  global: Loader;
-  kolkata: Loader;
-  india: Loader;
-}) {
+/**
+ * Each source must settle before the gateway's 18-second deadline (router.ts). Otherwise one
+ * slow feed aborts the whole check and discards the other source's verified warnings. This is
+ * longer than the direct national (14 s) and WMO (16 s) checks' own budgets.
+ */
+export const SOURCE_DEADLINE_MS = 17_000;
+
+/** Run one source under its own deadline; the caller's cancellation still applies. */
+async function bounded(
+  load: Loader,
+  place: Place,
+  signal: AbortSignal | undefined,
+  deadlineMs: number,
+): Promise<SourceResult> {
+  const controller = new AbortController();
+  const stop = () => controller.abort(signal?.reason);
+  if (signal?.aborted) stop();
+  signal?.addEventListener('abort', stop, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new Error('The warning source did not answer in time.')),
+    deadlineMs,
+  );
+  let release = () => {};
+  // A loader that ignores its signal still settles at the deadline.
+  const expired = new Promise<never>((_resolve, reject) => {
+    const fail = () => reject(controller.signal.reason);
+    controller.signal.addEventListener('abort', fail, { once: true });
+    release = () => controller.signal.removeEventListener('abort', fail);
+  });
+  try {
+    return await Promise.race([load(place, controller.signal), expired]);
+  } finally {
+    clearTimeout(timer);
+    release();
+    signal?.removeEventListener('abort', stop);
+  }
+}
+
+export function createLocalAlertAdapter(
+  dependencies: {
+    national: Loader;
+    global: Loader;
+    kolkata: Loader;
+    india: Loader;
+  },
+  options: { deadlineMs?: number } = {},
+) {
+  const deadlineMs = Math.min(
+    Math.max(options.deadlineMs ?? SOURCE_DEADLINE_MS, 1),
+    SOURCE_DEADLINE_MS,
+  );
   return async (place: Place, signal?: AbortSignal): Promise<AlertResult> => {
     signal?.throwIfAborted();
     const kolkata = supportsKolkata(place);
@@ -56,7 +101,9 @@ export function createLocalAlertAdapter(dependencies: {
             load: dependencies.global,
           },
         ];
-    const results = await Promise.allSettled(specs.map((spec) => spec.load(place, signal)));
+    const results = await Promise.allSettled(
+      specs.map((spec) => bounded(spec.load, place, signal, deadlineMs)),
+    );
     signal?.throwIfAborted();
     const available: Array<{ spec: SourceSpec; result: SourceResult }> = [];
     const checks: AlertSourceCheck[] = results.map((item, index) => {

@@ -63,6 +63,13 @@ import { localWarningSources, warningSourceFallback } from './warning-sources';
 import { value, finite, localTime, age, readPlaces, chartPaths, modelSpread } from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 import { placeResourceKey, nextSearchIndex } from './place-navigation';
+import {
+  currentResource,
+  loadResource,
+  type Resource,
+  type ResourceLoader,
+  type ResourceState,
+} from './resource';
 
 const PRESETS: Place[] = [
   {
@@ -178,51 +185,25 @@ const RISK_STUDY_LOCATIONS: Place[] = [
     admin: 'Jakarta Special Capital Region',
   },
 ];
-type Resource<T> = { data: T | null; loading: boolean; error: string | null };
 function useResource<T>(
   place: Place,
   revision: number,
-  loader: (p: Place, s?: AbortSignal) => Promise<T>,
+  loader: ResourceLoader<T>,
   enabled = true,
 ): Resource<T> {
   const key = placeResourceKey(place);
-  const [state, setState] = useState<Resource<T> & { key: string; loader: typeof loader }>({
+  const [state, setState] = useState<ResourceState<T>>({
     data: null,
     loading: true,
     error: null,
     key,
     loader,
   });
-  useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-    if (!enabled) {
-      setState({ data: null, loading: false, error: null, key, loader });
-      return () => controller.abort();
-    }
-    setState({ data: null, loading: true, error: null, key, loader });
-    loader(place, controller.signal)
-      .then((data) => {
-        if (active) setState({ data, loading: false, error: null, key, loader });
-      })
-      .catch((e) => {
-        if (active && !controller.signal.aborted)
-          setState({
-            data: null,
-            loading: false,
-            error: e instanceof Error ? e.message : 'The data provider is unavailable.',
-            key,
-            loader,
-          });
-      });
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [key, revision, loader, enabled]);
-  return enabled && state.key === key && state.loader === loader
-    ? state
-    : { data: null, loading: enabled, error: null };
+  useEffect(
+    () => loadResource(place, key, loader, enabled, setState),
+    [key, revision, loader, enabled],
+  );
+  return currentResource(state, key, loader, enabled);
 }
 function WeatherIcon({ code, size = 24 }: { code: number | null | undefined; size?: number }) {
   return code == null ? (
@@ -1396,12 +1377,12 @@ export default function App() {
                     <ShieldCheck size={22} className="mint-text" />
                   </PanelHeader>
                   <div
-                    className={`coverage-banner ${alerts.data?.status === 'available' ? 'available' : ''} ${alerts.data?.partial ? 'partial' : ''}`}
+                    className={`coverage-banner ${!alerts.error && alerts.data?.status === 'available' ? 'available' : ''} ${!alerts.error && alerts.data?.partial ? 'partial' : ''}`}
                   >
                     <Radio size={17} />
                     <div>
                       <strong>
-                        {alerts.loading
+                        {alerts.loading && !alerts.data
                           ? 'Checking official alert coverage…'
                           : !place.countryCode
                             ? 'Official warnings not checked for this point'
@@ -1414,7 +1395,7 @@ export default function App() {
                       <p>
                         {!place.countryCode
                           ? 'Choose a named city from search or quick locations to check official warnings. This is not an all-clear.'
-                          : alerts.data?.coverage ||
+                          : (!alerts.error && alerts.data?.coverage) ||
                             'Do not assume there are no warnings when this feed is unavailable.'}
                       </p>
                     </div>
@@ -1493,13 +1474,16 @@ export default function App() {
                       </ul>
                     </details>
                   )}
-                  {alerts.data?.status === 'available' && !alertsRecent && (
-                    <p className="wide-notice" role="status">
-                      This alert check is more than two minutes old. Current warning status is
-                      unverified. Refresh data or use the official source; saved briefings remain
-                      historical.
-                    </p>
-                  )}
+                  {alerts.data &&
+                    (alerts.error || (alerts.data.status === 'available' && !alertsRecent)) && (
+                      <p className="wide-notice" role="status">
+                        {alerts.error
+                          ? `Refresh failed · last successful check ${age(alerts.data.fetchedAt, now)}.`
+                          : 'This alert check is more than two minutes old.'}{' '}
+                        Current warning status is unverified. Refresh data or use the official
+                        source; saved briefings remain historical.
+                      </p>
+                    )}
                   {activeAlerts.map((alert) => (
                     <details
                       className="official-alert"
@@ -1550,13 +1534,16 @@ export default function App() {
                       </div>
                     </details>
                   ))}
-                  {alertsRecent && alerts.data?.status === 'available' && !activeAlerts.length && (
-                    <p className="empty-alert">
-                      {alerts.data.partial || alerts.data.scope !== 'point'
-                        ? 'No unexpired bulletins were matched in this limited feed. Current warning status is not confirmed; check the official sources below.'
-                        : 'No active alerts returned for this point. Conditions can change; this is not an assurance of safety.'}
-                    </p>
-                  )}
+                  {alertsRecent &&
+                    !alerts.error &&
+                    alerts.data?.status === 'available' &&
+                    !activeAlerts.length && (
+                      <p className="empty-alert">
+                        {alerts.data.partial || alerts.data.scope !== 'point'
+                          ? 'No unexpired bulletins were matched in this limited feed. Current warning status is not confirmed; check the official sources below.'
+                          : 'No active alerts returned for this point. Conditions can change; this is not an assurance of safety.'}
+                      </p>
+                    )}
                   <div className="alert-actions">
                     <a
                       className="text-link"
@@ -1671,7 +1658,7 @@ export default function App() {
             alerts={alerts.data}
             now={now}
             offline={!policy.essentials}
-            canSave={policy.essentials && !forecast.loading && !forecast.error && !!f && !isStale}
+            canSave={policy.essentials && !forecast.loading && !!f && !isStale}
             onSelectPlace={selectPlace}
           />
           {policy.extras && (

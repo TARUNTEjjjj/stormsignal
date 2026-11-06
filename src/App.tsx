@@ -40,6 +40,8 @@ import {
 const WeatherMap = lazy(() => import('./components/WeatherMap'));
 const DisasterWatch = lazy(() => import('./components/DisasterWatch'));
 import OfflineBriefing from './components/OfflineBriefing';
+import AtmosphereScene from './components/AtmosphereScene';
+import ForecastExplorer from './components/ForecastExplorer';
 import OptionalPanel from './components/OptionalPanel';
 import {
   CONNECTION_KEY,
@@ -60,7 +62,7 @@ import {
 } from './data';
 import { deriveHazards, getOutlook, FORECAST_STALE_MS } from './risk';
 import { localWarningSources, warningSourceFallback } from './warning-sources';
-import { value, finite, localTime, age, readPlaces, chartPaths, modelSpread } from './presentation';
+import { value, finite, localTime, age, readPlaces, modelSpread } from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 import { placeResourceKey, nextSearchIndex } from './place-navigation';
 
@@ -267,193 +269,6 @@ function PanelHeader({
   );
 }
 
-function ForecastChart({
-  hours,
-  models,
-  timezone,
-}: {
-  hours: Hour[];
-  models: ModelForecast[];
-  timezone: string;
-}) {
-  const [metric, setMetric] = useState<'temperature' | 'precipitation' | 'wind'>('temperature');
-  const [range, setRange] = useState(24);
-  const selected = hours.slice(0, range);
-  const label =
-    metric === 'temperature' ? 'Temperature' : metric === 'precipitation' ? 'Rainfall' : 'Wind';
-  const unit = metric === 'temperature' ? '°C' : metric === 'precipitation' ? 'mm' : 'km/h';
-  const all = [
-    selected.map((h) => h[metric]),
-    ...models.map((m) =>
-      selected.map((h) => m.hours.find((t) => t.time === h.time)?.[metric] ?? null),
-    ),
-  ];
-  const nums = all.flat().filter(finite);
-  const lo = Math.floor(Math.min(...nums, metric === 'temperature' ? Infinity : 0));
-  const hi = Math.ceil(Math.max(...nums));
-  const min = Number.isFinite(lo) ? lo : 0,
-    max = Number.isFinite(hi) ? Math.max(hi, min + 1) : 1;
-  return (
-    <>
-      <div className="chart-tools">
-        <div className="segmented" role="group" aria-label="Chart metric">
-          {(['temperature', 'precipitation', 'wind'] as const).map((m) => (
-            <button
-              key={m}
-              aria-pressed={metric === m}
-              className={metric === m ? 'selected' : ''}
-              onClick={() => setMetric(m)}
-            >
-              {m === 'temperature' ? 'Temperature' : m === 'precipitation' ? 'Rainfall' : 'Wind'}
-            </button>
-          ))}
-        </div>
-        <div className="segmented compact" role="group" aria-label="Forecast duration">
-          {[24, 72].map((h) => (
-            <button
-              key={h}
-              aria-pressed={range === h}
-              className={range === h ? 'selected' : ''}
-              onClick={() => setRange(h)}
-            >
-              {h}h
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="chart-wrap">
-        <div className="chart-scale">
-          <span>
-            {value(max)}
-            {unit}
-          </span>
-          <span>
-            {value((max + min) / 2)}
-            {unit}
-          </span>
-          <span>
-            {value(min)}
-            {unit}
-          </span>
-        </div>
-        <div className="chart-svg">
-          <svg
-            viewBox="0 0 600 160"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label={`${label} forecast over ${range} hours. The table below contains exact values.`}
-          >
-            <defs>
-              <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#65dbc6" stopOpacity=".2" />
-                <stop offset="100%" stopColor="#65dbc6" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            {[0, 70, 140].map((y) => (
-              <line
-                key={y}
-                x1="0"
-                x2="600"
-                y1={y + 10}
-                y2={y + 10}
-                stroke="#29353c"
-                strokeDasharray="3 5"
-              />
-            ))}
-            <g transform="translate(0 10)">
-              {all.map((series, i) => (
-                <path
-                  key={i}
-                  d={chartPaths(series, min, max)}
-                  fill="none"
-                  stroke={['#77e5d1', '#ffb65d', '#9490f8'][i]}
-                  strokeWidth={i === 0 ? 2.8 : 1.8}
-                  strokeDasharray={i === 0 ? undefined : '5 4'}
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-            </g>
-          </svg>
-          <div className="chart-times">
-            {[
-              0,
-              Math.floor(selected.length / 3),
-              Math.floor((2 * selected.length) / 3),
-              selected.length - 1,
-            ]
-              .filter((v, i, a) => a.indexOf(v) === i && v >= 0)
-              .map((i) => (
-                <span key={i}>
-                  {selected[i]
-                    ? localTime(selected[i].time, timezone, {
-                        hour: '2-digit',
-                        day: '2-digit',
-                        month: 'short',
-                      })
-                    : '—'}
-                </span>
-              ))}
-          </div>
-        </div>
-      </div>
-      <div className="chart-legend">
-        <span>
-          <i className="dot mint" />
-          Local forecast
-        </span>
-        {models.map((m, i) => (
-          <span key={m.id}>
-            <i className={`dot ${i === 0 ? 'amber' : 'violet'}`} />
-            {m.name}
-          </span>
-        ))}
-      </div>
-      <details className="data-details">
-        <summary>
-          Explore hourly data <ChevronDown size={14} />
-        </summary>
-        <div className="table-scroll">
-          <table>
-            <caption>
-              {label} ({unit}) · {timezone}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">Local forecast</th>
-                {models.map((m) => (
-                  <th key={m.id} scope="col">
-                    {m.name}
-                  </th>
-                ))}
-                <th scope="col">Rain chance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selected.map((h) => (
-                <tr key={h.time}>
-                  <th scope="row">
-                    {localTime(h.time, timezone, {
-                      day: '2-digit',
-                      month: 'short',
-                      hour: '2-digit',
-                    })}
-                  </th>
-                  <td>{value(h[metric], 1)}</td>
-                  {models.map((m) => (
-                    <td key={m.id}>{value(m.hours.find((x) => x.time === h.time)?.[metric], 1)}</td>
-                  ))}
-                  <td>{value(h.probability)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </>
-  );
-}
-
 export default function App() {
   const [place, setPlace] = useState<Place>(PRESETS[0]);
   const [revision, setRevision] = useState(0);
@@ -475,15 +290,28 @@ export default function App() {
     document.body.style.overflow = 'hidden';
     drawer?.querySelector<HTMLButtonElement>('.mobile-close')?.focus();
     const keys = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); setMobileNav(false); }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileNav(false);
+      }
       if (event.key !== 'Tab' || !drawer) return;
-      const items = [...drawer.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), summary')]
-        .filter((element) => element.getClientRects().length > 0);
-      const first = items[0], last = items.at(-1);
-      if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
-        event.preventDefault(); last?.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) {
-        event.preventDefault(); first?.focus();
+      const items = [
+        ...drawer.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), summary'),
+      ].filter((element) => element.getClientRects().length > 0);
+      const first = items[0],
+        last = items.at(-1);
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || !drawer.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last?.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || !drawer.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first?.focus();
       }
     };
     document.addEventListener('keydown', keys);
@@ -565,8 +393,10 @@ export default function App() {
   const alerted = useRef(new Set<string>());
   const searchArea = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (searchIndex >= 0) searchArea.current?.querySelector(`#city-option-${searchIndex}`)
-      ?.scrollIntoView({ block: 'nearest' });
+    if (searchIndex >= 0)
+      searchArea.current
+        ?.querySelector(`#city-option-${searchIndex}`)
+        ?.scrollIntoView({ block: 'nearest' });
   }, [searchIndex]);
   const forecast = useResource<Forecast>(
     place,
@@ -944,8 +774,7 @@ export default function App() {
             <Menu size={22} />
           </button>
           <div className="breadcrumb">
-            Workspace <span>/</span>{' '}
-            <strong>{lowBandwidth ? 'Field essentials' : 'Weather overview'}</strong>
+            Workspace <span>/</span> <strong>Weather overview</strong>
           </div>
           <div className="search-area" ref={searchArea}>
             <form
@@ -963,7 +792,9 @@ export default function App() {
                 aria-autocomplete="list"
                 aria-expanded={query.trim().length >= 2}
                 aria-controls="city-search-results"
-                aria-activedescendant={results[searchIndex] ? `city-option-${searchIndex}` : undefined}
+                aria-activedescendant={
+                  results[searchIndex] ? `city-option-${searchIndex}` : undefined
+                }
                 value={query}
                 placeholder="Search any city…"
                 disabled={!policy.essentials}
@@ -972,7 +803,11 @@ export default function App() {
                     ? 'Search needs a connection. Use saved or quick locations instead.'
                     : undefined
                 }
-                onChange={(e) => { setQuery(e.target.value); setResults([]); setSearchIndex(-1); }}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setResults([]);
+                  setSearchIndex(-1);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
@@ -992,18 +827,23 @@ export default function App() {
                 {searching && <p>Searching places…</p>}
                 {searchError && <p>{searchError}</p>}
                 <div id="city-search-results" role="listbox" aria-label="Matching cities">
-                {results.map((p, index) => (
-                  <button key={p.id} id={`city-option-${index}`} role="option"
-                    aria-selected={searchIndex === index} tabIndex={-1}
-                    onClick={() => selectPlace(p)}>
-                    <MapPin size={16} />
-                    <span>
-                      {p.name}
-                      <small>{[p.admin, p.country].filter(Boolean).join(', ')}</small>
-                    </span>
-                    <ArrowUpRight size={14} />
-                  </button>
-                ))}
+                  {results.map((p, index) => (
+                    <button
+                      key={p.id}
+                      id={`city-option-${index}`}
+                      role="option"
+                      aria-selected={searchIndex === index}
+                      tabIndex={-1}
+                      onClick={() => selectPlace(p)}
+                    >
+                      <MapPin size={16} />
+                      <span>
+                        {p.name}
+                        <small>{[p.admin, p.country].filter(Boolean).join(', ')}</small>
+                      </span>
+                      <ArrowUpRight size={14} />
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1033,7 +873,7 @@ export default function App() {
                 {place.name}
                 <span className="heading-dot">.</span>
               </h1>
-              <p>Your local conditions. The bigger picture.</p>
+              <p>Read the skies. Stay a step ahead.</p>
             </div>
             <div className="heading-actions">
               <button className="secondary-button" onClick={savePlace}>
@@ -1054,10 +894,44 @@ export default function App() {
               </button>
             </div>
           </section>
-          <section className="field-controls panel" aria-labelledby="field-heading">
-            <div>
-              <span className="eyebrow">BUILT FOR PATCHY SIGNAL</span>
-              <h2 id="field-heading">Keep the essentials close.</h2>
+          <section className="field-controls panel" aria-label="Workspace settings">
+            <div className="connection-bar">
+              <div className="connection-heading">
+                <Radio size={20} />
+                <div>
+                  <span className="eyebrow">YOUR WORKSPACE</span>
+                  <strong>
+                    {connectionMode === 'full'
+                      ? 'The bigger picture'
+                      : connectionMode === 'offline'
+                        ? 'Ready without a signal'
+                        : 'Light on data. Rich in detail.'}
+                  </strong>
+                </div>
+              </div>
+              <div className="connection-options" role="group" aria-label="Connection mode">
+                {(
+                  [
+                    ['lite', 'Data saver'],
+                    ['full', 'Full workspace'],
+                    ['offline', 'Offline only'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={connectionMode === mode}
+                    onClick={() => changeConnectionMode(mode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <details className="connection-details">
+              <summary>
+                Connection & offline tools <ChevronDown size={14} />
+              </summary>
               <p>
                 {connectionMode === 'offline'
                   ? 'Live data requests are paused. Use saved briefings and your emergency kit. External source links still need a connection.'
@@ -1065,37 +939,19 @@ export default function App() {
                     ? 'A small 24-hour forecast and official alert checks. No maps, satellite downloads, extra feeds, or background polling. Refresh when you need an update.'
                     : 'Full workspace with imagery, comparison models, air quality, regional reports, and automatic refreshes.'}
               </p>
-            </div>
-            <div className="connection-options" role="group" aria-label="Connection mode">
-              {(
-                [
-                  ['lite', 'Data saver'],
-                  ['offline', 'Offline only'],
-                  ['full', 'Full workspace'],
-                ] as const
-              ).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={connectionMode === mode}
-                  onClick={() => changeConnectionMode(mode)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="field-shortcuts">
-              {policy.essentials && <a href="#alerts">Official warnings ↓</a>}
-              <a href="#offline-briefings">Saved briefings ↓</a>
-              <a href="/offline.html">Open emergency kit ↗</a>
-              <a href="/offline.html" download="StormSignal-offline-kit.html">
-                Download offline-only kit ↓
-              </a>
-            </div>
-            <p className="field-cache-status" role="status">
-              {offlineStatus}. Download the kit before losing service. This app cannot receive new
-              warnings offline.
-            </p>
+              <div className="field-shortcuts">
+                {policy.essentials && <a href="#alerts">Official warnings ↓</a>}
+                <a href="#offline-briefings">Saved briefings ↓</a>
+                <a href="/offline.html">Open emergency kit ↗</a>
+                <a href="/offline.html" download="StormSignal-offline-kit.html">
+                  Download offline-only kit ↓
+                </a>
+              </div>
+              <p className="field-cache-status" role="status">
+                {offlineStatus}. Download the kit before losing service. This app cannot receive new
+                warnings offline.
+              </p>
+            </details>
           </section>
           {!policy.essentials && (
             <div className="wide-notice">
@@ -1123,22 +979,12 @@ export default function App() {
                           : 'Unavailable'}
                     </span>
                   </div>
+                  <AtmosphereScene code={f?.current.code} />
                   <div className="temperature">
                     <span>
                       {value(f?.current.temperature)}
                       <sup>°</sup>
                     </span>
-                    <div className="weather-glyph">
-                      {f?.current.code != null &&
-                      f.current.code <= 1 &&
-                      f.days[0]?.sunrise &&
-                      f.days[0]?.sunset &&
-                      (f.current.time < f.days[0].sunrise || f.current.time > f.days[0].sunset) ? (
-                        <Moon size={67} />
-                      ) : (
-                        <WeatherIcon code={f?.current.code} size={67} />
-                      )}
-                    </div>
                   </div>
                   <div className="condition-name">
                     {f
@@ -1204,6 +1050,36 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  {hours.length > 0 && (
+                    <div className="condition-horizon">
+                      <div className="horizon-heading">
+                        <span className="eyebrow">ON THE HORIZON</span>
+                        <span>Next available hours</span>
+                      </div>
+                      <div className="horizon-hours">
+                        {hours.slice(0, 3).map((hour) => (
+                          <div key={hour.time}>
+                            <time dateTime={new Date(hour.time).toISOString()}>
+                              {localTime(hour.time, tz, { hour: '2-digit', minute: '2-digit' })}
+                              <small>
+                                {localTime(hour.time, tz, { day: '2-digit', month: 'short' })}
+                              </small>
+                            </time>
+                            <WeatherIcon code={hour.code} size={24} />
+                            <strong>
+                              {value(hour.temperature)}
+                              <small>°C</small>
+                            </strong>
+                            <span>
+                              {finite(hour.probability)
+                                ? `${value(hour.probability)}% rain`
+                                : 'Rain chance —'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div className="condition-footer">
                     <span>Fetched {f ? age(f.fetchedAt, now) : '—'}</span>
                     <a href="#sources">
@@ -1234,56 +1110,29 @@ export default function App() {
                       />
                     </OptionalPanel>
                   ) : (
-                    <div className="field-forecast">
-                      <h2>Next hours, at a glance.</h2>
-                      <p>Model estimates · {tz}. Times are for the selected place.</p>
+                    <div className="field-forecast" id="forecast">
+                      <PanelHeader eyebrow="THE NEXT 24 HOURS" title="Follow the forecast.">
+                        <Activity size={21} />
+                      </PanelHeader>
+                      <p className="forecast-context">Model estimates · {tz}</p>
                       {hours.length ? (
-                        <div className="table-scroll">
-                          <table>
-                            <caption>
-                              Next 12 hours · refreshed {f ? age(f.fetchedAt, now) : '—'}
-                            </caption>
-                            <thead>
-                              <tr>
-                                <th>Time</th>
-                                <th>°C</th>
-                                <th>Rain mm</th>
-                                <th>Gust km/h</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {hours.slice(0, 12).map((hour) => (
-                                <tr key={hour.time}>
-                                  <th scope="row">
-                                    <time dateTime={new Date(hour.time).toISOString()}>
-                                      {localTime(hour.time, tz, { day: '2-digit', month: 'short' })}
-                                      <br />
-                                      {localTime(hour.time, tz, {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        timeZoneName: 'short',
-                                      })}
-                                    </time>
-                                  </th>
-                                  <td>{value(hour.temperature)}</td>
-                                  <td>{value(hour.precipitation, 1)}</td>
-                                  <td>{value(hour.gust)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                        <ForecastExplorer key={place.id} hours={hours} models={[]} timezone={tz} />
                       ) : (
-                        <p>
-                          {forecast.loading
-                            ? 'Fetching the compact forecast…'
-                            : 'Forecast unavailable. Use official information and saved material.'}
-                        </p>
+                        <div className="empty-state">
+                          <Activity size={30} />
+                          <p>
+                            {forecast.loading
+                              ? 'Building your forecast timeline…'
+                              : 'Forecast unavailable. Use official information and saved material.'}
+                          </p>
+                        </div>
                       )}
-                      <p className="fine-print">
-                        The compact forecast requests 24 hourly steps instead of a full week. Maps
-                        and model comparisons load only in Full workspace.
-                      </p>
+                      <div className="explore-invitation">
+                        <span>Want another perspective?</span>
+                        <button onClick={() => changeConnectionMode('full')}>
+                          Compare models & explore satellite <ArrowUpRight size={14} />
+                        </button>
+                      </div>
                     </div>
                   )}
                 </section>
@@ -1315,7 +1164,12 @@ export default function App() {
                       <span className="panel-number">01</span>
                     </PanelHeader>
                     {hours.length ? (
-                      <ForecastChart hours={hours} models={models.data || []} timezone={tz} />
+                      <ForecastExplorer
+                        key={place.id}
+                        hours={hours}
+                        models={models.data || []}
+                        timezone={tz}
+                      />
                     ) : (
                       <div className="empty-state">
                         <Activity size={30} />
@@ -1785,8 +1639,8 @@ export default function App() {
                 </p>
                 <p>
                   Elevated / high screening thresholds: hourly rain 5 / 15 mm; wind gusts 50 / 75
-                  km/h; feels-like temperature 35 / 40 °C; air temperature −5 / −15 °C; UV index 6 / 8.
-                  Thunderstorm forecast code 95 is elevated; codes 96 and 99 are high. These are
+                  km/h; feels-like temperature 35 / 40 °C; air temperature −5 / −15 °C; UV index 6 /
+                  8. Thunderstorm forecast code 95 is elevated; codes 96 and 99 are high. These are
                   application indicators, not official warning levels or safe limits.
                 </p>
                 <p>

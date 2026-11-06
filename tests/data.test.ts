@@ -379,6 +379,20 @@ test('international warning API failures retain actionable source failure messag
   await assert.rejects(fetchAlerts(place), /Source timed out/);
 });
 
+test('international warning API gateway pages keep the warning failure message and status', async () => {
+  for (const body of ['<html>502 Bad Gateway</html>', '']) {
+    clearRequestCache();
+    globalThis.fetch = async () =>
+      new Response(body, { status: 502, headers: { 'Content-Type': 'text/html' } });
+    await assert.rejects(fetchAlerts(place), (error: unknown) => {
+      assert.ok(error instanceof WeatherDataError);
+      assert.equal(error.message, 'Official warning sources could not be checked.');
+      assert.equal(error.status, 502);
+      return true;
+    });
+  }
+});
+
 test('international warning links are allowlisted and expired bulletins are excluded', async () => {
   const now = Date.now();
   const valid = {

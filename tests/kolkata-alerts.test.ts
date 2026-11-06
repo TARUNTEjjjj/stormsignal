@@ -102,6 +102,15 @@ test('actual public-feed RSS shape without Kolkata remains explicitly unmatched'
   assert.match(result.coverage, /No Kolkata entry was present/);
 });
 
+test('district bulletin text decodes XML numeric character references', async () => {
+  const result = await harness(
+    rss(item({ description: 'Moderate rain&#44; don&#39;t travel &#x2014; IMD' })),
+  ).fetch(place);
+  assert.equal(result.alerts.length, 1);
+  assert.match(result.alerts[0].description, /Moderate rain, don't travel — IMD/);
+  assert.doesNotMatch(result.alerts[0].description, /&#/);
+});
+
 test('district names match exactly and latest district publication suppresses older valid records', async () => {
   const result = await harness(
     rss(

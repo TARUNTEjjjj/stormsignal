@@ -154,7 +154,11 @@ export async function fetchImageryFrames(
   const abort = () => controller.abort();
   if (signal?.aborted) controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
-  const timeout = setTimeout(abort, 15_000);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    abort();
+  }, 15_000);
   try {
     const response = await fetch(domainUrl(source), { signal: controller.signal });
     if (!response.ok) throw new Error(`NASA imagery metadata unavailable (${response.status}).`);
@@ -164,6 +168,17 @@ export async function fetchImageryFrames(
     if (!frames.length) throw new Error('NASA has not advertised recent imagery for this layer.');
     domainCache.set(source.id, { at: Date.now(), frames });
     return frames;
+  } catch (error) {
+    // The map shows this message. A timeout abort or a network failure would
+    // otherwise surface as "This operation was aborted" or "Failed to fetch".
+    if (signal?.aborted) throw error;
+    if (timedOut)
+      throw new Error('NASA imagery metadata timed out. Check your connection or try again later.');
+    if (error instanceof TypeError)
+      throw new Error(
+        'NASA imagery metadata could not be reached. Check your connection or try again later.',
+      );
+    throw error;
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', abort);

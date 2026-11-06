@@ -31,6 +31,23 @@ test('CAP parser preserves multilingual details, issuer, geocodes, polygon coord
   });
 });
 
+test('CAP parser decodes XML numeric character references in warning text', () => {
+  const document = parseCap(
+    xml(
+      info()
+        .replace('Test &amp; fixture only', 'Don&#39;t cross &#x2014; flooded roads')
+        .replace(
+          'Original instructions.',
+          'Move inland.&#10;Avoid &#x22;low&#x22; areas &amp;#39;',
+        ),
+    ),
+    NOW,
+  );
+  assert.equal(document.infos[0].headline, "Don't cross — flooded roads");
+  // A literal "&#39;" that was itself escaped stays literal; nothing is decoded twice.
+  assert.equal(document.infos[0].instruction, 'Move inland.\nAvoid "low" areas &#39;');
+});
+
 test('CAP parser rejects malformed XML, entities, oversized payloads and invalid clocks', () => {
   for (const source of [
     xml().slice(0, -5),

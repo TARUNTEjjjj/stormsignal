@@ -190,6 +190,60 @@ test('Kolkata combines district and state bulletins without relabeling a distant
   assert.match(value.coverage, /do not automatically apply to Kolkata/);
 });
 
+test('a source still loading at its deadline is reported missing instead of discarding the other', async () => {
+  // router.ts aborts the whole check after 18 s; scaled down to 2 s here.
+  const gateway = new AbortController();
+  const timer = setTimeout(() => gateway.abort(new Error('Warning sources timed out.')), 2_000);
+  let stopped: unknown;
+  const slowSachet = (_place: Place, signal?: AbortSignal) =>
+    new Promise<Result>((_resolve, reject) =>
+      signal?.addEventListener('abort', () => reject((stopped = signal.reason)), { once: true }),
+    );
+  const ignoresCancellation = () => new Promise<Result>(() => {});
+  try {
+    const value = await createLocalAlertAdapter(
+      {
+        national: unavailable,
+        global: unavailable,
+        kolkata: async () =>
+          result([warning('imd-kolkata:kol-1', { area: 'Kolkata district', source: 'IMD' })], {
+            scope: 'region',
+            scopeLabel: 'Kolkata district',
+          }),
+        india: slowSachet,
+      },
+      { deadlineMs: 20 },
+    )(kolkata, gateway.signal);
+    assert.deepEqual(
+      value.alerts.map((a) => a.id),
+      ['imd-kolkata:kol-1'],
+    );
+    assert.deepEqual(
+      value.checks?.map((c) => `${c.id}:${c.status}`),
+      ['imd-kolkata:available', 'sachet:unavailable'],
+    );
+    assert.match(value.source, /other source unavailable/);
+    assert.ok(stopped instanceof Error, 'the slow source is told to stop');
+
+    const direct = await createLocalAlertAdapter(
+      {
+        national: ignoresCancellation,
+        global: async () => result([warning('issuer/wmo/0')], { source: 'BMKG via WMO SWIC' }),
+        kolkata: unavailable,
+        india: unavailable,
+      },
+      { deadlineMs: 20 },
+    )(jakarta, gateway.signal);
+    assert.deepEqual(
+      direct.checks?.map((c) => `${c.id}:${c.status}`),
+      ['national:unavailable', 'wmo:available'],
+    );
+    assert.equal(gateway.signal.aborted, false);
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 test('composition excludes newly expired and future-effective records and caps sorted warnings', async () => {
   const many = Array.from({ length: 35 }, (_, i) =>
     warning(`issuer/${i}/0`, { severity: i === 34 ? 'Extreme' : 'Moderate' }),

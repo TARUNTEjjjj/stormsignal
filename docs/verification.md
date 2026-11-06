@@ -1,5 +1,17 @@
 # Release verification
 
+## Frontend showcase — 6 November 2026
+
+- **239 deterministic tests passed.** Five new forecast-geometry checks cover timestamp joins, null/missing-hour gaps, single points, model-aware scales and pointer selection. TypeScript and the production build passed, including embedded Worker and Pages routing/API/artifact checks.
+- Browser review used the local Vite build with live retrieved provider data. Temperature, rainfall and wind controls changed units/readings; ArrowRight and End changed the hour; pointer inspection selected the corresponding timestamp. Exact hourly values and the retained gust column were checked. Full workspace exposed 72 hours and two model series; missing model values remained unavailable.
+- Data saver keeps the existing compact data request and disables the unavailable 72-hour control. The SVG chart and atmosphere illustration add no third-party graphics service or package dependency. Maps and report chunks remain optional in the production precache: two essential JS/CSS assets, four optional map/report assets.
+- At **1440 × 1080** and **390 × 844**, no page-level horizontal overflow was observed, including the expanded exact-data table on mobile. Mobile navigation opened with focus inside the drawer; Escape restored focus to its opener. Keyboard city search selected Sydney and cleared the prior city's values while new data loaded.
+- A Chennai briefing saved successfully and remained explicitly **SAVED COPY · CURRENT STATUS UNKNOWN** in Offline only, while online search and refresh were disabled. This was an application-mode check with the network still connected, not a radio-off test.
+- Screenshots: [desktop dashboard](images/dashboard-desktop.jpg), [mobile forecast](images/dashboard-mobile.jpg). These capture one data snapshot, not current weather or proof of complete provider coverage. Decorative atmosphere artwork is separate from measured/forecast graphics.
+- Reduced-motion styles were inspected in code; no new animation is introduced. Comprehensive assistive-technology testing and a full browser/device matrix were not performed in this iteration.
+
+The sections below are historical release records. Their test totals, supported regions and limitations describe those versions; they do not override the current coverage documentation.
+
 ## Direct local warning feeds — 1 November 2026
 
 - **227 deterministic tests passed**, including direct PAGASA Atom and BMKG RSS/CAP parsing, hostile XML/URLs, geographic matching, cancellation across sources, partial outages, duplicate identifiers, Kolkata district scope/timezones/onset/expiry, source-check validation and historical direct-source links. TypeScript, production build and Worker artifact checks passed.

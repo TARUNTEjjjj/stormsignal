@@ -1,0 +1,782 @@
+/* StormSignal's visual layer: a quiet instrument panel, with data in the foreground. */
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0b131b;
+  --bg: #0b131b;
+  --panel: #121f29;
+  --line: #283a47;
+  --muted: #a2b5c2;
+  --mint: #9ce6d2;
+  --amber: #edc18e;
+}
+body {
+  background: radial-gradient(ellipse at 65% 0, #192e3b66, transparent 60%), var(--bg);
+}
+h1,
+h2,
+h3,
+.brand,
+.temperature {
+  font-family: inherit;
+}
+.sidebar {
+  background: #0e1922;
+  border-color: #263541;
+  padding-top: 34px;
+}
+.brand {
+  font-size: 24px;
+  letter-spacing: -1.3px;
+  margin-bottom: 42px;
+}
+.brand-mark {
+  color: var(--mint);
+}
+.brand small {
+  font-family: inherit;
+  color: #9cafbb;
+  letter-spacing: 1.5px;
+  font-size: 8px;
+}
+nav a {
+  border-radius: 9px;
+  font-size: 12px;
+}
+nav a.active {
+  background: linear-gradient(90deg, #244039, #1a302e);
+  border-color: #36544e;
+}
+.nav-label {
+  color: #8da3b2;
+  font-size: 9px;
+}
+.sidebar-divider {
+  margin: 25px 10px;
+  border-color: #253642;
+}
+.saved-list button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #b0c0cb;
+}
+.saved-list button.current {
+  border-color: #314653;
+  background: #1c2c37;
+}
+.saved-list small {
+  color: #91a6b5;
+}
+.sidebar-bottom {
+  border-color: #263946;
+}
+.topbar {
+  height: 76px;
+  background: #0b151de8;
+  border-color: #263541;
+}
+.search-area {
+  width: 315px;
+}
+.search-area form {
+  height: 40px;
+  border-radius: 9px;
+  background: #12212b;
+}
+.search-area input {
+  font-size: 12px;
+}
+.breadcrumb {
+  font-size: 12px;
+}
+.breadcrumb strong {
+  color: #bdcdd7;
+}
+.status-tag {
+  font-size: 9px;
+  letter-spacing: 0.7px;
+}
+main {
+  padding-top: 34px;
+  max-width: 1640px;
+}
+.page-heading {
+  margin-bottom: 26px;
+}
+.location-eyebrow {
+  color: #afc0cb;
+  letter-spacing: 1.4px;
+  font-size: 10px;
+}
+h1 {
+  font-weight: 500;
+  font-size: clamp(40px, 3.8vw, 62px);
+  letter-spacing: -2.8px;
+  margin: 13px 0 11px;
+}
+.page-heading p {
+  color: #a3b5c2;
+  font-size: 14px;
+  letter-spacing: 0.1px;
+}
+.primary-button,
+.secondary-button {
+  border-radius: 9px;
+  min-height: 42px;
+  padding-inline: 16px;
+  font-size: 12px;
+}
+.primary-button {
+  background: #b3ebda;
+  border-color: #b3ebda;
+}
+.secondary-button {
+  background: #152530;
+  border-color: #354956;
+}
+.eyebrow {
+  color: #98afbd;
+  font-size: 9px;
+  letter-spacing: 1.65px;
+}
+.panel {
+  border-radius: 15px;
+  background: #12202a;
+  border-color: #293b48;
+}
+.panel-heading h2 {
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.6px;
+  margin-top: 7px;
+}
+.panel-heading {
+  margin-bottom: 22px;
+}
+.field-controls {
+  background: #12212a;
+  padding: 15px 20px 0;
+  margin-bottom: 24px;
+  border-color: #2b414b;
+}
+.connection-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 14px;
+}
+.connection-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #a6d7cd;
+}
+.connection-heading strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #dfebef;
+  margin-top: 5px;
+}
+.connection-heading .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.6px;
+}
+.connection-options {
+  margin: 0;
+  gap: 4px;
+  background: #0a1720;
+  border: 1px solid #2c404d;
+  padding: 4px;
+  border-radius: 10px;
+}
+.connection-options button {
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 14px;
+  min-height: 36px;
+  font-size: 11px;
+  font-weight: 500;
+  background: transparent;
+  color: #b1c2cd;
+}
+.connection-options button[aria-pressed='true'] {
+  background: #2c4c45;
+  color: #c7f2e4;
+  box-shadow: inset 0 0 0 1px #43645a;
+}
+.connection-options button:hover {
+  background: #263d46;
+}
+.connection-details {
+  border-top: 1px solid #2a3c48;
+}
+.connection-details summary {
+  cursor: pointer;
+  list-style: none;
+  color: #a9bdc9;
+  font-size: 11px;
+  padding: 11px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.connection-details summary::-webkit-details-marker {
+  display: none;
+}
+.connection-details[open] summary svg {
+  transform: rotate(180deg);
+}
+.connection-details > p {
+  font-size: 13px;
+  padding-top: 5px;
+}
+.connection-details .field-cache-status {
+  margin-bottom: 18px;
+  font-size: 12px;
+}
+.field-shortcuts a {
+  font-size: 12px;
+}
+.overview-grid {
+  grid-template-columns: minmax(310px, 0.8fr) minmax(0, 1.25fr);
+  gap: 22px;
+}
+.conditions-card {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 90% 20%, #294b60 0, transparent 65%),
+    linear-gradient(145deg, #1c3545, #142835 65%, #12222d);
+  border: 1px solid #3b5363;
+  border-radius: 16px;
+  padding: 24px 26px 0;
+  min-height: 410px;
+}
+.conditions-card > :not(.atmosphere-scene) {
+  position: relative;
+  z-index: 1;
+}
+.atmosphere-scene {
+  position: absolute;
+  width: 355px;
+  max-width: 90%;
+  right: -42px;
+  top: 36px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.95;
+}
+.card-kicker {
+  font-size: 8px;
+  color: #c0d3dd;
+  letter-spacing: 1.1px;
+}
+.card-kicker > span:last-child {
+  color: #bbccd8;
+}
+.temperature {
+  margin-top: 34px;
+  justify-content: flex-start;
+}
+.temperature > span {
+  font-size: clamp(75px, 6.6vw, 106px);
+  font-weight: 300;
+  letter-spacing: -7px;
+  text-shadow: 0 3px 25px #132b3e;
+}
+.temperature sup {
+  font-size: 45px;
+  line-height: 1.4;
+}
+.condition-name {
+  margin-top: 17px;
+  font-size: 19px;
+  font-weight: 500;
+}
+.feels {
+  color: #b7cbd8;
+  font-size: 11px;
+  max-width: 60%;
+  line-height: 1.6;
+}
+.condition-metrics {
+  gap: 21px 16px;
+  margin: 27px 0 22px;
+  padding-top: 22px;
+}
+.condition-metrics > div {
+  color: #aac4d3;
+}
+.condition-metrics > div > span {
+  font-size: 11px;
+}
+.condition-metrics strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 7px;
+}
+.condition-metrics strong small {
+  font-size: 10px;
+}
+.condition-footer {
+  margin-left: -26px;
+  margin-right: -26px;
+  padding: 14px 26px;
+  font-size: 10px;
+  color: #b3c5d1;
+  background: #07162342;
+  border-color: #64869a24;
+}
+.map-card {
+  border-radius: 16px;
+  border-color: #2d4351;
+  background: #12212c;
+}
+.field-forecast {
+  padding: 24px 26px 18px;
+}
+.field-forecast .panel-heading {
+  margin-bottom: 0;
+}
+.field-forecast .panel-heading > svg {
+  color: #a9dcd0;
+}
+.field-forecast > .forecast-context {
+  margin: 8px 0 23px;
+  font-size: 11px;
+  color: #9eb4c2;
+}
+.explore-invitation {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 7px;
+  margin-top: 17px;
+  border-top: 1px solid #2b404d;
+  padding-top: 14px;
+  color: #9fb5c3;
+  font-size: 10px;
+}
+.explore-invitation button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0;
+  background: none;
+  color: #a9e7d5;
+  font-size: 11px;
+  text-align: left;
+}
+.signal-strip {
+  border-radius: 12px;
+  margin: 22px 0;
+  padding: 19px 23px;
+}
+.signal-strip p {
+  font-size: 12px;
+}
+.signal-title strong {
+  font-weight: 500;
+  font-size: 15px;
+}
+.signal-strip > a {
+  font-size: 11px;
+}
+.analytics-grid {
+  gap: 22px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
+}
+.safety-grid {
+  gap: 22px;
+  margin-top: 24px;
+}
+.forecast-panel,
+.outlook-panel,
+.alerts-panel,
+.hazards-panel {
+  padding: 25px;
+}
+.model-note {
+  font-size: 11px;
+}
+.daily-list {
+  margin-top: 4px;
+}
+.day-row {
+  min-height: 49px;
+}
+.day-row > span:first-child {
+  color: #c9d8df;
+}
+.sun-times {
+  color: #adbfcb;
+}
+.coverage-banner {
+  border-radius: 10px;
+}
+.coverage-banner p,
+.section-intro,
+.no-hazards p {
+  line-height: 1.7;
+}
+.preparedness-banner {
+  border-radius: 16px;
+  background: radial-gradient(ellipse at 4% 50%, #33534c65, transparent 50%), #15282a;
+  border-color: #37554d;
+}
+.preparedness-banner h2 {
+  font-weight: 500;
+  letter-spacing: -0.9px;
+}
+.sources-panel {
+  border-radius: 16px;
+}
+.sources-grid h3 {
+  color: #dfebef;
+  font-weight: 500;
+}
+.error-note {
+  line-height: 1.6;
+}
+.empty-state {
+  min-height: 200px;
+}
+@media (min-width: 1600px) {
+  .overview-grid {
+    grid-template-columns: minmax(350px, 0.78fr) minmax(0, 1.3fr);
+  }
+}
+@media (max-width: 1250px) {
+  .overview-grid {
+    grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  }
+  .field-forecast {
+    padding: 22px 20px 17px;
+  }
+  .conditions-card {
+    padding-inline: 22px;
+  }
+  .atmosphere-scene {
+    right: -63px;
+    top: 58px;
+    max-width: 100%;
+  }
+  .condition-footer {
+    margin-inline: -22px;
+    padding-inline: 22px;
+  }
+  .temperature > span {
+    font-size: 88px;
+  }
+  .connection-bar {
+    gap: 10px;
+  }
+  .connection-options button {
+    padding-inline: 10px;
+  }
+  .analytics-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.8fr);
+  }
+}
+@media (max-width: 1050px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+  .conditions-card {
+    min-height: 330px;
+  }
+  .atmosphere-scene {
+    width: 420px;
+    max-width: 60%;
+    top: 5px;
+    right: 5px;
+  }
+  .condition-metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .condition-metrics:has(> div:nth-child(4)) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+  .connection-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .connection-options {
+    margin-left: auto;
+  }
+}
+@media (max-width: 800px) {
+  .sidebar {
+    padding-top: 28px;
+  }
+  .topbar {
+    height: 68px;
+    padding-inline: 20px;
+    gap: 13px;
+  }
+  main {
+    padding: 28px 20px 0;
+  }
+  h1 {
+    font-size: 47px;
+  }
+  .search-area {
+    width: min(315px, 75vw);
+  }
+  .page-heading {
+    margin-bottom: 24px;
+  }
+  .heading-actions {
+    gap: 7px;
+  }
+  .connection-options {
+    margin-left: 0;
+  }
+  .primary-button,
+  .secondary-button {
+    padding-inline: 12px;
+  }
+}
+@media (max-width: 600px) {
+  main {
+    padding: 23px 16px 0;
+  }
+  .topbar {
+    padding-inline: 14px;
+  }
+  .page-heading {
+    align-items: flex-start;
+    gap: 18px;
+  }
+  h1 {
+    font-size: 46px;
+    letter-spacing: -2.5px;
+  }
+  .page-heading p {
+    font-size: 12px;
+  }
+  .location-eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.8px;
+  }
+  .heading-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .field-controls {
+    padding: 15px 16px 0;
+    margin-bottom: 18px;
+  }
+  .connection-bar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .connection-options {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    gap: 2px;
+  }
+  .connection-options button {
+    flex: 1;
+    min-height: 40px;
+    padding: 8px 6px;
+    font-size: 10px;
+    text-align: center;
+  }
+  .connection-heading strong {
+    font-size: 13px;
+  }
+  .overview-grid {
+    gap: 18px;
+  }
+  .conditions-card {
+    padding: 22px 22px 0;
+    min-height: 380px;
+  }
+  .atmosphere-scene {
+    width: 330px;
+    max-width: 95%;
+    right: -45px;
+    top: 38px;
+  }
+  .temperature {
+    margin-top: 33px;
+  }
+  .temperature > span {
+    font-size: 91px;
+  }
+  .condition-name {
+    font-size: 19px;
+  }
+  .condition-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .condition-metrics:has(> div:nth-child(4)) {
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+  }
+  .condition-metrics > div {
+    align-items: flex-start;
+    gap: 7px;
+  }
+  .condition-metrics > div > svg {
+    width: 14px;
+  }
+  .condition-metrics > div > span {
+    font-size: 10px;
+  }
+  .condition-metrics strong {
+    font-size: 17px;
+  }
+  .field-forecast {
+    padding: 22px 18px 17px;
+  }
+  .field-forecast .panel-heading h2 {
+    font-size: 22px;
+  }
+  .signal-strip {
+    margin-block: 18px;
+    padding: 19px;
+  }
+  .signal-strip p {
+    font-size: 12px;
+  }
+  .forecast-panel,
+  .outlook-panel,
+  .alerts-panel,
+  .hazards-panel {
+    padding: 21px 18px;
+  }
+  .safety-grid {
+    gap: 18px;
+    margin-top: 18px;
+  }
+  .panel-heading h2 {
+    font-size: 21px;
+    line-height: 1.3;
+  }
+  .field-mode .fine-print {
+    font-size: 12px;
+  }
+  .field-mode .coverage-banner p,
+  .field-mode .section-intro {
+    font-size: 13px;
+  }
+}
+@media (max-width: 360px) {
+  .condition-metrics > div > svg {
+    display: none;
+  }
+  .condition-metrics strong {
+    font-size: 16px;
+  }
+  .card-kicker {
+    letter-spacing: 0.5px;
+  }
+}
+@media print {
+  body {
+    background: white;
+  }
+  .atmosphere-scene,
+  .field-controls,
+  .explore-invitation {
+    display: none;
+  }
+  .conditions-card,
+  .panel {
+    background: white;
+    color: black;
+  }
+  .temperature > span {
+    text-shadow: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .heading-actions > button {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
+.condition-horizon {
+  margin-top: auto;
+  margin-bottom: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #9ab7cb24;
+}
+.horizon-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.horizon-heading > span:last-child {
+  font-size: 9px;
+  color: #a5becd;
+}
+.horizon-hours {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 19px;
+}
+.horizon-hours > div {
+  display: grid;
+  justify-items: center;
+  gap: 11px;
+  padding: 15px 4px;
+  background: #09203140;
+  border: 1px solid #67859a20;
+  border-radius: 11px;
+}
+.horizon-hours time {
+  color: #b7cdda;
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.horizon-hours time small {
+  display: block;
+  color: #96aebf;
+  font-size: 9px;
+  margin-top: 4px;
+}
+.horizon-hours svg {
+  color: #b7d6db;
+  stroke-width: 1.4;
+}
+.horizon-hours strong {
+  font-size: 21px;
+  font-weight: 500;
+}
+.horizon-hours strong small {
+  font-size: 11px;
+  margin-left: 2px;
+  color: #abc3d0;
+}
+.horizon-hours > div > span {
+  font-size: 9px;
+  color: #a5c9d5;
+}
+@media (max-width: 600px) {
+  .condition-horizon {
+    padding-top: 19px;
+    margin-bottom: 20px;
+  }
+  .horizon-hours > div {
+    padding-block: 12px;
+  }
+}

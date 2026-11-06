@@ -54,6 +54,9 @@ const parser = new XMLParser({
   parseAttributeValue: false,
   trimValues: true,
   processEntities: true,
+  // XML numeric character references (&#39;, &#xA;) must be decoded. DOCTYPE and
+  // ENTITY declarations are rejected before parsing, so no custom entity expands.
+  htmlEntities: true,
 });
 const record = (value: unknown): RecordValue => {
   if (

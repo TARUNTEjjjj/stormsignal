@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { afterEach, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DAILY_IMAGERY,
@@ -9,6 +9,7 @@ import {
   imageryTileUrl,
   domainUrl,
   isFrameStale,
+  fetchImageryFrames,
 } from '../src/imagery';
 
 const now = Date.parse('2026-10-30T18:00:00Z');
@@ -89,4 +90,41 @@ test('metadata URL rounds fractional wall-clock seconds to the provider frame ca
   assert.equal(url.searchParams.get('TIME'), '2026-10-29T18:00:00Z/2026-10-30T18:00:00Z');
   const daily = new URL(domainUrl(DAILY_IMAGERY, now + 57_992));
   assert.equal(daily.searchParams.get('TIME'), '2026-10-23/2026-10-30');
+});
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  mock.timers.reset();
+});
+// Rejects like a browser fetch when its signal aborts, and never resolves otherwise.
+const hangingFetch = (async (_target: unknown, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () =>
+      reject(new DOMException('This operation was aborted', 'AbortError')),
+    );
+  })) as typeof fetch;
+
+test('imagery metadata timeouts and network failures give a readable message', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.fetch = hangingFetch;
+  const pending = fetchImageryFrames(DAILY_IMAGERY, undefined, true);
+  mock.timers.tick(15_000);
+  await assert.rejects(pending, /^Error: NASA imagery metadata timed out/);
+
+  globalThis.fetch = (async () => {
+    throw new TypeError('Failed to fetch');
+  }) as typeof fetch;
+  await assert.rejects(
+    fetchImageryFrames(DAILY_IMAGERY, undefined, true),
+    /^Error: NASA imagery metadata could not be reached/,
+  );
+});
+
+test('imagery metadata cancelled by the caller still rejects as an abort', async () => {
+  globalThis.fetch = hangingFetch;
+  const controller = new AbortController();
+  const pending = fetchImageryFrames(DAILY_IMAGERY, controller.signal, true);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
 });

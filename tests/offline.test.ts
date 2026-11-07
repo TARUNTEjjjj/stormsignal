@@ -21,8 +21,20 @@ function harness(origin = 'https://example.org') {
     requests = 0,
     skipped = 0,
     claimed = 0,
-    aborted = 0;
-  let mode: 'online' | 'offline' | 'hang' | 'error' = 'online';
+    aborted = 0,
+    bodyCancelled = 0;
+  let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let resolveLateHeaders: ((response: Response) => void) | undefined;
+  let mode:
+    | 'online'
+    | 'offline'
+    | 'hang'
+    | 'error'
+    | 'error-body'
+    | 'body-hang'
+    | 'oversized'
+    | 'empty'
+    | 'headers-late' = 'online';
   let quota = false,
     installFailure = false,
     cacheUnavailable = false;
@@ -52,13 +64,36 @@ function harness(origin = 'https://example.org') {
       return stores.delete(name);
     },
   };
+  const stalledResponse = (status = 200) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodyController = controller;
+          controller.enqueue(new TextEncoder().encode('<!doctype html><html><head>'));
+        },
+        cancel() {
+          bodyCancelled++;
+        },
+      }),
+      { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    );
   const fetch = async (_request: Request, options: { signal: AbortSignal }) => {
     requests++;
     options.signal.addEventListener('abort', () => aborted++);
     if (mode === 'offline') throw Error('offline');
     if (mode === 'hang') return new Promise<Response>(() => {});
     if (mode === 'error') return new Response('provider error', { status: 503 });
-    return new Response('network document');
+    if (mode === 'error-body') return stalledResponse(503);
+    if (mode === 'body-hang') return stalledResponse();
+    if (mode === 'headers-late')
+      return new Promise<Response>((resolve) => {
+        resolveLateHeaders = resolve;
+      });
+    if (mode === 'oversized') return new Response('x'.repeat(1024 * 1024 + 1));
+    if (mode === 'empty') return new Response('');
+    return new Response('network document', {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Shell-Version': 'network' },
+    });
   };
   const self = {
     location: { origin },
@@ -154,10 +189,12 @@ function harness(origin = 'https://example.org') {
       await pending;
       return reply;
     },
-    counts: () => ({ requests, skipped, claimed, aborted }),
+    counts: () => ({ requests, skipped, claimed, aborted, bodyCancelled }),
     setMode: (value: typeof mode) => {
       mode = value;
     },
+    failBody: () => bodyController?.error(new Error('Connection lost during body transfer')),
+    deliverLateHeaders: () => resolveLateHeaders?.(stalledResponse()),
     setQuota: () => {
       quota = true;
     },
@@ -420,11 +457,129 @@ test('a hanging dashboard request falls back after 3 seconds and aborts its tran
   assert.equal(h.timers.size, 0);
 });
 
+test('a dashboard with successful headers but a stalled body falls back before navigation commits', async () => {
+  const h = harness();
+  h.setMode('body-hang');
+  h.put('/', 'complete installed dashboard');
+  const pending = h.dispatch('/');
+  let settled = false;
+  void pending.response?.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    settled,
+    false,
+    'headers and a partial HTML prefix must not be returned as a usable shell',
+  );
+  assert.deepEqual(
+    [...h.timers.values()].map((timer) => timer.delay),
+    [3000],
+  );
+  h.fireTimers();
+  assert.equal(await (await pending.done())?.text(), 'complete installed dashboard');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.counts().aborted, 1);
+  assert.equal(
+    h.counts().bodyCancelled,
+    1,
+    'both tee branches must be cancelled to stop the source',
+  );
+  assert.equal(h.timers.size, 0);
+  assert.equal(await h.get('/'), 'complete installed dashboard');
+});
+
+test('an interrupted dashboard body falls back instead of exposing truncated HTML', async () => {
+  const h = harness();
+  h.setMode('body-hang');
+  h.put('/', 'complete installed dashboard');
+  const pending = h.dispatch('/');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.failBody();
+  assert.equal(await (await pending.done())?.text(), 'complete installed dashboard');
+  assert.equal(h.counts().aborted, 1);
+  assert.equal(h.timers.size, 0);
+});
+
+test('dashboard buffering is bounded and an oversized response retains the installed shell', async () => {
+  const h = harness();
+  h.setMode('oversized');
+  h.put('/', 'complete installed dashboard');
+  assert.equal(await (await h.dispatch('/').done())?.text(), 'complete installed dashboard');
+  assert.equal(h.counts().aborted, 1);
+  assert.equal(await h.get('/'), 'complete installed dashboard');
+});
+
+test('an empty successful dashboard response cannot replace a complete installed shell', async () => {
+  const h = harness();
+  h.setMode('empty');
+  h.put('/', 'complete installed dashboard');
+  assert.equal(await (await h.dispatch('/').done())?.text(), 'complete installed dashboard');
+  assert.equal(h.counts().aborted, 1);
+});
+
+test('late headers after a timed-out fetch are cancelled even when fetch ignores its abort', async () => {
+  const h = harness();
+  h.setMode('headers-late');
+  h.put('/', 'complete installed dashboard');
+  const pending = h.dispatch('/');
+  h.fireTimers();
+  assert.equal(await (await pending.done())?.text(), 'complete installed dashboard');
+  h.deliverLateHeaders();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.counts().bodyCancelled, 1);
+  assert.equal(h.counts().aborted, 1);
+  assert.equal(h.timers.size, 0);
+});
+
+test('a stalled body without an installed dashboard returns an honest network error', async () => {
+  const h = harness();
+  h.setMode('body-hang');
+  const pending = h.dispatch('/');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.fireTimers();
+  assert.equal((await pending.done())?.type, 'error');
+  assert.equal(h.counts().bodyCancelled, 1);
+});
+
+test('a completely downloaded dashboard preserves its bytes and response headers', async () => {
+  const h = harness();
+  h.put('/', 'old installed dashboard');
+  const result = await h.dispatch('/').done();
+  assert.equal(await result?.text(), 'network document');
+  assert.equal(result?.headers.get('content-type'), 'text/html; charset=utf-8');
+  assert.equal(result?.headers.get('x-shell-version'), 'network');
+  assert.equal(h.timers.size, 0);
+  assert.equal(await h.get('/'), 'old installed dashboard');
+});
+
 test('server errors prefer the installed dashboard instead of breaking offline readiness', async () => {
   const h = harness();
   h.setMode('error');
   h.put('/', 'stable shell');
   assert.equal(await (await h.dispatch('/').done())?.text(), 'stable shell');
+});
+
+test('a discarded error response is cancelled when the cached dashboard replaces it', async () => {
+  const h = harness();
+  h.setMode('error-body');
+  h.put('/', 'stable shell');
+  assert.equal(await (await h.dispatch('/').done())?.text(), 'stable shell');
+  assert.equal(h.counts().bodyCancelled, 1, 'do not keep downloading a discarded error page');
+});
+
+test('an uncached error response keeps its body readable for the caller', async () => {
+  const h = harness();
+  h.setMode('error-body');
+  const response = await h.dispatch('/').done();
+  assert.equal(response?.status, 503);
+  assert.equal(h.counts().bodyCancelled, 0);
+  const reader = response!.body!.getReader();
+  assert.equal(
+    new TextDecoder().decode((await reader.read()).value),
+    '<!doctype html><html><head>',
+  );
+  await reader.cancel();
 });
 
 test('new online HTML never overwrites the installed shell with mismatched hashed dependencies', async () => {

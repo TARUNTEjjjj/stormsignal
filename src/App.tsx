@@ -1636,7 +1636,7 @@ export default function App() {
                 <p>
                   Elevated / high screening thresholds: hourly rain 5 / 15 mm; wind gusts 50 / 75
                   km/h; feels-like temperature 35 / 40 °C; air temperature −5 / −15 °C; UV index 6 /
-                  8. Thunderstorm forecast code 95 is elevated; codes 96 and 99 are high. These are
+                  8. Thunderstorm forecast code 95 is elevated; codes 96, 97 and 99 are high. These are
                   application indicators, not official warning levels or safe limits.
                 </p>
                 <p>

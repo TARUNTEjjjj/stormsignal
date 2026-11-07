@@ -2,7 +2,7 @@
 
 [Open the live website](https://stormsignal-weather.pages.dev) · [Verification notes](docs/verification.md)
 
-Weather with evidence. An open-source weather workspace that puts forecasts, satellite imagery, model disagreement, and official warning coverage in one view.
+Weather with evidence. A weather workspace that puts forecasts, satellite imagery, model disagreement, and official warning coverage in one view.
 
 StormSignal is intended for public situational awareness and learning. It does not issue official warnings, certify safe routes, or replace emergency instructions. No data is not the same as no danger.
 

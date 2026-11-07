@@ -73,3 +73,94 @@ test('zone labels distinguish repeated local hours across daylight-saving change
   assert.match(after, /01:00/);
   assert.notEqual(before, after);
 });
+
+test('equivalent option objects reuse a formatter without caching the timestamp or changing timezone precedence', (t) => {
+  const Original = Intl.DateTimeFormat;
+  let constructions = 0;
+  t.mock.method(
+    Intl,
+    'DateTimeFormat',
+    function (...args: ConstructorParameters<typeof Intl.DateTimeFormat>) {
+      constructions++;
+      return new Original(...args);
+    },
+  );
+  const first: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/New_York',
+  };
+  const second: Intl.DateTimeFormatOptions = {
+    minute: '2-digit',
+    hour: '2-digit',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    second: undefined,
+    timeZone: 'UTC',
+  };
+  const start = Date.UTC(2026, 10, 7, 5);
+  const expected = new Original('en-GB', { ...first, timeZone: 'Asia/Tokyo' });
+  assert.equal(localTime(start, 'Asia/Tokyo', first), expected.format(start));
+  assert.equal(
+    localTime(start + 3_600_000, 'Asia/Tokyo', second),
+    expected.format(start + 3_600_000),
+  );
+  assert.equal(constructions, 1);
+  assert.equal(first.timeZone, 'America/New_York', 'Formatting must not mutate caller options.');
+});
+
+test('formatter reuse preserves distinct options, zones, fallback and daylight-saving changes', () => {
+  const start = Date.UTC(2026, 10, 1, 5);
+  const withZone: Intl.DateTimeFormatOptions = {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  };
+  for (const zone of ['UTC', 'Asia/Kolkata', 'America/New_York', 'invalid-zone']) {
+    for (const options of [withZone, { ...withZone, weekday: 'short' as const }]) {
+      const expected = new Intl.DateTimeFormat('en-GB', {
+        ...options,
+        timeZone: zone === 'invalid-zone' ? 'UTC' : zone,
+      });
+      for (const time of [start, start + 3_600_000, start + 86_400_000])
+        assert.equal(localTime(time, zone, options), expected.format(time));
+    }
+  }
+  assert.equal(localTime(NaN, 'invalid-zone'), 'Unavailable');
+});
+
+test('the formatter cache is bounded and evicts the least recently used entry', (t) => {
+  const zones = Intl.supportedValuesOf('timeZone').slice(0, 65);
+  assert.equal(zones.length, 65);
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: 'long',
+    era: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit',
+    hourCycle: 'h24',
+  };
+  const Original = Intl.DateTimeFormat;
+  let constructions = 0;
+  t.mock.method(
+    Intl,
+    'DateTimeFormat',
+    function (...args: ConstructorParameters<typeof Intl.DateTimeFormat>) {
+      constructions++;
+      return new Original(...args);
+    },
+  );
+  const time = Date.UTC(2026, 10, 7);
+  for (const zone of zones) localTime(time, zone, options);
+  assert.equal(constructions, 65);
+  localTime(time, zones[1], options);
+  assert.equal(constructions, 65, 'A recently used entry remains cached.');
+  localTime(time, zones[0], options);
+  assert.equal(constructions, 66, 'The oldest of 65 distinct entries was evicted.');
+  localTime(time, zones[2], options);
+  assert.equal(constructions, 67, 'Refreshing another entry does not grow the cache.');
+});

@@ -53,9 +53,10 @@ function percent(value: unknown): number | null {
   const n = nonnegative(value);
   return n !== null && n <= 100 ? n : null;
 }
+// Open-Meteo includes WMO 97 (heavy thunderstorm): https://open-meteo.com/en/docs
 const WEATHER_CODES = new Set([
   0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86,
-  95, 96, 99,
+  95, 96, 97, 99,
 ]);
 function weatherCode(value: unknown): number | null {
   const n = number(value);
@@ -102,8 +103,10 @@ function url(base: string, params: Record<string, string>): string {
 
 async function boundedJson(response: Response): Promise<unknown> {
   const length = Number(response.headers.get('content-length'));
-  if (Number.isFinite(length) && length > MAX_BYTES)
+  if (Number.isFinite(length) && length > MAX_BYTES) {
+    void response.body?.cancel().catch(() => {});
     throw new WeatherDataError('The provider response is too large. Try again later.');
+  }
   if (!response.body) throw new WeatherDataError('The provider returned an empty response.');
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -114,11 +117,13 @@ async function boundedJson(response: Response): Promise<unknown> {
       if (part.done) break;
       size += part.value.byteLength;
       if (size > MAX_BYTES) {
-        await reader.cancel();
         throw new WeatherDataError('The provider response is too large. Try again later.');
       }
       chunks.push(part.value);
     }
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -166,13 +171,15 @@ async function requestJson(target: string, ttl: number, signal?: AbortSignal): P
         response.status,
       );
     }
-    if (!response.ok)
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
       throw new WeatherDataError(
         response.status === 429
           ? 'The weather provider is busy. Please wait before retrying.'
           : `Weather provider unavailable (HTTP ${response.status}). Check the official source and retry later.`,
         response.status,
       );
+    }
     const value = await boundedJson(response);
     if (record(value).error === true)
       throw new WeatherDataError(
@@ -687,6 +694,7 @@ export function weatherLabel(code: number | null | undefined): string {
   if ([71, 73, 75, 77].includes(code)) return 'Snow';
   if ([80, 81, 82].includes(code)) return 'Rain showers';
   if ([85, 86].includes(code)) return 'Snow showers';
+  if (code === 97) return 'Heavy thunderstorm';
   if ([95, 96, 99].includes(code)) return 'Thunderstorm';
   return 'Conditions unavailable';
 }

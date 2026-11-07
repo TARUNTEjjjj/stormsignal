@@ -3,6 +3,30 @@ export const finite = (n: unknown): n is number => typeof n === 'number' && Numb
 export function value(n: number | null | undefined, digits = 0) {
   return finite(n) ? n.toFixed(digits) : '—';
 }
+const MAX_TIME_FORMATTERS = 64;
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function timeFormatter(timezone: string, options: Intl.DateTimeFormatOptions) {
+  // Match the previous spread/override semantics. Property order and explicitly
+  // undefined options must not create a formatter for every equivalent call.
+  const formatOptions = { ...options, timeZone: timezone };
+  const key = JSON.stringify(
+    Object.entries(formatOptions)
+      .filter(([, option]) => option !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  const existing = timeFormatters.get(key);
+  if (existing) {
+    timeFormatters.delete(key);
+    timeFormatters.set(key, existing);
+    return existing;
+  }
+  const formatter = new Intl.DateTimeFormat('en-GB', formatOptions);
+  if (timeFormatters.size >= MAX_TIME_FORMATTERS)
+    timeFormatters.delete(timeFormatters.keys().next().value!);
+  timeFormatters.set(key, formatter);
+  return formatter;
+}
 export function localTime(
   time: number,
   timezone = 'UTC',
@@ -10,9 +34,9 @@ export function localTime(
 ) {
   if (!finite(time)) return 'Unavailable';
   try {
-    return new Intl.DateTimeFormat('en-GB', { ...options, timeZone: timezone }).format(time);
+    return timeFormatter(timezone, options).format(time);
   } catch {
-    return new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'UTC' }).format(time);
+    return timeFormatter('UTC', options).format(time);
   }
 }
 export function age(time: number, now = Date.now()) {

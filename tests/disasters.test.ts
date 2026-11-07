@@ -145,6 +145,44 @@ test('failed feed is explicit, never replaced by an empty success or fabricated 
   await assert.rejects(fetchDisasters(), /unexpected report format/);
 });
 
+test('HTML success responses are rejected as provider pages and never cached as reports', async () => {
+  for (const contentType of ['text/html; charset=utf-8', 'application/xhtml+xml', 'Text/Html']) {
+    clearDisasterCache();
+    let cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': contentType } },
+      );
+    await assert.rejects(
+      fetchDisasters(),
+      /GDACS returned a web page instead of report data\. Open the official GDACS source or try again later\./,
+    );
+    assert.equal(cancelled, true, 'Release the provider HTML body without reading it');
+    globalThis.fetch = async () => response([feature()]);
+    assert.equal((await fetchDisasters()).events.length, 1, 'A later valid response can recover');
+  }
+});
+
+test('an HTML second page retains verified first-page reports with explicit partial coverage', async () => {
+  let calls = 0;
+  globalThis.fetch = async () =>
+    ++calls === 1
+      ? response(Array.from({ length: 100 }, (_, i) => feature({ eventid: i + 1 })))
+      : new Response('<!doctype html><title>Provider page</title>', {
+          headers: { 'Content-Type': 'text/html' },
+        });
+  const result = await fetchDisasters();
+  assert.equal(calls, 2);
+  assert.equal(result.partial, true);
+  assert.equal(result.recordsRead, 100);
+  assert.equal(result.events.length, 100);
+});
+
 test('bounded pagination exposes truncation instead of claiming complete global coverage', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
@@ -174,4 +212,38 @@ test('oversized responses and caller cancellation are rejected', async () => {
   const controller = new AbortController();
   controller.abort();
   await assert.rejects(fetchDisasters(controller.signal), { name: 'AbortError' });
+});
+
+test('rejected GDACS bodies are cancelled without replacing the provider error', async () => {
+  for (const [status, headers, message] of [
+    [503, {}, /HTTP 503/],
+    [200, { 'content-length': '3000000' }, /safely read/],
+  ] as const) {
+    let cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status, headers },
+      );
+    await assert.rejects(fetchDisasters(), message);
+    assert.equal(cancelled, true, `Release the unread HTTP ${status} body`);
+  }
+});
+
+test('explicit-zone GDACS timestamps reject impossible calendar dates', () => {
+  for (const invalid of [
+    '2026-02-30T08:00:00Z',
+    '2026-02-30T08:00:00+05:30',
+    '2026-04-31T08:00:00-04:00',
+  ]) {
+    assert.equal(gdacsTimestamp(invalid), null, invalid);
+  }
+  assert.equal(
+    gdacsTimestamp('2024-02-29T08:00:00+05:30'),
+    Date.parse('2024-02-29T08:00:00+05:30'),
+  );
 });

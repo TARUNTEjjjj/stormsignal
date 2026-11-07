@@ -5,6 +5,7 @@ const BUILD_ASSETS = [];
 const OPTIONAL_ASSETS = [];
 const DOCUMENTS = ['/', '/preparedness.html', '/offline.html'];
 const STATIC_FILES = ['/favicon.svg', '/icon.svg', '/manifest.webmanifest'];
+const MAX_DASHBOARD_BYTES = 1024 * 1024;
 const ALLOWED_ASSETS = new Set([...BUILD_ASSETS, ...OPTIONAL_ASSETS, ...STATIC_FILES]);
 const HASHED_SCRIPT_OR_STYLE = /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.(?:js|css)$/;
 const DOCUMENT_ALIASES = new Map([
@@ -88,22 +89,71 @@ async function readCache(path) {
   }
 }
 
-async function fetchWithin(request, milliseconds) {
+async function fetchWithin(request, milliseconds, completeBodyLimit = 0) {
   const controller = new AbortController();
+  let response, reader;
   let timer;
+  const cancelBody = () => {
+    // A clone tees the response. Cancel both branches without awaiting either:
+    // a tee's cancellation promise can wait for the other branch to close.
+    // Cleanup can run again after a timeout has released the reader's lock.
+    try {
+      reader?.cancel().catch(() => {});
+    } catch {
+      /* Already released. */
+    }
+    response?.body?.cancel().catch(() => {});
+  };
   try {
-    // Race explicitly: not every network failure rejects fetch promptly.
+    // A fetch resolves when headers arrive, not when its document is complete.
+    // Read a bounded clone before handing the original response to navigation;
+    // this preserves its URL, redirect metadata and headers without exposing a
+    // partial shell that can no longer be replaced by the cached dashboard.
+    const transfer = (async () => {
+      try {
+        response = await fetch(request, { signal: controller.signal });
+        controller.signal.throwIfAborted();
+        if (!completeBodyLimit || !response.ok || response.redirected) return response;
+        if (!response.body) throw new Error('Empty shell response');
+        const declaredSize = Number(response.headers.get('content-length'));
+        if (Number.isFinite(declaredSize) && declaredSize > completeBodyLimit)
+          throw new Error('Shell response too large');
+        reader = response.clone().body.getReader();
+        let received = 0;
+        for (;;) {
+          const part = await reader.read();
+          controller.signal.throwIfAborted();
+          if (part.done) break;
+          received += part.value.byteLength;
+          if (received > completeBodyLimit) throw new Error('Shell response too large');
+        }
+        if (!received) throw new Error('Empty shell response');
+        return response;
+      } catch (error) {
+        // Also release a late response if its fetch ignored the earlier abort.
+        controller.abort();
+        cancelBody();
+        throw error;
+      }
+    })();
+    // Race explicitly: not every broken connection rejects its fetch/body read.
     return await Promise.race([
-      fetch(request, { signal: controller.signal }),
+      transfer,
       new Promise((_, reject) => {
         timer = setTimeout(() => {
           controller.abort();
+          cancelBody();
           reject(new Error('Shell request timed out'));
         }, milliseconds);
       }),
     ]);
+  } catch (error) {
+    controller.abort();
+    cancelBody();
+    throw error;
   } finally {
     clearTimeout(timer);
+    reader?.releaseLock();
   }
 }
 
@@ -154,9 +204,14 @@ async function previousBuildAsset(request, path) {
 
 async function dashboard(request) {
   try {
-    const response = await fetchWithin(request, 3000);
+    const response = await fetchWithin(request, 3000, MAX_DASHBOARD_BYTES);
     if (response.ok && !response.redirected) return response;
-    return (await readCache('/')) || response;
+    const cached = await readCache('/');
+    if (!cached) return response;
+    // Headers can arrive while an error/redirect body is still downloading.
+    // Stop that unused transfer only when an installed shell replaces it.
+    response.body?.cancel().catch(() => {});
+    return cached;
   } catch {
     return (await readCache('/')) || Response.error();
   }

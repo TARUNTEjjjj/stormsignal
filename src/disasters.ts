@@ -65,7 +65,11 @@ export function gdacsTimestamp(value: unknown): number | null {
   const normalized = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`;
   const ms = Date.parse(normalized);
   if (!Number.isFinite(ms) || ms < Date.UTC(2000, 0, 1) || ms >= Date.UTC(2200, 0, 1)) return null;
-  // Date.parse normalizes invalid dates such as February 30: reject those too.
+  // Date.parse normalizes impossible dates even when a timezone is present.
+  // Check the original calendar date, not the UTC date shifted by its offset.
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== value.slice(0, 10))
+    return null;
   if (
     !/(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
     new Date(ms).toISOString().slice(0, 19) !== value.slice(0, 19)
@@ -181,12 +185,25 @@ async function page(target: string, signal?: AbortSignal): Promise<unknown> {
       referrerPolicy: 'no-referrer',
       headers: { Accept: 'application/geo+json, application/json' },
     });
-    if (!response.ok)
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
       throw new Error(
         `GDACS reports are unavailable (HTTP ${response.status}). Check the official source.`,
       );
-    if (Number(response.headers.get('content-length')) > MAX_BYTES || !response.body)
+    }
+    // GDACS can return an HTTP 200 HTML page to cross-origin browser requests.
+    // That is a provider response, not an empty or malformed disaster snapshot.
+    const mediaType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+    if (mediaType === 'text/html' || mediaType === 'application/xhtml+xml') {
+      void response.body?.cancel().catch(() => {});
+      throw new Error(
+        'GDACS returned a web page instead of report data. Open the official GDACS source or try again later.',
+      );
+    }
+    if (Number(response.headers.get('content-length')) > MAX_BYTES || !response.body) {
+      void response.body?.cancel().catch(() => {});
       throw new Error('The GDACS response could not be safely read. Use the official source.');
+    }
     const reader = response.body.getReader(),
       chunks: Uint8Array[] = [];
     let size = 0;
@@ -196,11 +213,13 @@ async function page(target: string, signal?: AbortSignal): Promise<unknown> {
         if (part.done) break;
         size += part.value.byteLength;
         if (size > MAX_BYTES) {
-          await reader.cancel();
           throw new Error('The GDACS response exceeded the size limit.');
         }
         chunks.push(part.value);
       }
+    } catch (error) {
+      void reader.cancel().catch(() => {});
+      throw error;
     } finally {
       reader.releaseLock();
     }

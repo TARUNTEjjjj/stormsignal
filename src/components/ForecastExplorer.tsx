@@ -1,4 +1,4 @@
-import { useId, useState, type PointerEvent } from 'react';
+import { useId, useMemo, useState, type PointerEvent } from 'react';
 import { ChevronDown, CloudRain, MoveHorizontal, Thermometer, Wind } from 'lucide-react';
 import { finite, localTime, value } from '../presentation';
 import {
@@ -43,19 +43,28 @@ export default function ForecastExplorer({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
   const visibleRange = hours.length <= 24 ? 24 : range;
-  const selected = hours.slice(0, visibleRange);
+  const selected = useMemo(() => hours.slice(0, visibleRange), [hours, visibleRange]);
   const index = Math.min(selectedIndex, Math.max(0, selected.length - 1));
   const hour = selected[index];
   const { label, unit } = METRICS[metric];
-  const series = forecastSeries(selected, models, metric);
-  const domain = forecastDomain(series, metric);
-  const geometries = series.map((points) => forecastGeometry(points, domain));
+  // Moving the inspection cursor changes readings, not the plotted series.
+  const series = useMemo(
+    () => forecastSeries(selected, models, metric),
+    [selected, models, metric],
+  );
+  const domain = useMemo(() => forecastDomain(series, metric), [series, metric]);
+  const geometries = useMemo(
+    () => series.map((points) => forecastGeometry(points, domain)),
+    [series, domain],
+  );
   const x = hour ? pointPosition(hour.time, selected[0].time, selected.at(-1)!.time) : 0;
-  const names = ['Local forecast', ...models.map((model) => model.name)];
+  const names = useMemo(() => ['Local forecast', ...models.map((model) => model.name)], [models]);
   const hasValues = series.some((points) => points.some((point) => finite(point.value)));
-  const timeLabel = hour
-    ? localTime(hour.time, timezone, timeOptions)
-    : 'No forecast hours available';
+  const timeLabels = useMemo(
+    () => selected.map((item) => localTime(item.time, timezone, timeOptions)),
+    [selected, timezone],
+  );
+  const timeLabel = timeLabels[index] ?? 'No forecast hours available';
   const spokenReading = names
     .map(
       (name, seriesIndex) =>
@@ -326,7 +335,7 @@ export default function ForecastExplorer({
             <tbody>
               {selected.map((item, rowIndex) => (
                 <tr key={item.time}>
-                  <th scope="row">{localTime(item.time, timezone, timeOptions)}</th>
+                  <th scope="row">{timeLabels[rowIndex]}</th>
                   {series.map((points, seriesIndex) => (
                     <td key={names[seriesIndex]}>
                       {finite(points[rowIndex]?.value)

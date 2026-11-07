@@ -728,3 +728,43 @@ test('a coordinate-only location requires country metadata without blaming an up
   );
   assert.equal(called, false);
 });
+
+test('heavy-thunderstorm code 97 survives all forecast views and has a readable label', async () => {
+  const payload = forecastPayload();
+  globalThis.fetch = async () =>
+    json({
+      ...payload,
+      current: { ...payload.current, weather_code: 97 },
+      hourly: { ...payload.hourly, weather_code: [97, 97] },
+      daily: { ...payload.daily, weather_code: [97] },
+    });
+  const forecast = await fetchForecast(place);
+  assert.equal(forecast.current.code, 97);
+  assert.deepEqual(
+    forecast.hours.map((hour) => hour.code),
+    [97, 97],
+  );
+  assert.equal(forecast.days[0].code, 97);
+  assert.equal(weatherLabel(97), 'Heavy thunderstorm');
+});
+
+test('rejected provider bodies are cancelled before returning the original error', async () => {
+  for (const [status, headers, message] of [
+    [429, {}, /provider is busy/],
+    [503, {}, /HTTP 503/],
+    [200, { 'content-length': '3000000' }, /too large/],
+  ] as const) {
+    let cancelled = false;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status, headers },
+      );
+    await assert.rejects(fetchForecast(place), message);
+    assert.equal(cancelled, true, `Release the unread HTTP ${status} body`);
+  }
+});

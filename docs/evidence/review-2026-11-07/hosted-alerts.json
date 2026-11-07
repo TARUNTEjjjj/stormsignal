@@ -1,0 +1,120 @@
+{
+  "deployment": "https://9f40d63c.stormsignal-weather.pages.dev",
+  "production": "https://stormsignal-weather.pages.dev",
+  "sourceCommit": "3e63483aa7e2e9e618fee6b595949e63f382896a",
+  "scope": "International checks exercise deployed Cloudflare Pages API; US NWS uses the direct client adapter. Counts are time-specific, coverage remains incomplete.",
+  "initialCheck": [
+    {
+      "city": "San Francisco",
+      "source": "US National Weather Service",
+      "scope": "point: San Francisco",
+      "partial": false,
+      "warnings": 2,
+      "checkedAt": "2026-11-07T11:11:24.288Z",
+      "latestBulletin": null,
+      "meaning": "Verified active bulletins returned; follow the issuing authority."
+    },
+    {
+      "city": "Manila",
+      "failed": true,
+      "reason": "Manila: a direct or supplementary source failed"
+    },
+    {
+      "city": "Kolkata",
+      "source": "IMD district nowcasts + NDMA SACHET",
+      "scope": "region: Kolkata district + West Bengal",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "IMD Kolkata district nowcasts \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "NDMA SACHET \u00b7 West Bengal regional feed",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-07T11:11:24.641Z",
+      "latestBulletin": "2026-11-07T10:43:28.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    },
+    {
+      "city": "Jakarta",
+      "failed": true,
+      "reason": "Jakarta: a direct or supplementary source failed"
+    }
+  ],
+  "boundedRetry": [
+    {
+      "city": "San Francisco",
+      "source": "US National Weather Service",
+      "scope": "point: San Francisco",
+      "partial": false,
+      "warnings": 2,
+      "checkedAt": "2026-11-07T11:12:37.005Z",
+      "latestBulletin": null,
+      "meaning": "Verified active bulletins returned; follow the issuing authority."
+    },
+    {
+      "city": "Manila",
+      "source": "PAGASA direct + WMO SWIC",
+      "scope": "point: Manila",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "PAGASA CAP feed \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "PAGASA via WMO SWIC \u00b7 supplementary",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-07T11:12:38.109Z",
+      "latestBulletin": "2026-10-31T09:02:11.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    },
+    {
+      "city": "Kolkata",
+      "source": "IMD district nowcasts + NDMA SACHET",
+      "scope": "region: Kolkata district + West Bengal",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "IMD Kolkata district nowcasts \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "NDMA SACHET \u00b7 West Bengal regional feed",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-07T11:12:36.249Z",
+      "latestBulletin": "2026-11-07T10:43:28.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    },
+    {
+      "city": "Jakarta",
+      "source": "BMKG direct + WMO SWIC",
+      "scope": "point: Jakarta",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "BMKG CAP feed \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "BMKG via WMO SWIC \u00b7 supplementary",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-07T11:12:36.444Z",
+      "latestBulletin": "2026-11-07T10:40:00.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    }
+  ]
+}

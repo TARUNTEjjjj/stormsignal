@@ -47,9 +47,8 @@ type RecordValue = Record<string, unknown>;
 const MAX_XML_BYTES = 256_000;
 const MIN_TIME = Date.UTC(2000, 0, 1),
   MAX_TIME = Date.UTC(2100, 0, 1);
-const parser = new XMLParser({
+const parserOptions = {
   ignoreAttributes: false,
-  removeNSPrefix: true,
   parseTagValue: false,
   parseAttributeValue: false,
   trimValues: true,
@@ -57,7 +56,42 @@ const parser = new XMLParser({
   // XML numeric character references (&#39;, &#xA;) must be decoded. DOCTYPE and
   // ENTITY declarations are rejected before parsing, so no custom entity expands.
   htmlEntities: true,
-});
+};
+const parser = new XMLParser({ ...parserOptions, removeNSPrefix: true });
+const namespaceParser = new XMLParser({ ...parserOptions, removeNSPrefix: false });
+const CAP_NAMESPACE = 'urn:oasis:names:tc:emergency:cap:1.2';
+// Guard the fields this adapter consumes, not a full CAP schema. Unrelated
+// extension elements can remain in a document without becoming CAP fields.
+const CAP_CHILDREN: Record<string, Set<string>> = {
+  alert: new Set([
+    'identifier',
+    'sender',
+    'sent',
+    'status',
+    'msgType',
+    'scope',
+    'references',
+    'info',
+  ]),
+  info: new Set([
+    'language',
+    'event',
+    'severity',
+    'urgency',
+    'certainty',
+    'senderName',
+    'effective',
+    'onset',
+    'expires',
+    'headline',
+    'description',
+    'instruction',
+    'web',
+    'area',
+  ]),
+  area: new Set(['areaDesc', 'polygon', 'circle', 'geocode']),
+  geocode: new Set(['valueName', 'value']),
+};
 const record = (value: unknown): RecordValue => {
   if (
     !value ||
@@ -83,13 +117,42 @@ const list = (value: unknown, max: number): unknown[] => {
   if (values.length > max) throw new Error('XML list exceeds its bound.');
   return values;
 };
-function xml(raw: string): RecordValue {
+function xml(raw: string, selectedParser = parser): RecordValue {
   if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > MAX_XML_BYTES)
     throw new Error('XML exceeds its size limit.');
   if (/<!\s*(?:DOCTYPE|ENTITY)\b/i.test(raw))
     throw new Error('XML entities and document types are not accepted.');
   if (XMLValidator.validate(raw) !== true) throw new Error('Malformed XML.');
-  return record(parser.parse(raw));
+  return record(selectedParser.parse(raw));
+}
+
+function validateCapNamespaces(root: RecordValue): void {
+  const roots = Object.keys(root).filter((name) => !name.startsWith('?'));
+  if (roots.length !== 1 || Array.isArray(root[roots[0]]))
+    throw new Error('Expected one CAP 1.2 alert namespace.');
+  function visit(name: string, value: unknown, inherited: Map<string, string>, expected: string) {
+    const node = value && typeof value === 'object' ? record(value) : undefined;
+    const namespaces = new Map(inherited);
+    for (const [key, uri] of Object.entries(node ?? {})) {
+      if (key === '@_xmlns' || key.startsWith('@_xmlns:')) {
+        if (typeof uri !== 'string') throw new Error('Invalid CAP namespace declaration.');
+        namespaces.set(key === '@_xmlns' ? '' : key.slice('@_xmlns:'.length), uri);
+      }
+    }
+    const parts = name.split(':');
+    const prefix = parts.length === 1 ? '' : parts[0];
+    if (parts.length > 2 || parts.at(-1) !== expected || namespaces.get(prefix) !== CAP_NAMESPACE)
+      throw new Error('Unexpected namespace on a CAP field.');
+    for (const [childName, child] of Object.entries(node ?? {})) {
+      if (childName.startsWith('@_') || childName.startsWith('?') || childName.startsWith('#'))
+        continue;
+      const localName = childName.split(':').at(-1)!;
+      if (!CAP_CHILDREN[expected]?.has(localName)) continue;
+      for (const item of Array.isArray(child) ? child : [child])
+        visit(childName, item, namespaces, localName);
+    }
+  }
+  visit(roots[0], root[roots[0]], new Map(), 'alert');
 }
 function capTime(value: unknown, required = true): number | null {
   const raw = text(value, 60, required);
@@ -197,13 +260,10 @@ export function parseRss(raw: string): RssFeed {
 /** Preserve cancellation metadata and all languages; filtering is a separate operation. */
 export function parseCap(raw: string, now = Date.now()): CapDocument {
   if (!Number.isFinite(now)) throw new Error('Invalid clock.');
-  if (
-    !/<(?:[\w.-]+:)?alert\b[^>]*\bxmlns(?::[\w.-]+)?\s*=\s*["']urn:oasis:names:tc:emergency:cap:1\.2["']/.test(
-      raw,
-    )
-  )
-    throw new Error('Expected a CAP 1.2 namespace.');
-  const root = xml(raw),
+  // Resolve each consumed element's own namespace before removing prefixes.
+  // Merely declaring an unused CAP prefix does not make a foreign element CAP.
+  validateCapNamespaces(xml(raw, namespaceParser));
+  const root = record(parser.parse(raw)),
     a = record(root.alert);
   const sent = capTime(a.sent)!;
   if (sent > now + 300_000) throw new Error('CAP publication time is in the future.');

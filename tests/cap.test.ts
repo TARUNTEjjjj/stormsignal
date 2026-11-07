@@ -31,6 +31,64 @@ test('CAP parser preserves multilingual details, issuer, geocodes, polygon coord
   });
 });
 
+test('CAP namespace guard accepts scoped CAP prefixes and unrelated extension content', () => {
+  const expected = parseCap(xml(), NOW);
+  const prefixed = xml()
+    .replace(
+      'xmlns="urn:oasis:names:tc:emergency:cap:1.2"',
+      'xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2"',
+    )
+    .replace(/<(\/?)([A-Za-z][\w-]*)(?=[\s>])/g, '<$1cap:$2');
+  assert.deepEqual(parseCap(prefixed, NOW), expected);
+  const scoped = xml()
+    .replace(
+      '<status>Actual</status>',
+      '<c:status xmlns:c="urn:oasis:names:tc:emergency:cap:1.2">Actual</c:status>',
+    )
+    .replace(
+      '</alert>',
+      '<ext:metadata xmlns:ext="urn:example:metadata"><ext:status>Unrelated extension value</ext:status></ext:metadata></alert>',
+    );
+  assert.deepEqual(parseCap(scoped, NOW), expected);
+});
+
+test('CAP namespace guard rejects unused namespace declarations impersonating the root vocabulary', () => {
+  const namespace = 'urn:oasis:names:tc:emergency:cap:1.2';
+  const invalid = [
+    xml().replace(`xmlns="${namespace}"`, `xmlns="urn:foreign" xmlns:unused="${namespace}"`),
+    xml().replace(`xmlns="${namespace}"`, `xmlns:unused="${namespace}"`),
+    xml()
+      .replace('<alert ', '<foreign:alert ')
+      .replace('</alert>', '</foreign:alert>')
+      .replace(`xmlns="${namespace}"`, `xmlns:foreign="urn:foreign" xmlns:unused="${namespace}"`),
+  ];
+  for (const source of invalid) assert.throws(() => parseCap(source, NOW), /namespace/i);
+});
+
+test('CAP namespace guard rejects foreign consumed fields and scoped prefix/default rebinding', () => {
+  const invalid = [
+    xml().replace(
+      '<status>Actual</status>',
+      '<ext:status xmlns:ext="urn:foreign">Actual</ext:status>',
+    ),
+    xml().replace('<info>', '<info xmlns="urn:foreign">'),
+    xml().replace('<area>', '<area xmlns="">'),
+    xml()
+      .replace('<expires>', '<ext:expires xmlns:ext="urn:foreign">')
+      .replace('</expires>', '</ext:expires>'),
+    xml()
+      .replace('<info>', '<c:info xmlns:c="urn:oasis:names:tc:emergency:cap:1.2">')
+      .replace('</info>', '</c:info>')
+      .replace(
+        '<severity>Severe</severity>',
+        '<c:severity xmlns:c="urn:foreign">Severe</c:severity>',
+      ),
+    xml().replace('<value>469</value>', '<ext:value xmlns:ext="urn:foreign">469</ext:value>'),
+    xml().replace('<status>Actual</status>', '<undeclared:status>Actual</undeclared:status>'),
+  ];
+  for (const source of invalid) assert.throws(() => parseCap(source, NOW), /namespace/i);
+});
+
 test('CAP parser decodes XML numeric character references in warning text', () => {
   const document = parseCap(
     xml(

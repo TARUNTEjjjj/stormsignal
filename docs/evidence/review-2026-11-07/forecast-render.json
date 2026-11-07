@@ -1,0 +1,14 @@
+{
+  "method": "Alternating Node React renderToStaticMarkup of the actual ForecastExplorer at the baseline commit and after the review changes; 40 warmups and 200 samples each. The default 24 visible hours are drawn from 72 input hours, with two comparison models. Exact HTML output matched. SSR does not measure browser input or paint, and cannot measure memo reuse across client renders.",
+  "beforeCommit": "4ad39c0e4635971616679abbb9b92b741d6a63d6",
+  "node": "v26.13.0",
+  "before": {
+    "medianMs": 1.2710840000000871,
+    "p95Ms": 2.816082999999992
+  },
+  "after": {
+    "medianMs": 0.42487500000004275,
+    "p95Ms": 1.117791000000011
+  },
+  "exactHTMLMatch": true
+}

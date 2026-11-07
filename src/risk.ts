@@ -5,7 +5,7 @@ export const FORECAST_STALE_MS = 60 * 60_000;
 
 /** Product screening thresholds, not official warning criteria or a validated risk model.
  * Rain: 5/15 mm in one hour; gusts: 50/75 km/h; apparent heat: 35/40 °C;
- * cold: -5/-15 °C actual temperature; UV: 6/8; thunder: WMO 95/96/99.
+ * cold: -5/-15 °C actual temperature; UV: 6/8; thunder: WMO 95/96/97/99.
  * Local vulnerability, terrain, drainage, and recent rainfall are not represented.
  */
 export function deriveHazards(forecast: Forecast, now = Date.now()): Hazard[] {
@@ -65,7 +65,7 @@ export function deriveHazards(forecast: Forecast, now = Date.now()): Hazard[] {
         detail: `Forecast UV index ${h.uv.toFixed(1)}. Plan shade and sun protection.`,
         time: h.time,
       });
-    if (h.code !== null && [95, 96, 99].includes(h.code))
+    if (h.code !== null && [95, 96, 97, 99].includes(h.code))
       add({
         kind: 'thunder',
         level: h.code === 95 ? 'elevated' : 'high',

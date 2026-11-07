@@ -117,3 +117,12 @@ test('a high forecast signal is explicitly distinct from an official warning', (
   assert.equal(result.level, 'high');
   assert.match(result.detail, /not official warnings/);
 });
+
+test('heavy thunderstorms produce a high model signal without creating an official warning', () => {
+  const result = deriveHazards(forecast([hour({ code: 97 })]), now);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].kind, 'thunder');
+  assert.equal(result[0].level, 'high');
+  assert.equal(getOutlook([hour({ code: 97 })], now).level, 'high');
+  assert.match(getOutlook([hour({ code: 97 })], now).detail, /not official warnings/);
+});

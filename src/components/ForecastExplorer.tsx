@@ -1,12 +1,14 @@
 import { useId, useMemo, useState, type PointerEvent } from 'react';
-import { ChevronDown, CloudRain, MoveHorizontal, Thermometer, Wind } from 'lucide-react';
+import { ChevronDown, CloudRain, Download, MoveHorizontal, Thermometer, Wind } from 'lucide-react';
 import { finite, localTime, value } from '../presentation';
 import {
   CHART_HEIGHT,
   CHART_WIDTH,
   forecastDomain,
+  forecastCsv,
   forecastGeometry,
   forecastSeries,
+  forecastWindow,
   nearestForecastHour,
   pointPosition,
   valuePosition,
@@ -42,8 +44,15 @@ export default function ForecastExplorer({
   const [range, setRange] = useState(24);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
-  const visibleRange = hours.length <= 24 ? 24 : range;
-  const selected = useMemo(() => hours.slice(0, visibleRange), [hours, visibleRange]);
+  const orderedHours = useMemo(() => forecastWindow(hours, 72), [hours]);
+  const hasLongRange = orderedHours.some(
+    (hour) => hour.time >= (orderedHours[0]?.time ?? 0) + 24 * 3_600_000,
+  );
+  const visibleRange = hasLongRange ? range : 24;
+  const selected = useMemo(
+    () => forecastWindow(orderedHours, visibleRange),
+    [orderedHours, visibleRange],
+  );
   const index = Math.min(selectedIndex, Math.max(0, selected.length - 1));
   const hour = selected[index];
   const { label, unit } = METRICS[metric];
@@ -91,6 +100,17 @@ export default function ForecastExplorer({
     );
   }
 
+  function downloadCsv() {
+    const url = URL.createObjectURL(
+      new Blob([forecastCsv(selected, models, metric)], { type: 'text/csv;charset=utf-8' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `stormsignal-${metric}-${visibleRange}h.csv`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="fe-explorer">
       <div className="fe-toolbar">
@@ -116,10 +136,10 @@ export default function ForecastExplorer({
               type="button"
               key={duration}
               aria-pressed={visibleRange === duration}
-              disabled={duration === 72 && hours.length <= 24}
+              disabled={duration === 72 && !hasLongRange}
               title={
-                duration === 72 && hours.length <= 24
-                  ? 'Full workspace is needed for longer forecasts.'
+                duration === 72 && !hasLongRange
+                  ? 'No forecast readings beyond 24 hours are available.'
                   : undefined
               }
               onClick={() => {
@@ -130,6 +150,14 @@ export default function ForecastExplorer({
               {duration}h
             </button>
           ))}
+          <button
+            type="button"
+            disabled={!selected.length}
+            onClick={downloadCsv}
+            title="Export the displayed metric and comparison models. Times are UTC; missing values remain blank."
+          >
+            <Download size={15} aria-hidden="true" /> CSV
+          </button>
         </div>
       </div>
 

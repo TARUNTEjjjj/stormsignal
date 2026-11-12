@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   forecastDomain,
+  forecastCsv,
   forecastGeometry,
   forecastSeries,
+  forecastWindow,
   nearestForecastHour,
   pointPosition,
 } from '../src/forecast-chart';
@@ -12,6 +14,45 @@ const HOUR = 3_600_000;
 const hours = [0, HOUR, 2 * HOUR].map(
   (time) => ({ time, temperature: 20, precipitation: 0, wind: 5 }) as Hour,
 );
+
+test('forecast windows bound elapsed time, sort readings and retain visible gaps', () => {
+  const sparse = [30, 0, 23, 24, 2, 2, NaN].map((time) => ({ time: time * HOUR }) as Hour);
+  assert.deepEqual(
+    forecastWindow(sparse, 24).map((hour) => hour.time / HOUR),
+    [0, 2, 23],
+  );
+  assert.deepEqual(
+    forecastWindow(sparse, 72).map((hour) => hour.time / HOUR),
+    [0, 2, 23, 24, 30],
+  );
+  assert.deepEqual(forecastWindow([], 24), []);
+  assert.deepEqual(forecastWindow(sparse, 0), []);
+  assert.deepEqual(
+    sparse.map((hour) => hour.time / HOUR),
+    [30, 0, 23, 24, 2, 2, NaN],
+  );
+});
+
+test('CSV preserves UTC timestamps, timestamp alignment, zero and missing measurements', () => {
+  const local = [
+    { ...hours[0], temperature: -2 },
+    { ...hours[1], temperature: null },
+  ];
+  const models: ModelForecast[] = [
+    {
+      id: 'test',
+      name: '=SUM(1,2)',
+      fetchedAt: 0,
+      hours: [{ time: HOUR, temperature: 0, precipitation: 0, wind: 0 }],
+    },
+  ];
+  const csv = forecastCsv(local, models, 'temperature');
+  assert.equal(
+    csv,
+    '"time_utc","Local forecast: temperature (C)","\'=SUM(1,2): temperature (C)"\r\n"1970-01-01T00:00:00.000Z",-2,\r\n"1970-01-01T01:00:00.000Z",,0\r\n',
+  );
+  assert.equal(forecastCsv([], [], 'wind'), '"time_utc","Local forecast: wind (km/h)"\r\n');
+});
 
 test('comparison series join by timestamp and leave unmatched hours unavailable', () => {
   const models: ModelForecast[] = [

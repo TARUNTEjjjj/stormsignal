@@ -72,6 +72,14 @@ test('empty forecast renders a recovery message without an unusable hour slider'
   assert.match(html, /disabled=""[^>]*>72h<\/button>/);
 });
 
+test('sparse forecasts keep the 24h view bounded while offering the longer range and export', () => {
+  const html = render([hour(START), hour(START + 2 * HOUR), hour(START + 30 * HOUR)]);
+  const rows = [...html.matchAll(/<th scope="row">(.*?)<\/th>/g)];
+  assert.equal(rows.length, 2);
+  assert.doesNotMatch(html, /disabled=""[^>]*>72h<\/button>/);
+  assert.match(html, /CSV<\/button>/);
+});
+
 test('exact values retain gusts and identify unmatched model hours as unavailable', () => {
   const hours = [
     hour(START, { gust: 17.4 }),

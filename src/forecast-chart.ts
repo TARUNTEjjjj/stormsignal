@@ -8,6 +8,55 @@ export const CHART_WIDTH = 600;
 export const CHART_HEIGHT = 200;
 const INSET = 10;
 
+/** Durations describe elapsed time, even when the provider omits hourly records. */
+export function forecastWindow(hours: Hour[], duration: number): Hour[] {
+  const ordered = hours
+    .filter((hour) => finite(hour.time))
+    .slice()
+    .sort((a, b) => a.time - b.time);
+  const start = ordered[0]?.time;
+  if (start === undefined || !finite(duration) || duration <= 0) return [];
+  const seen = new Set<number>();
+  return ordered.filter((hour) => {
+    if (hour.time >= start + duration * 3_600_000 || seen.has(hour.time)) return false;
+    seen.add(hour.time);
+    return true;
+  });
+}
+
+/** Export the same timestamp joins used by the chart; missing measurements stay empty. */
+export function forecastCsv(
+  hours: Hour[],
+  models: ModelForecast[],
+  metric: ForecastMetric,
+): string {
+  const units = { temperature: 'C', precipitation: 'mm', wind: 'km/h' };
+  const cell = (value: string | number | null) => {
+    if (typeof value === 'number') return finite(value) ? String(value) : '';
+    if (value === null) return '';
+    // Spreadsheet programs may execute formula-looking text even when it is CSV-quoted.
+    const safe = /^[\s]*[=+\-@]/.test(value) ? `'${value}` : value;
+    return `"${safe.replaceAll('"', '""')}"`;
+  };
+  const series = forecastSeries(hours, models, metric);
+  const headings = [
+    'time_utc',
+    ...['Local forecast', ...models.map((model) => model.name)].map(
+      (name) => `${name}: ${metric} (${units[metric]})`,
+    ),
+  ];
+  return (
+    [
+      headings.map(cell).join(','),
+      ...hours.map((hour, index) =>
+        [new Date(hour.time).toISOString(), ...series.map((points) => points[index].value)]
+          .map(cell)
+          .join(','),
+      ),
+    ].join('\r\n') + '\r\n'
+  );
+}
+
 /** Model values are joined by observation time, never by array position. */
 export function forecastSeries(hours: Hour[], models: ModelForecast[], metric: ForecastMetric) {
   const local = hours.map((hour) => ({ time: hour.time, value: hour[metric] }));

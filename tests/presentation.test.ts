@@ -29,6 +29,47 @@ test('saved places are bounded and valid', () => {
   };
   assert.equal(readPlaces(JSON.stringify(Array(20).fill(p))).length, 8);
 });
+test('saved places reject malformed metadata without discarding other valid places', () => {
+  const valid = {
+    id: 'chennai',
+    name: 'Chennai',
+    country: 'India',
+    countryCode: 'IN',
+    latitude: 13,
+    longitude: 80,
+    admin: 'Tamil Nadu',
+    timezone: 'Asia/Kolkata',
+  };
+  for (const invalid of [
+    { admin: {} },
+    { admin: 'x'.repeat(201) },
+    { timezone: {} },
+    { timezone: 'not/a-timezone' },
+    { countryCode: 'India' },
+    { id: ' ' },
+    { id: 'x'.repeat(301) },
+    { name: ' ' },
+    { country: 'x'.repeat(201) },
+  ]) {
+    assert.deepEqual(readPlaces(JSON.stringify([{ ...valid, ...invalid }, valid])), [valid]);
+  }
+});
+test('saved places retain only known fields and normalize country codes', () => {
+  const valid = {
+    id: 'chennai',
+    name: 'Chennai',
+    country: 'India',
+    countryCode: 'IN',
+    latitude: 13,
+    longitude: 80,
+  };
+  assert.deepEqual(readPlaces(JSON.stringify([{ ...valid, countryCode: 'in', extra: {} }])), [
+    valid,
+  ]);
+  const point = { ...valid, id: 'point', name: 'Selected point', country: '', countryCode: '' };
+  assert.deepEqual(readPlaces(JSON.stringify([point])), [point]);
+  assert.deepEqual(readPlaces(' '.repeat(65_537) + JSON.stringify([valid])), []);
+});
 test('chart paths break across missing observations', () => {
   assert.equal(chartPaths([0, null, 10], 0, 10, 100, 100), 'M0.0,100.0  M100.0,0.0');
   assert.ok(!chartPaths([null, null], 0, 0).includes('NaN'));

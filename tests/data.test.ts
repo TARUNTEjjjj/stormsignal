@@ -611,6 +611,38 @@ test('NWS excludes future-effective records but retains current warnings for fut
   );
 });
 
+test('NWS warns when a bounded response omits records or additional pages', async () => {
+  for (const payload of [
+    { features: Array.from({ length: 101 }, (_, i) => alert({ id: `alert-${i}` })) },
+    {
+      features: [alert()],
+      pagination: { next: 'https://api.weather.gov/alerts/active?cursor=next' },
+    },
+  ]) {
+    clearRequestCache();
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return json(payload);
+    };
+    const result = await fetchAlerts({ ...place, countryCode: 'US' });
+    assert.equal(result.partial, true);
+    assert.match(result.coverage, /incomplete/i);
+    assert.equal(result.alerts.length, Math.min(payload.features.length, 100));
+    assert.equal(calls, 1, 'Provider pagination must not trigger an unbounded fetch chain.');
+  }
+});
+
+test('NWS allows complete responses at the local record limit', async () => {
+  globalThis.fetch = async () =>
+    json({
+      features: Array.from({ length: 100 }, (_, i) => alert({ id: `alert-${i}` })),
+    });
+  const result = await fetchAlerts({ ...place, countryCode: 'US' });
+  assert.equal(result.alerts.length, 100);
+  assert.equal(result.partial, false);
+});
+
 test('NWS valid hazard end shortens expiry and missing validity never becomes a warning', async () => {
   const now = Date.now();
   const ends = new Date(now + 300_000).toISOString();
@@ -681,6 +713,26 @@ test('NWS discards malformed geometry and disallows unsafe outgoing alert links'
 test('malformed warning feed is an error rather than an all-clear', async () => {
   globalThis.fetch = async () => json({ features: null });
   await assert.rejects(fetchAlerts({ ...place, countryCode: 'US' }), /warning feed is unavailable/);
+});
+
+test('NWS outgoing links reject credentials, nonstandard ports and lookalike hosts', async () => {
+  for (const web of [
+    'https://example-user:example-password@weather.gov/alert',
+    'https://weather.gov:8443/alert',
+    'https://weather.gov.example.com/alert',
+    'http://weather.gov/alert',
+  ]) {
+    clearRequestCache();
+    globalThis.fetch = async () => json({ features: [alert({ web })] });
+    const result = await fetchAlerts({ ...place, countryCode: 'US' });
+    assert.equal(result.alerts[0].url, 'https://api.weather.gov/alerts/test');
+  }
+  clearRequestCache();
+  globalThis.fetch = async () => json({ features: [alert({ web: 'https://www.noaa.gov/alert' })] });
+  assert.equal(
+    (await fetchAlerts({ ...place, countryCode: 'US' })).alerts[0].url,
+    'https://www.noaa.gov/alert',
+  );
 });
 
 test('physically invalid nonnegative fields and out-of-range percentages stay unavailable', async () => {

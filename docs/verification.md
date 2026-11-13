@@ -1,5 +1,48 @@
 # Release verification
 
+## Submission review — 13 November 2026
+
+Reviewed the client data/storage boundaries, warning gateway, offline recovery,
+build configuration and existing tests at baseline `6eb94d8`. This pass fixes:
+
+- Saved places now validate bounded IDs, names, countries, country codes,
+  optional region names and timezones. Invalid entries are skipped independently;
+  valid entries survive, country codes are normalized and unknown fields are
+  discarded. The parser bounds the stored input and retains the eight-place limit.
+- NWS responses with more than 100 records or another page are explicitly
+  incomplete. They retain the official-source link and use the existing partial
+  coverage behavior, including disabling page notifications. Pagination links
+  are not followed automatically.
+- Outgoing NWS links reject embedded credentials and nonstandard ports, in
+  addition to the existing HTTPS and government-domain checks.
+- `npm test` uses Node's `--import tsx` loader directly, avoiding the `tsx` CLI's
+  extra IPC listener in restricted execution environments.
+- `fast-xml-parser` is pinned to **5.12.0**, the patched version for
+  [GHSA-474x-hrwr-fgx4](https://github.com/advisories/GHSA-474x-hrwr-fgx4).
+  The advisory concerns the non-default `stopNodes` option, which these adapters
+  do not enable. The dependency and lockfile were updated together.
+
+Four regression tests failed against the previous implementation and passed
+after the fixes; a fifth verifies the complete 100-record boundary. On Linux with
+Node **24.22.1**, `npm run check` passed **289 tests**, TypeScript, the production
+browser build, embedded Worker checks and Pages artifact checks. `npm audit`
+reported **zero known vulnerabilities** after the update. This is a point-in-time
+registry result, not a guarantee about undiscovered issues. Node 22 remains the
+repository's CI target.
+
+The opt-in live warning check at **03:33 UTC** passed for San Francisco (four
+active records), but failed for Manila and Jakarta because at least one source
+was unavailable, and for Kolkata with HTTP 503. A subsequent source-level check
+retrieved WMO's Manila result and IMD Kolkata successfully while direct national
+requests timed out. These observations do **not** establish that all live
+integrations are healthy; preserve the partial/unavailable states and use the
+official authority links. No mocked result was substituted for a live failure.
+
+The production preview served locally, but this session's separate browser could
+not reach its loopback address. No new visual, mobile or device-offline browser
+verification is claimed. This review also does not redeploy the hosted website;
+earlier screenshots and deployment records below refer to their dated releases.
+
 ## Reliability and rendering review — 7 November 2026
 
 - **281 deterministic tests passed.** The integrated `npm run check` also passed TypeScript, the production browser build, embedded Worker checks and Cloudflare Pages artifact checks. The production-dependency audit reported **zero known vulnerabilities** at the time of this review; it does not establish that every dependency is free of undiscovered vulnerabilities.

@@ -1,7 +1,9 @@
 /**
  * Opt-in integration check: performs real public-provider reads, never fixtures.
  * Build first, then run: node --import tsx scripts/check-live-alerts.ts --live
- * This exercises the production Worker artifact locally; it is not an edge-runtime test.
+ * By default this exercises the production Worker artifact locally. Pass
+ * --base-url=https://stormsignal-weather.pages.dev to check the hosted warning API.
+ * Both modes require every configured source to pass; fallback is reported as degraded.
  */
 import assert from 'node:assert/strict';
 import { fetchAlerts } from '../src/data';
@@ -14,9 +16,26 @@ if (!process.argv.includes('--live')) {
   process.exit(1);
 }
 
-const worker = (await import(new URL('../dist/server/index.js', import.meta.url).href)).default as {
-  fetch(request: Request): Promise<Response>;
-};
+const baseArgument = process.argv.find((argument) => argument.startsWith('--base-url='));
+const base = baseArgument ? new URL(baseArgument.slice('--base-url='.length)) : null;
+if (
+  base &&
+  (base.protocol !== 'https:' ||
+    base.username ||
+    base.password ||
+    base.search ||
+    base.hash ||
+    base.pathname !== '/')
+)
+  throw new Error(
+    '--base-url must be an HTTPS origin without credentials, path, query or fragment.',
+  );
+const worker = base
+  ? null
+  : ((await import(new URL('../dist/server/index.js', import.meta.url).href)).default as {
+      fetch(request: Request): Promise<Response>;
+    });
+const diagnostics = new Map<string, Record<string, unknown>>();
 const cases: { place: Place; scope: 'point' | 'region'; scopeLabel: string; partial: boolean }[] = [
   {
     place: {
@@ -82,6 +101,7 @@ const cases: { place: Place; scope: 'point' | 'region'; scopeLabel: string; part
 
 async function check(item: (typeof cases)[number]) {
   const { place } = item;
+  const started = performance.now();
   const signal = AbortSignal.timeout(30_000);
   let result: AlertResult;
   if (place.countryCode === 'US') result = await fetchAlerts(place, signal);
@@ -94,9 +114,15 @@ async function check(item: (typeof cases)[number]) {
       admin: place.admin ?? '',
       name: place.name,
     });
-    const response = await worker.fetch(
-      new Request(`https://stormsignal.invalid/api/alerts?${query}`, { signal }),
+    const request = new Request(
+      `${base?.origin ?? 'https://stormsignal.invalid'}/api/alerts?${query}`,
+      { signal },
     );
+    const response = base ? await fetch(request) : await worker!.fetch(request);
+    diagnostics.set(place.name, {
+      durationMs: Math.round(performance.now() - started),
+      httpStatus: response.status,
+    });
     assert.equal(
       response.status,
       200,
@@ -105,6 +131,18 @@ async function check(item: (typeof cases)[number]) {
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
     result = (await response.json()) as AlertResult;
   }
+
+  const durationMs = Math.round(performance.now() - started);
+  diagnostics.set(place.name, {
+    durationMs,
+    status: result.status,
+    partial: result.partial,
+    sources: result.checks?.map((check) => ({
+      name: check.name,
+      status: check.status,
+      coverage: check.coverage?.slice(0, 500),
+    })),
+  });
 
   const now = Date.now();
   assert.equal(result.status, 'available', `${place.name}: feed unavailable or unsupported`);
@@ -153,6 +191,7 @@ async function check(item: (typeof cases)[number]) {
   }
   return {
     city: place.name,
+    durationMs,
     source: result.source.slice(0, 200),
     scope: `${result.scope}: ${result.scopeLabel}`,
     partial: result.partial,
@@ -168,7 +207,11 @@ async function check(item: (typeof cases)[number]) {
   };
 }
 
-console.log('Real upstream checks using the local production build (not the hosted edge runtime).');
+console.log(
+  base
+    ? `Real upstream checks through ${base.origin}; NWS is checked directly, as in the browser.`
+    : 'Real upstream checks using the local production build (not the hosted edge runtime).',
+);
 const results = await Promise.allSettled(cases.map(check));
 for (const [index, result] of results.entries()) {
   if (result.status === 'fulfilled') console.log(JSON.stringify(result.value));
@@ -178,6 +221,7 @@ for (const [index, result] of results.entries()) {
       JSON.stringify({
         city: cases[index].place.name,
         failed: true,
+        ...diagnostics.get(cases[index].place.name),
         reason: String(
           result.reason instanceof Error ? result.reason.message : result.reason,
         ).slice(0, 300),

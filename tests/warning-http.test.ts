@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, test } from 'node:test';
+import { afterEach, beforeEach, test, type TestContext } from 'node:test';
 import { clearWarningCache, requestText } from '../server/http';
 
 const SOURCE = 'https://severeweather.wmo.int/f/ows/test.json';
@@ -184,7 +184,8 @@ test('expired content is never returned when upstream fails or refuses the reque
   const fresh = await requestText(SOURCE);
   assert.equal(fresh.text, 'fresh warning');
   assert.equal(fresh.fetchedAt, now);
-  assert.equal(calls.length, 7);
+  // Initial read, one retry each for 500/503/network failure, then recovery.
+  assert.equal(calls.length, 10);
 });
 
 test('declared and streamed UTF-8 byte limits reject oversized bodies without caching them', async () => {
@@ -226,19 +227,23 @@ test('failed status, length, stream size and UTF-8 validation cancel unread upst
   for (const fixture of fixtures) {
     clearWarningCache();
     let cancelled = 0;
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(fixture.bytes);
-        // Keep the transfer open so successful cleanup must cancel it.
-      },
-      cancel() {
-        cancelled++;
-      },
+    const bodies: ReadableStream<Uint8Array>[] = [];
+    mockFetch(async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(fixture.bytes);
+          // Keep the transfer open so successful cleanup must cancel it.
+        },
+        cancel() {
+          cancelled++;
+        },
+      });
+      bodies.push(body);
+      return new Response(body, fixture.init);
     });
-    mockFetch(async () => new Response(body, fixture.init));
     await assert.rejects(requestText(SOURCE, { maxBytes: 5 }), fixture.message);
-    assert.equal(cancelled, 1);
-    assert.equal(body.locked, false);
+    assert.equal(cancelled, fixture.init.status === 503 ? 2 : 1);
+    assert.ok(bodies.every((body) => !body.locked));
   }
 });
 
@@ -353,4 +358,240 @@ test('optional cache failures do not discard a successful upstream response', as
   mockFetch(async () => new Response('usable upstream content'));
   assert.equal((await requestText(SOURCE)).text, 'usable upstream content');
   assert.equal(calls.length, 1);
+});
+
+async function flush() {
+  for (let i = 0; i < 6; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+async function advance(t: TestContext, ms: number) {
+  now += ms;
+  t.mock.timers.tick(ms);
+  await flush();
+}
+const never = () => new Promise<never>(() => {});
+
+function cacheWith(overrides: Record<string, unknown>) {
+  Object.defineProperty(globalThis, 'caches', {
+    configurable: true,
+    value: { default: { match: async () => undefined, put: async () => {}, ...overrides } },
+  });
+}
+
+test('a stalled optional cache lookup falls through to the provider and permits later reads', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  cacheWith({ match: never });
+  mockFetch(async () => new Response('fresh verified text'));
+  const first = requestText(SOURCE);
+  await flush();
+  assert.equal(calls.length, 0);
+  await advance(t, 200);
+  assert.equal((await first).text, 'fresh verified text');
+  assert.equal((await requestText(SOURCE)).text, 'fresh verified text');
+  assert.equal(calls.length, 1);
+});
+
+test('a stalled cached body and its cancellation cannot block a fresh provider read', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let cancelled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('incomplete cache'));
+    },
+    cancel() {
+      cancelled++;
+      return never();
+    },
+  });
+  cacheWith({
+    match: async () => new Response(body, { headers: { 'x-storm-fetched-at': String(now) } }),
+  });
+  mockFetch(async () => new Response('complete upstream text'));
+  const result = requestText(SOURCE);
+  await flush();
+  await advance(t, 200);
+  assert.equal((await result).text, 'complete upstream text');
+  assert.equal(cancelled, 1);
+  assert.equal(body.locked, false);
+  assert.equal((await requestText(SOURCE)).text, 'complete upstream text');
+  assert.equal(calls.length, 1);
+});
+
+test('a stalled optional cache write cannot withhold a verified response from shared readers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  cacheWith({ put: never });
+  mockFetch(async () => new Response('verified upstream text'));
+  const first = requestText(SOURCE);
+  const second = requestText(SOURCE);
+  await flush();
+  assert.equal(calls.length, 1);
+  await advance(t, 200);
+  assert.equal((await first).text, 'verified upstream text');
+  assert.deepEqual(await second, await first);
+  assert.equal((await requestText(SOURCE)).text, 'verified upstream text');
+  assert.equal(calls.length, 1);
+});
+
+test('an abort-ignoring transport times out, releases the shared slot and cannot overwrite recovery', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let release!: (response: Response) => void;
+  mockFetch(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const first = requestText(SOURCE);
+  const rejected = assert.rejects(first, { name: 'TimeoutError' });
+  await flush();
+  await advance(t, 8_000);
+  await rejected;
+  assert.equal(calls[0].init?.signal?.aborted, true);
+  mockFetch(async () => new Response('recovered text'));
+  assert.equal((await requestText(SOURCE)).text, 'recovered text');
+  let cancelled = 0;
+  release(
+    new Response(
+      new ReadableStream({
+        cancel() {
+          cancelled++;
+        },
+      }),
+    ),
+  );
+  await flush();
+  assert.equal(cancelled, 1);
+  assert.equal((await requestText(SOURCE)).text, 'recovered text');
+  assert.equal(calls.length, 2);
+});
+
+test('a stalled provider body and stalled cancel settle by the same total upstream deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let cancelled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('partial'));
+    },
+    cancel() {
+      cancelled++;
+      return never();
+    },
+  });
+  mockFetch(async () => new Response(body));
+  const rejected = assert.rejects(requestText(SOURCE), { name: 'TimeoutError' });
+  await flush();
+  await advance(t, 8_000);
+  await rejected;
+  assert.equal(cancelled, 1);
+  assert.equal(body.locked, false);
+  mockFetch(async () => new Response('recovered complete body'));
+  assert.equal((await requestText(SOURCE)).text, 'recovered complete body');
+  assert.equal(calls.length, 2);
+});
+
+test('invalid bodies reject promptly even if their cancellation never settles', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let cancelled = 0;
+  mockFetch(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([0xc3, 0x28]));
+          },
+          cancel() {
+            cancelled++;
+            return never();
+          },
+        }),
+      ),
+  );
+  let settled = false;
+  const rejected = assert.rejects(requestText(SOURCE), /encoded data|encoding/i).then(() => {
+    settled = true;
+  });
+  await flush();
+  assert.equal(settled, true, 'validation must not wait for its cleanup or timeout');
+  await rejected;
+  assert.equal(cancelled, 1);
+  assert.equal(calls.length, 1, 'invalid content is never retried');
+});
+
+test('transient network failures and retryable statuses get one bounded recovery attempt', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const failure of [new TypeError('connection reset'), 408, 500, 502, 503, 504]) {
+    clearWarningCache();
+    const before: number = calls.length;
+    mockFetch(async () => {
+      if (calls.length === before + 1) {
+        if (failure instanceof Error) throw failure;
+        return new Response('temporary upstream error', { status: failure });
+      }
+      return new Response('recovered bulletin');
+    });
+    const result = requestText(SOURCE);
+    await flush();
+    assert.equal(calls.length, before + 1);
+    await advance(t, 150);
+    assert.equal((await result).text, 'recovered bulletin');
+    assert.equal(calls.length, before + 2);
+  }
+});
+
+test('retry shares the original eight-second budget instead of starting a new deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  mockFetch(async () => {
+    if (calls.length === 1) return new Response('temporary', { status: 503 });
+    return never();
+  });
+  const rejected = assert.rejects(requestText(SOURCE), { name: 'TimeoutError' });
+  await flush();
+  await advance(t, 150);
+  assert.equal(calls.length, 2);
+  await advance(t, 7_849);
+  assert.equal(calls[1].init?.signal?.aborted, false);
+  await advance(t, 1);
+  await rejected;
+  assert.equal(calls[1].init?.signal?.aborted, true);
+});
+
+test('Retry-After is respected when affordable and never retried early when outside the budget', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const format of ['seconds', 'date']) {
+    const value = format === 'seconds' ? '2' : new Date(now + 2_000).toUTCString();
+    clearWarningCache();
+    const before: number = calls.length;
+    mockFetch(async () =>
+      calls.length === before + 1
+        ? new Response('temporary', { status: 503, headers: { 'Retry-After': value } })
+        : new Response('recovered after server delay'),
+    );
+    const result = requestText(SOURCE);
+    await flush();
+    await advance(t, 1_999);
+    assert.equal(calls.length, before + 1);
+    await advance(t, 1);
+    assert.equal((await result).text, 'recovered after server delay');
+    assert.equal(calls.length, before + 2);
+  }
+  clearWarningCache();
+  const before: number = calls.length;
+  mockFetch(async () => new Response('busy', { status: 503, headers: { 'Retry-After': '60' } }));
+  await assert.rejects(requestText(SOURCE), /HTTP 503/);
+  assert.equal(calls.length, before + 1);
+});
+
+test('persistent failures retry at most once and redirects or authorization errors never retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  mockFetch(async () => new Response('temporary', { status: 503 }));
+  const rejected = assert.rejects(requestText(SOURCE), /HTTP 503/);
+  await flush();
+  await advance(t, 150);
+  await rejected;
+  assert.equal(calls.length, 2);
+  for (const status of [301, 302, 400, 401, 403, 404, 429]) {
+    const before: number = calls.length;
+    mockFetch(async () => new Response('unavailable', { status }));
+    await assert.rejects(requestText(SOURCE), new RegExp(`HTTP ${status}`));
+    assert.equal(calls.length, before + 1);
+  }
 });

@@ -180,6 +180,51 @@ test('national work is bounded at 20 unique documents and 4 simultaneous request
   );
 });
 
+test('a stalled national detail leaves free slots for later verified bulletins', async () => {
+  const urls = Array.from({ length: 8 }, (_, index) => ph(index + 1));
+  const started: string[] = [];
+  let active = 0,
+    peak = 0;
+  const fetch = createNationalAlertAdapter(
+    async (url) => {
+      if (url.endsWith('/feeds/')) return { text: atom(urls), fetchedAt: now };
+      started.push(url);
+      active++;
+      peak = Math.max(peak, active);
+      if (url === ph(1)) return new Promise(() => {});
+      await Promise.resolve();
+      active--;
+      return { text: cap(urls.indexOf(url) + 1), fetchedAt: now };
+    },
+    { now: () => now, deadlineMs: 40 },
+  );
+  const result = await fetch(manila);
+  assert.deepEqual(started, urls);
+  assert.equal(peak, 4);
+  assert.equal(result.alerts.length, 7);
+  assert.match(result.coverage, /7 of 8 selected recent bulletins verified/);
+  assert.match(result.coverage, /1 selected bulletin\(s\) could not be verified/);
+});
+
+test('national deadline stops workers before starting queued details', async () => {
+  const urls = Array.from({ length: 8 }, (_, index) => ph(index + 1));
+  const started: string[] = [];
+  const fetch = createNationalAlertAdapter(
+    async (url) => {
+      if (url.endsWith('/feeds/')) return { text: atom(urls), fetchedAt: now };
+      started.push(url);
+      if (url === ph(1)) return { text: cap(1), fetchedAt: now };
+      return new Promise(() => {});
+    },
+    { now: () => now, deadlineMs: 40 },
+  );
+  const result = await fetch(manila);
+  assert.deepEqual(started, urls.slice(0, 5));
+  assert.equal(result.alerts.length, 1);
+  assert.match(result.coverage, /4 selected bulletin\(s\) could not be verified/);
+  assert.match(result.coverage, /3 additional feed entries were not checked/);
+});
+
 test('head failure, malformed payloads and total detail failure reject instead of empty success', async () => {
   const failure = createNationalAlertAdapter(async () => {
     throw Error('Source offline');

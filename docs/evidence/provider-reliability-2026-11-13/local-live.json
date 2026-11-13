@@ -1,0 +1,82 @@
+{
+  "checkedAt": "2026-11-13T03:57:24Z",
+  "runtime": "Node 26.13.0 on macOS",
+  "command": "npm run test:live",
+  "target": "local production Worker artifact; NWS direct",
+  "exitCode": 1,
+  "results": [
+    {
+      "city": "San Francisco",
+      "durationMs": 1035,
+      "source": "US National Weather Service",
+      "scope": "point: San Francisco",
+      "partial": false,
+      "warnings": 4,
+      "checkedAt": "2026-11-13T03:57:24.765Z",
+      "latestBulletin": null,
+      "meaning": "Verified active bulletins returned; follow the issuing authority."
+    },
+    {
+      "city": "Manila",
+      "failed": true,
+      "durationMs": 8004,
+      "status": "available",
+      "partial": true,
+      "sources": [
+        {
+          "name": "PAGASA CAP feed \u00b7 direct",
+          "status": "unavailable",
+          "coverage": "This source could not be reached or validated. Its warnings may be missing; check the authority directly."
+        },
+        {
+          "name": "PAGASA via WMO SWIC \u00b7 supplementary",
+          "status": "available",
+          "coverage": "Partial official CAP coverage at this point via WMO SWIC. At most 6 current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted. Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions."
+        }
+      ],
+      "reason": "Manila: a direct or supplementary source failed"
+    },
+    {
+      "city": "Kolkata",
+      "durationMs": 1056,
+      "source": "IMD district nowcasts + NDMA SACHET",
+      "scope": "region: Kolkata district + West Bengal",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "IMD Kolkata district nowcasts \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "NDMA SACHET \u00b7 West Bengal regional feed",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-13T03:57:23.907Z",
+      "latestBulletin": "2026-11-13T01:49:40.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    },
+    {
+      "city": "Jakarta",
+      "durationMs": 2391,
+      "source": "BMKG direct + WMO SWIC",
+      "scope": "point: Jakarta",
+      "partial": true,
+      "warnings": 0,
+      "sources": [
+        {
+          "name": "BMKG CAP feed \u00b7 direct",
+          "status": "available"
+        },
+        {
+          "name": "BMKG via WMO SWIC \u00b7 supplementary",
+          "status": "available"
+        }
+      ],
+      "checkedAt": "2026-11-13T03:57:23.897Z",
+      "latestBulletin": "2026-11-13T03:25:00.000Z",
+      "meaning": "No matching unexpired bulletins in this limited feed; this is not an all-clear."
+    }
+  ]
+}

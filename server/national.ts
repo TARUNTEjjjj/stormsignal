@@ -208,10 +208,14 @@ export function createNationalAlertAdapter(
       const candidates = unique.slice(0, MAX_DOCUMENTS);
       const loaded: Array<{ document: CapDocument; url: string; fetchedAt: number }> = [];
       let failed = 0,
-        attempted = 0;
-      for (let i = 0; i < candidates.length && !controller.signal.aborted; i += 4) {
-        await Promise.all(
-          candidates.slice(i, i + 4).map(async (item) => {
+        attempted = 0,
+        next = 0;
+      // Reuse each free slot immediately; a stalled bulletin must not hold up
+      // later source entries while the overall verification deadline runs down.
+      await Promise.all(
+        Array.from({ length: Math.min(4, candidates.length) }, async () => {
+          while (next < candidates.length && !controller.signal.aborted) {
+            const item = candidates[next++];
             attempted++;
             try {
               const url = detailUrl(item.url, country);
@@ -224,9 +228,9 @@ export function createNationalAlertAdapter(
             } catch {
               failed++;
             }
-          }),
-        );
-      }
+          }
+        }),
+      );
       signal?.throwIfAborted();
       if (candidates.length && !loaded.length)
         throw new Error(

@@ -249,6 +249,76 @@ test('India detail requests cap at ten with no more than four concurrent request
   assert.match(result.coverage, /Additional feed entries were not checked/);
 });
 
+test('a slow India detail does not block later details while request concurrency stays at four', async () => {
+  const urls = Array.from({ length: 8 }, (_, index) => link(index + 1));
+  const started: string[] = [];
+  let releaseFirst!: () => void, finishedRest!: () => void;
+  const first = new Promise<void>((resolve) => (releaseFirst = resolve));
+  const rest = new Promise<void>((resolve) => (finishedRest = resolve));
+  let active = 0,
+    peak = 0,
+    completed = 0;
+  const pending = fetchIndiaAlerts(place, {
+    now: NOW,
+    request: async (url) => {
+      if (url.includes('/rss/')) return { text: feed(urls), fetchedAt: NOW };
+      started.push(url);
+      active++;
+      peak = Math.max(peak, active);
+      if (url === link(1)) await first;
+      else await Promise.resolve();
+      active--;
+      if (url !== link(1) && ++completed === 7) finishedRest();
+      return { text: cap(Number(new URL(url).searchParams.get('identifier'))), fetchedAt: NOW };
+    },
+  });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      rest,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Later details were blocked by the first')),
+          500,
+        );
+      }),
+    ]);
+    assert.deepEqual(started, urls);
+    assert.equal(peak, 4);
+  } finally {
+    clearTimeout(timeout);
+    releaseFirst();
+    await pending;
+  }
+  assert.equal((await pending).alerts.length, 8);
+});
+
+test('India cancellation stops workers before starting queued details', async () => {
+  const controller = new AbortController();
+  const urls = Array.from({ length: 8 }, (_, index) => link(index + 1));
+  const started: string[] = [];
+  let firstFourStarted!: () => void;
+  const ready = new Promise<void>((resolve) => (firstFourStarted = resolve));
+  const pending = fetchIndiaAlerts(place, {
+    now: NOW,
+    signal: controller.signal,
+    request: async (url, options) => {
+      if (url.includes('/rss/')) return { text: feed(urls), fetchedAt: NOW };
+      started.push(url);
+      if (started.length === 4) firstFourStarted();
+      return new Promise((_, reject) => {
+        options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), {
+          once: true,
+        });
+      });
+    },
+  });
+  await ready;
+  controller.abort(new Error('Source deadline reached'));
+  await assert.rejects(pending, /Source deadline reached/);
+  assert.deepEqual(started, urls.slice(0, 4));
+});
+
 test('caller cancellation propagates instead of returning an available empty list', async () => {
   const controller = new AbortController();
   controller.abort(new Error('cancelled'));

@@ -138,8 +138,16 @@ export async function fetchIndiaAlerts(
       failures++;
     }
   };
-  for (let index = 0; index < links.length; index += 4)
-    await Promise.all(links.slice(index, index + 4).map(readDetail));
+  // A slow detail occupies only its own slot, rather than blocking a whole batch.
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, links.length) }, async () => {
+      while (next < links.length) {
+        options.signal?.throwIfAborted();
+        await readDetail(links[next++]);
+      }
+    }),
+  );
   if (links.length && failures === links.length)
     throw new Error(
       `The ${region.name} regional feed was retrieved, but its warning details could not be verified. Check SACHET directly.`,

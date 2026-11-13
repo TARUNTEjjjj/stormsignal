@@ -1,5 +1,67 @@
 # Release verification
 
+## Provider timeout recovery — 13 November 2026
+
+This review fixes application-side stalls without treating a failed provider as
+healthy or replacing missing official warnings with fabricated data:
+
+- Optional edge-cache reads and writes have 200 ms deadlines. Stalled cache
+  operations, abort-ignoring transports, incomplete response bodies and stalled
+  cancellation no longer hold a shared request slot indefinitely. Late responses
+  cannot overwrite a recovered in-memory result.
+- Connection failures and HTTP 408/500/502/503/504 receive at most one retry within
+  the original eight-second upstream budget. Valid `Retry-After` delays are
+  respected when affordable. Redirects, rate limits, authorization failures,
+  invalid UTF-8 and oversized bodies are not retried. Failed revalidation still
+  never serves expired cached warnings as current.
+- National/SACHET detail workers reuse four slots, and WMO reuses three. One slow
+  document cannot block all the next documents. WMO's own deadline now retains
+  already verified bulletins while disclosing failed and unchecked documents;
+  caller cancellation still rejects, and zero verified candidate documents is
+  still a failure.
+- The live-check command now records elapsed time and individual failed-source
+  details, and accepts `--base-url=https://stormsignal-weather.pages.dev` for the
+  hosted API. Its strict requirement that every configured source succeed is
+  unchanged.
+
+`npm run check` passed **308 tests**, TypeScript, the production browser build,
+embedded Worker checks and Pages artifact checks on macOS with Node **26.13.0**.
+This adds 19 tests to the previous 289-test baseline. Focused transport and adapter
+tests cover cache/transport/body stalls, recovery, shared readers, retry bounds,
+`Retry-After`, concurrency limits, queue cancellation, partial results and optional
+translation deadlines. The changed TypeScript files pass Prettier and
+`git diff --check`. A clean install reported zero known dependency vulnerabilities.
+Repository CI separately targets Node 22.
+
+The real local production-artifact check at **03:57 UTC** returned:
+
+| City | Elapsed | Observed provider result |
+| --- | ---: | --- |
+| San Francisco | 1.04 s | NWS passed; four active records at that instant. |
+| Kolkata | 1.06 s | IMD district and SACHET regional checks passed. |
+| Jakarta | 2.39 s | BMKG direct and WMO supplementary checks passed. |
+| Manila | 8.00 s | WMO passed; direct PAGASA timed out. Partial response retained. |
+
+The strict live command therefore **exited 1**. PAGASA's direct CAP origin also
+failed standalone connection probes and the existing hosted check; this is an
+upstream availability limitation, not a claim that this change restored PAGASA.
+The [WMO authority registry](https://alertingauthority.wmo.int/authorities.php?recId=127)
+still lists the configured CAP feed; no verified replacement endpoint was found.
+The existing PAGASA NCR authority page remains the fallback link. Raw local
+results, including the failure, are in
+[the live-check record](evidence/provider-reliability-2026-11-13/local-live.json).
+
+In the local production browser, Manila's forecast remained usable while its
+warning request completed with WMO available, PAGASA unavailable, **1/2 retrieved**,
+and explicit incomplete-coverage text. The source panel retained the authority
+links and disabled page notifications for incomplete coverage.
+[Browser evidence](evidence/provider-reliability-2026-11-13/manila-sources.jpg).
+Switching to Kolkata and Jakarta loaded their forecasts and **2/2 retrieved**
+source status. No browser console errors or warnings appeared in these flows.
+These tests establish bounded application behavior; they do not certify future
+provider uptime or complete warning coverage. Earlier deployment and browser
+records below describe their own dated releases.
+
 ## Submission review — 13 November 2026
 
 Reviewed the client data/storage boundaries, warning gateway, offline recovery,

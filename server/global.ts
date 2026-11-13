@@ -276,7 +276,10 @@ function toAlert(
   };
 }
 
-export function createGlobalAlertAdapter(request: RequestText) {
+export function createGlobalAlertAdapter(
+  request: RequestText,
+  settings: { deadlineMs?: number } = {},
+) {
   return async (
     place: Place,
     signal?: AbortSignal,
@@ -291,7 +294,7 @@ export function createGlobalAlertAdapter(request: RequestText) {
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(
       () => controller.abort(new Error('The global warning check timed out.')),
-      16_000,
+      Math.min(Math.max(settings.deadlineMs ?? 16_000, 1), 16_000),
     );
     const options = { signal: controller.signal };
     // A shared HTTP cache fill may continue for other callers; this location check still has a hard deadline.
@@ -337,24 +340,34 @@ export function createGlobalAlertAdapter(request: RequestText) {
       const query = await read(queryUrl, { ...options, ttlMs: 60_000, maxBytes: 250_000 });
       const candidates = candidatesFor(query.text, sources);
       const loaded: { document: CapDocument; candidate: Candidate; fetchedAt: number }[] = [];
-      let failed = 0;
-      for (let i = 0; i < candidates.length; i += 3) {
-        const batch = await Promise.allSettled(
-          candidates.slice(i, i + 3).map(async (candidate) => {
-            const result = await read(`${ORIGIN}/v2/cap-alerts/${candidate.path}`, {
-              ...options,
-              ttlMs: 60_000,
-              maxBytes: 256_000,
-            });
-            return { document: parseCap(result.text), candidate, fetchedAt: result.fetchedAt };
-          }),
-        );
-        for (const result of batch)
-          if (result.status === 'fulfilled') loaded.push(result.value);
-          else failed++;
-      }
-      if (controller.signal.aborted)
-        throw controller.signal.reason ?? Error('The warning check was interrupted.');
+      let failed = 0,
+        next = 0;
+      // A slow source document occupies one slot, without blocking the other
+      // workers from verifying later bulletins before this adapter's deadline.
+      await Promise.all(
+        Array.from({ length: Math.min(3, candidates.length) }, async () => {
+          while (next < candidates.length && !controller.signal.aborted) {
+            const candidate = candidates[next++];
+            try {
+              const result = await read(`${ORIGIN}/v2/cap-alerts/${candidate.path}`, {
+                ...options,
+                ttlMs: 60_000,
+                maxBytes: 256_000,
+              });
+              loaded.push({
+                document: parseCap(result.text),
+                candidate,
+                fetchedAt: result.fetchedAt,
+              });
+            } catch {
+              failed++;
+            }
+          }
+        }),
+      );
+      // Our own deadline may retain verified partial data. A location change or
+      // gateway cancellation must still stop the entire caller's check.
+      signal?.throwIfAborted();
       if (candidates.length && !loaded.length)
         throw Error(
           'Official warning details could not be verified. Check WMO SWIC and your local authority.',
@@ -484,7 +497,7 @@ export function createGlobalAlertAdapter(request: RequestText) {
           ...loaded.map((item) => item.fetchedAt),
           ...[...translations.values()].map((item) => item.fetchedAt),
         ),
-        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${failed ? ' Some warning details could not be loaded.' : ''} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
+        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${failed ? ` Some warning details could not be loaded: ${failed} selected source document(s) could not be verified.` : ''}${next < candidates.length ? ` ${candidates.length - next} selected source document(s) were not checked before the time limit.` : ''}${controller.signal.aborted ? ' The check reached its time limit; verified original bulletins are retained.' : ''} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
       };
     } finally {
       clearTimeout(timer);

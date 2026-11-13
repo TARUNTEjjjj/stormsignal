@@ -246,6 +246,85 @@ test('partial detail failures are visible and total detail failure is an error',
   await assert.rejects(harness([feature(2)]).fetch(place), /could not be verified/);
 });
 
+function deadlineHarness(
+  detail: (id: number, options?: TextOptions) => Promise<{ text: string; fetchedAt: number }>,
+) {
+  return createGlobalAlertAdapter(
+    async (url, options) => {
+      if (url.endsWith('/sources.json'))
+        return { text: JSON.stringify({ sources: [source] }), fetchedAt: now };
+      if (url.includes('/f/ows/'))
+        return {
+          text: JSON.stringify({
+            type: 'FeatureCollection',
+            features: Array.from({ length: 6 }, (_, index) => feature(index + 1)),
+          }),
+          fetchedAt: now,
+        };
+      return detail(Number(/\/(\d+)-abc\.xml$/.exec(url)![1]), options);
+    },
+    { deadlineMs: 40 },
+  );
+}
+
+test('WMO deadline retains verified later bulletins without a stalled detail blocking free slots', async () => {
+  const started: number[] = [];
+  let active = 0,
+    peak = 0;
+  const fetch = deadlineHarness(async (id) => {
+    started.push(id);
+    active++;
+    peak = Math.max(peak, active);
+    if (id === 1) return new Promise(() => {});
+    await Promise.resolve();
+    active--;
+    return { text: cap(id), fetchedAt: now - 500 };
+  });
+  const result = await fetch(place);
+  assert.deepEqual(started, [1, 2, 3, 4, 5, 6]);
+  assert.equal(peak, 3);
+  assert.equal(result.alerts.length, 5);
+  assert.equal(result.fetchedAt, now - 500);
+  assert.equal(result.partial, true);
+  assert.match(result.coverage, /1 selected source document\(s\) could not be verified/);
+  assert.match(result.coverage, /time limit/);
+});
+
+test('WMO deadline stops queued details and discloses unverified and unattempted documents', async () => {
+  const started: number[] = [];
+  const fetch = deadlineHarness(async (id) => {
+    started.push(id);
+    if (id === 1) return { text: cap(1), fetchedAt: now };
+    return new Promise(() => {});
+  });
+  const result = await fetch(place);
+  assert.deepEqual(started, [1, 2, 3, 4]);
+  assert.equal(result.alerts.length, 1);
+  assert.match(result.coverage, /3 selected source document\(s\) could not be verified/);
+  assert.match(result.coverage, /2 selected source document\(s\) were not checked/);
+});
+
+test('WMO deadline with no verified documents rejects instead of returning an empty success', async () => {
+  const started: number[] = [];
+  const fetch = deadlineHarness(async (id) => {
+    started.push(id);
+    return new Promise(() => {});
+  });
+  await assert.rejects(fetch(place), /could not be verified/);
+  assert.deepEqual(started, [1, 2, 3]);
+});
+
+test('external cancellation rejects a WMO check even after one original has been verified', async () => {
+  const controller = new AbortController();
+  const fetch = deadlineHarness(async (id) => {
+    if (id === 1) return { text: cap(1), fetchedAt: now };
+    // The fourth request starts only after the first document has been parsed.
+    if (id === 4) controller.abort(new Error('Location changed after verification'));
+    return new Promise(() => {});
+  });
+  await assert.rejects(fetch(place, controller.signal), /Location changed after verification/);
+});
+
 test('invalid source and WFS payloads cannot masquerade as an empty successful warning check', async () => {
   const malformed = createGlobalAlertAdapter(async () => ({ text: '{}', fetchedAt: now }));
   await assert.rejects(malformed(place), /registry is unavailable/);
@@ -473,6 +552,34 @@ test('a stalled optional translation falls back promptly without hiding verified
   const result = await fetch(jakarta);
   assert.equal(result.alerts[0].title, 'Hujan Lebat');
   assert.ok(Date.now() - started < 3000);
+});
+
+test('an optional WMO translation cannot extend the overall verification deadline', async () => {
+  let requestedTranslation = false;
+  const started = Date.now();
+  const fetch = createGlobalAlertAdapter(
+    async (url) => {
+      if (url.endsWith('/sources.json'))
+        return { text: JSON.stringify({ sources: [bmkgSource] }), fetchedAt: now };
+      if (url.includes('/f/ows/'))
+        return {
+          text: JSON.stringify({
+            type: 'FeatureCollection',
+            features: [feature(1, { capurl: bmkgPath, rlink: bmkgEnglishPath, mem: '043' })],
+          }),
+          fetchedAt: now,
+        };
+      if (url.endsWith(bmkgPath)) return { text: bmkgOriginal, fetchedAt: now };
+      requestedTranslation = true;
+      return new Promise(() => {});
+    },
+    { deadlineMs: 40 },
+  );
+  const result = await fetch(jakarta);
+  assert.equal(requestedTranslation, true);
+  assert.equal(result.alerts[0].title, 'Hujan Lebat');
+  assert.match(result.coverage, /time limit/);
+  assert.ok(Date.now() - started < 500);
 });
 
 test('caller cancellation during an optional translation still stops the location check', async () => {

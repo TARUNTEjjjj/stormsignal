@@ -6,6 +6,24 @@ The React + TypeScript interface is built with Vite. Leaflet renders the map. Cl
 
 The warning gateway accepts validated coordinates/country/region metadata, never an arbitrary upstream URL. It uses bounded response sizes, deadlines and concurrent-request limits. Shared edge caching and ETag revalidation reduce repeated CAP downloads; failed revalidation never serves old warnings as current. Raw public feeds may remain cached for 24 hours only to support conditional revalidation; ordinary warning checks require revalidation after 60 seconds. The WMO source registry is cached for six hours and is not a live feed-health signal. User-specific warning responses have `Cache-Control: no-store`.
 
+Optional edge-cache reads and writes each have a short deadline; a stalled cache
+cannot indefinitely block a provider request or later callers. An upstream read
+has a hard eight-second budget, including response headers and body. One retry
+can recover a transient connection failure or HTTP 408/500/502/503/504 inside
+that same budget. A valid `Retry-After` is respected when it fits; rate limiting,
+redirects, invalid content and rejected response sizes are not retried. Expired
+cached warning text never becomes a successful fallback.
+
+Direct national and Indian regional bulletin downloads use up to four concurrent
+workers. A completed download releases its slot immediately, so one slow detail
+does not hold up other queued bulletins. Existing document limits, cancellation,
+partial-coverage labels and validity checks still apply.
+WMO uses the same scheduling approach with three workers. If its own deadline
+expires after some original bulletins have been verified, those bulletins remain
+available with failed and unchecked documents disclosed. Caller cancellation
+still rejects the check, and a nonempty document list with nothing verified never
+becomes a successful empty result.
+
 Direct PAGASA/BMKG ingestion checks up to 20 recent CAP documents, four concurrently within 14 seconds, with original polygon/circle matching. WMO runs alongside it to supplement the bounded national history. Cross-source references suppress cancelled/superseded CAP records; direct verified copies take precedence and exact repeated bulletin content is deduplicated. One unavailable source, including one still answering after 17 seconds, leaves verified results from the other visible with an explicit missing-source status. Both failing returns an unavailable check, never an all-clear. Kolkata retains distinct district and state-wide scopes; its public IMD feed is a rolling national list and can omit Kolkata. No authenticated IMD API credentials are used.
 
 For BMKG warnings, up to six WMO-linked official English copies are optionally checked, three concurrently with a 1.5-second wait limit. New language checks stop after 14 seconds of the 16-second overall check budget. Matching CAP identity, reference chain, validity, hazard level and area geometry are required; a missing, late or mismatched copy cannot replace the verified original. This is publisher-provided text, not machine translation.

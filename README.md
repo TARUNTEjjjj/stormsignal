@@ -32,6 +32,7 @@ Open the URL printed by Vite. New forecasts, warning checks and map tiles requir
 npm run check      # unit tests, TypeScript, production build and artifact checks
 npm run preview    # serve the built application and warning API locally
 npm run test:live  # optional real-provider warning checks; run after a build
+npm run test:live -- --base-url=https://stormsignal-weather.pages.dev # hosted API
 ```
 
 `npm test`, `npm run typecheck` and `npm run build` are also available individually. CI installs from the lockfile and runs `npm run check` on Node 22. Tests use fixtures and mocks where appropriate; live-provider checks are separate because network access and upstream data can change.

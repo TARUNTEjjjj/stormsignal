@@ -435,6 +435,9 @@ function officialLink(candidate: unknown, fallback: string): string {
   try {
     const parsed = new URL(str(candidate, 2000));
     return parsed.protocol === 'https:' &&
+      !parsed.username &&
+      !parsed.password &&
+      !parsed.port &&
       (parsed.hostname === 'weather.gov' ||
         parsed.hostname.endsWith('.weather.gov') ||
         parsed.hostname === 'noaa.gov' ||
@@ -484,11 +487,13 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
     30_000,
     signal,
   );
-  const features = record(result.value).features;
+  const response = record(result.value),
+    features = response.features;
   if (!Array.isArray(features))
     throw new WeatherDataError(
       'The warning feed is unavailable. Check weather.gov for current warnings.',
     );
+  const partial = features.length > 100 || !!record(response.pagination).next;
   const now = Date.now(),
     seen = new Set<string>();
   const fallback = `https://forecast.weather.gov/MapClick.php?lat=${location.latitude}&lon=${location.longitude}`;
@@ -548,9 +553,10 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
     officialUrl: fallback,
     scope: 'point',
     scopeLabel: place.name,
-    partial: false,
-    coverage:
-      'NWS point warnings in the United States and supported territories. An empty response is not a safety guarantee.',
+    partial,
+    coverage: partial
+      ? 'Incomplete NWS point warning response: additional records or pages were not loaded. Check the official source for all current warnings.'
+      : 'NWS point warnings in the United States and supported territories. An empty response is not a safety guarantee.',
   };
 }
 

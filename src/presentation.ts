@@ -51,25 +51,52 @@ export function age(time: number, now = Date.now()) {
         : `${Math.floor(m / 1440)}d ago`;
 }
 export function readPlaces(raw: string | null): Place[] {
+  // Storage is untrusted and may outlive an older application version.
+  if (raw && raw.length > 65_536) return [];
   try {
     const data = JSON.parse(raw || '[]');
-    return Array.isArray(data)
-      ? data
-          .filter(
-            (p): p is Place =>
-              !!p &&
-              typeof p.id === 'string' &&
-              typeof p.name === 'string' &&
-              p.name.length < 150 &&
-              typeof p.country === 'string' &&
-              typeof p.countryCode === 'string' &&
-              finite(p.latitude) &&
-              Math.abs(p.latitude) <= 90 &&
-              finite(p.longitude) &&
-              Math.abs(p.longitude) <= 180,
-          )
-          .slice(0, 8)
-      : [];
+    if (!Array.isArray(data)) return [];
+    const places: Place[] = [];
+    const text = (value: unknown, max: number, empty = false): value is string =>
+      typeof value === 'string' && value.length <= max && (empty || !!value.trim());
+    for (const p of data) {
+      if (
+        !p ||
+        typeof p !== 'object' ||
+        Array.isArray(p) ||
+        !text(p.id, 300) ||
+        !text(p.name, 150) ||
+        !text(p.country, 200, true) ||
+        !text(p.countryCode, 2, true) ||
+        (p.countryCode && !/^[a-z]{2}$/i.test(p.countryCode)) ||
+        !finite(p.latitude) ||
+        Math.abs(p.latitude) > 90 ||
+        !finite(p.longitude) ||
+        Math.abs(p.longitude) > 180 ||
+        (p.admin != null && !text(p.admin, 200, true)) ||
+        (p.timezone != null && !text(p.timezone, 100))
+      )
+        continue;
+      if (p.timezone != null) {
+        try {
+          timeFormatter(p.timezone, {});
+        } catch {
+          continue;
+        }
+      }
+      places.push({
+        id: p.id,
+        name: p.name,
+        country: p.country,
+        countryCode: p.countryCode.toUpperCase(),
+        latitude: p.latitude,
+        longitude: p.longitude,
+        ...(p.admin == null ? {} : { admin: p.admin }),
+        ...(p.timezone == null ? {} : { timezone: p.timezone }),
+      });
+      if (places.length === 8) break;
+    }
+    return places;
   } catch {
     return [];
   }

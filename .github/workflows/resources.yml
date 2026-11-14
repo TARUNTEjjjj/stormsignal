@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --test scripts/resources/resource-catalog.test.mjs
+      - name: Check automatic refresh and offline resource support
+        run: npm run test:resources:ui
       - name: Check committed catalog
         run: node scripts/resources/check-catalog.mjs
   refresh:

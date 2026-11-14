@@ -140,6 +140,42 @@ export function createAppUpdater({baseline, loadVersion, prepareWorkers, verifyP
     check,stop(){running=false;generation++;clearTimer(timer);active?.abort.abort();active=undefined;},getState:()=>({...state})};
 }
 
+/** Resume checks are bounded so focus events cannot create a request storm. */
+export function bindAppUpdateLifecycle(updater, {windowObject = globalThis.window,
+  documentObject = globalThis.document, serviceWorker = globalThis.navigator?.serviceWorker,
+  now = Date.now, resumeIntervalMs = 60000} = {}) {
+  const pending = new Set(['waiting-for-idle','waiting-for-workers','waiting-for-deployment']);
+  let lastResumeAttempt=-Infinity;
+  const due = () => {
+    if(documentObject?.visibilityState === 'hidden') return;
+    const state=updater.getState();
+    const elapsed=state.lastChecked===null ? Infinity : now()-state.lastChecked;
+    const sinceAttempt=now()-lastResumeAttempt;
+    if((elapsed >= resumeIntervalMs || elapsed < 0) && (sinceAttempt >= resumeIntervalMs || sinceAttempt < 0)) {
+      lastResumeAttempt=now();void updater.check({force:true});
+    } else if(pending.has(state.status)) void updater.check();
+  };
+  const online = () => { lastResumeAttempt=now();void updater.check({force:true}); };
+  const visible = () => { if(documentObject?.visibilityState === 'visible') due(); };
+  const resume = () => { void updater.start(); due(); };
+  const pause = () => updater.stop();
+  windowObject?.addEventListener('focus',due);
+  windowObject?.addEventListener('online',online);
+  windowObject?.addEventListener('pageshow',resume);
+  windowObject?.addEventListener('pagehide',pause);
+  documentObject?.addEventListener('visibilitychange',visible);
+  serviceWorker?.addEventListener('controllerchange',online);
+  return () => {
+    windowObject?.removeEventListener('focus',due);
+    windowObject?.removeEventListener('online',online);
+    windowObject?.removeEventListener('pageshow',resume);
+    windowObject?.removeEventListener('pagehide',pause);
+    documentObject?.removeEventListener('visibilitychange',visible);
+    serviceWorker?.removeEventListener('controllerchange',online);
+    updater.stop();
+  };
+}
+
 export function startAppUpdates({windowObject = globalThis.window, documentObject = globalThis.document, navigatorObject = globalThis.navigator} = {}) {
   if(!documentObject||windowObject.__appUpdater)return windowObject?.__appUpdater;
   const baseline={version:documentObject.querySelector('meta[name="app-version"]')?.content,project:documentObject.querySelector('meta[name="app-project"]')?.content};
@@ -167,6 +203,7 @@ export function startAppUpdates({windowObject = globalThis.window, documentObjec
     event.ports[0].postMessage({type:'APP_UPDATE_SAFETY',nonce:event.data.nonce,safe:guard.canReload()});
   };
   navigatorObject.serviceWorker?.addEventListener('message',safety);
-  windowObject.addEventListener('pagehide',event=>{if(!event.persisted){updater.stop();guard.dispose();navigatorObject.serviceWorker?.removeEventListener('message',safety);}});
+  const unbindLifecycle=bindAppUpdateLifecycle(updater,{windowObject,documentObject,serviceWorker:navigatorObject.serviceWorker});
+  windowObject.addEventListener('pagehide',event=>{if(!event.persisted){unbindLifecycle();guard.dispose();navigatorObject.serviceWorker?.removeEventListener('message',safety);}});
   windowObject.__appUpdater=updater;void updater.start();return updater;
 }

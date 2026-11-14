@@ -1,5 +1,6 @@
 /* Public resource page only. The staging script supplies a complete shell inventory. */
 const VERSION = /* RESOURCE_SHELL_VERSION */ 'development';
+const APP_VERSION = /* APP_VERSION */ 'development';
 const PROJECT = /* RESOURCE_PROJECT */ '';
 const INVENTORY = /* RESOURCE_SHELL_MANIFEST */ [];
 const SCOPE = new URL(self.registration.scope);
@@ -75,7 +76,7 @@ async function shellReady() {
 }
 
 self.addEventListener('install', event => event.waitUntil((async () => {
-  if (SCOPE.pathname !== '/resources/' || ASSETS.size !== 9) throw new Error('Invalid resource shell scope or inventory');
+  if (SCOPE.pathname !== '/resources/' || ASSETS.size !== 10) throw new Error('Invalid resource shell scope or inventory');
   try {
     const responses = await Promise.all([...ASSETS].map(async ([url, asset]) => [url, await verifiedAsset(url, asset)]));
     const cache = await caches.open(CACHE);
@@ -85,7 +86,8 @@ self.addEventListener('install', event => event.waitUntil((async () => {
 })()));
 
 self.addEventListener('activate', event => event.waitUntil((async () => {
-  for (const key of await caches.keys()) if (key.startsWith(PREFIX) && key !== CACHE) await caches.delete(key);
+  const previous = (await caches.keys()).filter(key=>key.startsWith(PREFIX)&&key!==CACHE).at(-1);
+  for (const key of await caches.keys()) if (key.startsWith(PREFIX) && key !== CACHE && key !== previous) await caches.delete(key);
   // This registration's narrow scope never takes control of the main application.
   await self.clients.claim();
 })()));
@@ -118,3 +120,5 @@ self.addEventListener('message', event => {
     event.ports[0].postMessage({type: 'RESOURCE_SHELL_STATUS', ready: await shellReady(), version: VERSION, scope: SCOPE.href});
   })());
 });
+
+/* APP_UPDATE_PROTOCOL */

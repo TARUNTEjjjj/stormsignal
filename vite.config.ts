@@ -1,14 +1,25 @@
 import { defineConfig, type Manifest } from 'vite';
 import react from '@vitejs/plugin-react';
 import { readFile, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import { handleAlerts } from './server/router.ts';
+// @ts-expect-error Native ESM build helpers are shared with the static apps.
+import { readAppRelease, stampAppVersion, writeAppVersion } from './scripts/app-release.mjs';
+// @ts-expect-error Native ESM build helper.
+import { workerUpdateProtocolSource } from './scripts/app-update-protocol.mjs';
+// @ts-expect-error Native ESM staging helper.
+import { stageResourceExplorer } from './scripts/stage-resource-explorer.mjs';
 
 // Follow static imports only: optional satellite code must not consume a field
 // user's bandwidth just because the app is preparing itself for offline use.
 const offlineShell = {
   name: 'stormsignal-offline-shell',
   async closeBundle() {
+    const release = await readAppRelease(process.cwd(), {project:'stormsignal',
+      sourcePaths:['src','public','resources','server','index.html','vite.config.ts','package.json','package-lock.json','scripts'],
+      ignorePaths:['public/resources']});
+    await stageResourceExplorer(process.cwd(), 'dist/resources', {release});
+    for (const file of ['index.html', 'preparedness.html', 'offline.html'])
+      await writeFile(`dist/${file}`, stampAppVersion(await readFile(`dist/${file}`, 'utf8'), release));
     const manifest: Manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
     const critical = new Set<string>();
     const visited = new Set<string>();
@@ -32,21 +43,14 @@ const offlineShell = {
     const files = [...critical].sort();
     const optional = [...all].filter((file) => !critical.has(file)).sort();
     const worker = await readFile('public/sw.js', 'utf8');
-    const hash = createHash('sha256').update(worker).update(JSON.stringify({ files, optional }));
-    for (const file of [
-      'index.html',
-      'preparedness.html',
-      'offline.html',
-      'favicon.svg',
-      'icon.svg',
-      'manifest.webmanifest',
-    ]) {
-      hash.update(await readFile(`dist/${file}`));
-    }
-    const version = hash.digest('hex').slice(0, 12);
+    const version = release.version.slice(0, 12);
     await writeFile(
       'dist/sw.js',
       worker
+        .replace("const APP_VERSION = 'development';", `const APP_VERSION=${JSON.stringify(release.version)};`)
+        .replace('/* APP_UPDATE_PROTOCOL */', workerUpdateProtocolSource({
+          readyExpression:'(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)',
+        }))
         .replace(
           /const VERSION\s*=\s*['"]stormsignal-v1['"];?/,
           `const VERSION='stormsignal-${version}';`,
@@ -57,6 +61,7 @@ const offlineShell = {
           `const OPTIONAL_ASSETS=${JSON.stringify(optional)};`,
         ),
     );
+    await writeAppVersion('dist', release, {workers:[{scope:'/',script:'/sw.js'},{scope:'/resources/',script:'/resources/offline-worker.js'}]});
     console.log(
       `Offline shell: ${files.length} critical assets; ${optional.length} optional assets left on demand.`,
     );

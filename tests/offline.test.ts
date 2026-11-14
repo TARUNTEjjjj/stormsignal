@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import vm from 'node:vm';
+// @ts-expect-error Shared native ESM worker builder.
+import {workerUpdateProtocolSource} from '../scripts/app-update-protocol.mjs';
 
 type EventHandler = (event: any) => void;
 function harness(origin = 'https://example.org') {
+  let safe = true;
+  const client = {id:'window-1',url:origin+'/',postMessage(data:any,ports:MessagePort[]){ports[0].postMessage({type:'APP_UPDATE_SAFETY',nonce:data.nonce,safe});}};
   const events: Record<string, EventHandler> = {};
   const store = new Map<string, Response>();
   const stores = new Map<string, Map<string, Response>>([
@@ -98,19 +102,22 @@ function harness(origin = 'https://example.org') {
   };
   const self = {
     location: { origin },
+    registration: {scope:origin+'/'},
     addEventListener: (type: string, callback: EventHandler) => {
-      events[type] = callback;
+      const previous=events[type];events[type]=event=>{previous?.(event);callback(event);};
     },
     skipWaiting: async () => {
       skipped++;
     },
     clients: {
+      matchAll: async () => [client],
       claim: async () => {
         claimed++;
       },
     },
   };
   const source = readFileSync('public/sw.js', 'utf8')
+    .replace('/* APP_UPDATE_PROTOCOL */',workerUpdateProtocolSource({readyExpression:'(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)'}))
     .replace(
       'const BUILD_ASSETS = [];',
       "const BUILD_ASSETS = ['/assets/main-a1.js', '/assets/main-a1.css'];",
@@ -126,6 +133,7 @@ function harness(origin = 'https://example.org') {
     URL,
     Response,
     AbortController,
+    MessageChannel,
     setTimeout: (callback: () => void, delay: number) => {
       const id = ++timerId;
       timers.set(id, { callback, delay });
@@ -189,6 +197,12 @@ function harness(origin = 'https://example.org') {
       });
       await pending;
       return reply;
+    },
+    setSafe(value:boolean){safe=value;},
+    message: async (data:unknown) => {
+      let reply:any;const pending:Promise<unknown>[]=[];
+      events.message({source:client,data,ports:[{postMessage(value:unknown){reply=value;}}],waitUntil(value:Promise<unknown>){pending.push(value);}});
+      await Promise.all(pending);return reply;
     },
     counts: () => ({ requests, skipped, claimed, aborted, bodyCancelled }),
     setMode: (value: typeof mode) => {
@@ -258,7 +272,7 @@ test('offline installation atomically precaches core and standalone kit, not opt
   ])
     assert.ok(h.saved.includes(path), path);
   assert.ok(!h.saved.includes('/assets/WeatherMap-b2.js'));
-  assert.equal(h.counts().skipped, 1);
+  assert.equal(h.counts().skipped, 0, 'A new release waits until every open window approves activation');
 });
 
 test('failed installation cannot activate a partially downloaded offline shell', async () => {
@@ -267,6 +281,17 @@ test('failed installation cannot activate a partially downloaded offline shell',
   await assert.rejects(h.lifecycle('install'), /failed critical asset/);
   assert.equal(h.counts().skipped, 0);
   assert.equal(h.saved.length, 0);
+});
+
+test('a matching complete update still waits for every window to become safe',async()=>{
+  const h=harness(),command={type:'ACTIVATE_APP_UPDATE',version:'development',nonce:'a'.repeat(32)};
+  assert.equal((await h.message({type:'GET_APP_UPDATE_STATUS'})).ready,false);
+  assert.equal((await h.message(command)).accepted,false);
+  await h.lifecycle('install');h.setSafe(false);
+  assert.equal((await h.message(command)).accepted,false);assert.equal(h.counts().skipped,0);
+  h.setSafe(true);assert.equal(await h.message({...command,nonce:'invalid'}),undefined);
+  assert.equal((await h.message(command)).accepted,true);assert.equal(h.counts().skipped,1);
+  assert.equal(h.dispatch('/app-version.json').response,undefined);
 });
 
 test('offline readiness confirms every critical file, not just an active worker', async () => {

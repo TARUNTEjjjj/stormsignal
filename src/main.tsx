@@ -4,6 +4,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import './styles.css';
 import './frontend-design.css';
 
+window.appUpdateCanReload = () => false;
+
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
     <App />

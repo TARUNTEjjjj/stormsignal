@@ -34,7 +34,7 @@ function runtime(files, {timeout = 8000} = {}) {
   };
   const context = vm.createContext({URL, Response, Headers, AbortController, Uint8Array, TextDecoder, crypto: webcrypto,
     setTimeout: (callback, ms) => setTimeout(callback, Math.min(ms, timeout)), clearTimeout, caches,
-    self: {registration: {scope}, addEventListener(name, handler) { handlers[name] = handler; },
+    self: {registration: {scope}, addEventListener(name, handler) { const previous=handlers[name];handlers[name]=event=>{previous?.(event);handler(event);}; },
       async skipWaiting() { skips++; }, clients: {async claim() { claims++; }}},
     async fetch(url, options) {
       calls.push({url, options});
@@ -63,7 +63,7 @@ test('worker code release changes for shell edits but remains stable for daily c
   assert.equal(renderResourceWorker(files).toString(), original);
   files.set('explorer.mjs', Buffer.from('export const changed = true;'));
   assert.notEqual(renderResourceWorker(files).toString(), original);
-  assert.equal(publicResourceFiles.length, 10);
+  assert.equal(publicResourceFiles.length, 11);
   assert.ok(!publicResourceFiles.some(file => /sources|cache|secret/.test(file)));
 });
 
@@ -75,12 +75,12 @@ test('canonical install creates complete isolated offline shell and preserves ma
   app.storage.set('vedaris-static:https://resource.example/:old', new Map());
   app.storage.set('stormsignal-v1', new Map());
   await app.lifecycle('install');
-  assert.equal(app.calls.length, 9);
+  assert.equal(app.calls.length, 10);
   assert.ok(app.calls.some(call => call.url === scope));
   assert.ok(app.calls.every(call => !call.url.endsWith('/index.html') && call.options.redirect === 'error' && call.options.credentials === 'omit'));
   assert.equal((await app.status()).ready, true);
   await app.lifecycle('activate');
-  assert.equal(app.storage.has('resource-library-shell:/resources/:old'), false);
+  assert.equal(app.storage.has('resource-library-shell:/resources/:old'), true);
   for (const name of ['resource-library-shell:/elsewhere/:old', 'avenquellis-offline:/:old', 'vedaris-static:https://resource.example/:old', 'stormsignal-v1']) assert.ok(app.storage.has(name), name);
   assert.deepEqual(app.counters(), {claims: 1, skips: 0});
   app.context.fetch = async () => { throw new Error('Offline'); };

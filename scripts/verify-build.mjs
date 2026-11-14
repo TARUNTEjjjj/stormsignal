@@ -15,6 +15,8 @@ for (const path of [
   '/resources/',
   '/resources/catalog.json',
   '/resources/explorer.mjs',
+  '/resources/app-updates.mjs',
+  '/app-version.json',
 ]) {
   const response = await check(path);
   assert.equal(response.status, 200, path);
@@ -24,6 +26,13 @@ assert.equal((await check('/resources')).status, 308);
 assert.match((await check('/resources/explorer.mjs')).headers.get('Content-Type'), /javascript/);
 assert.equal((await (await check('/resources/catalog.json')).json()).schemaVersion, 1);
 const html = await (await check('/')).text();
+const versionResponse=await check('/app-version.json');
+assert.equal(versionResponse.headers.get('Cache-Control'),'no-store');
+const release=await versionResponse.json();
+assert.equal(release.project,'stormsignal');
+assert.match(release.version,/^[a-f0-9]{64}$/);
+for(const path of ['/','/offline.html','/preparedness','/resources/'])
+  assert.ok((await (await check(path)).text()).includes(`name="app-version" content="${release.version}"`),path);
 for (const path of [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map((m) => m[1])) {
   const response = await check(path);
   assert.equal(response.status, 200, path);

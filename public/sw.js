@@ -1,4 +1,5 @@
 const VERSION = 'stormsignal-v1';
+const APP_VERSION = 'development';
 // Vite fills these lists. Only static entry dependencies are downloaded during
 // installation; optional map/report chunks are cached only if actually opened.
 const BUILD_ASSETS = [];
@@ -23,10 +24,12 @@ self.addEventListener('install', (event) => {
       // addAll commits as one batch. An incomplete install cannot replace the
       // active worker or report a new offline kit as ready.
       await cache.addAll([...DOCUMENTS, ...STATIC_FILES, ...BUILD_ASSETS]);
-      await self.skipWaiting();
+      // A waiting update activates only after every open client confirms idle.
     }),
   );
 });
+
+/* APP_UPDATE_PROTOCOL */
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(

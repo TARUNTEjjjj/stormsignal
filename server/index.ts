@@ -3,12 +3,14 @@ import { handleAlerts } from './router.ts';
 
 const aliases: Record<string, string> = {
   '/': '/index.html',
+  '/resources/': '/resources/index.html',
   '/offline': '/offline.html',
   '/preparedness': '/preparedness.html',
 };
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/resources') return new Response(null, {status: 308, headers: {Location: '/resources/'}});
     if (url.pathname === '/api/alerts') return handleAlerts(request);
     if (!['GET', 'HEAD'].includes(request.method))
       return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });

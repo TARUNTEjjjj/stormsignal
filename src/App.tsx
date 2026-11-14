@@ -1671,6 +1671,7 @@ export default function App() {
             </details>
           </section>
           <footer className="footer">
+            <a href="/resources/">Open-source resources ↗</a>
             <a href="/offline.html" className="offline-status">
               {offlineStatus}
             </a>

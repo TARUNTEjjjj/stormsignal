@@ -12,11 +12,17 @@ for (const path of [
   '/icon.svg',
   '/manifest.webmanifest',
   '/third-party-licenses.md',
+  '/resources/',
+  '/resources/catalog.json',
+  '/resources/explorer.mjs',
 ]) {
   const response = await check(path);
   assert.equal(response.status, 200, path);
   assert.ok((await response.text()).length, path);
 }
+assert.equal((await check('/resources')).status, 308);
+assert.match((await check('/resources/explorer.mjs')).headers.get('Content-Type'), /javascript/);
+assert.equal((await (await check('/resources/catalog.json')).json()).schemaVersion, 1);
 const html = await (await check('/')).text();
 for (const path of [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map((m) => m[1])) {
   const response = await check(path);

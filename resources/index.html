@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A project-specific collection of open-source tools, learning references, and datasets with source and freshness information.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://raw.githubusercontent.com; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Resource library</title>
+  <link rel="stylesheet" href="./explorer.css">
+  <script type="module" src="./explorer.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#library">Skip to resources</a>
+  <header class="masthead"><a class="back-link" href="/">← Back to project</a><span class="edition">THE OPEN-SOURCE FIELD GUIDE <span aria-hidden="true">✳</span></span></header>
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div><p class="eyebrow" id="project-name">RESOURCE LIBRARY</p><h1 id="page-title">Good sources.<br><em>New possibilities.</em></h1><p class="intro">Explore useful projects, follow the ideas behind them, and find your next thing to build.</p></div>
+      <aside class="editor-note"><span class="note-mark" aria-hidden="true">↗</span><p>Selected for this project.<br>Ranked with context.</p><small>Relevance, community interest, and maintenance help order this collection. A star count is a signal, not a quality guarantee.</small></aside>
+    </section>
+    <div class="collection-summary"><p><strong id="total-count">—</strong><span>open-source resources</span></p><p><strong id="category-count">—</strong><span>areas to explore</span></p><div><span class="eyebrow">COLLECTION STATUS</span><p id="freshness" role="status">Loading the published collection…</p></div></div>
+    <section id="library" aria-labelledby="library-title">
+      <div class="section-heading"><div><p class="eyebrow">FOLLOW YOUR CURIOSITY</p><h2 id="library-title">The collection</h2></div><a class="download-link" href="./catalog.json" download>Download collection <span aria-hidden="true">↓</span></a></div>
+      <form class="toolbar" role="search" id="filters"><div class="search-field"><label for="search">Search the library</label><input id="search" type="search" placeholder="Try a topic, tool, or idea…" maxlength="200" autocomplete="off"></div><div><label for="category">Area</label><select id="category"><option value="">All areas</option></select></div><div><label for="sort">Order by</label><select id="sort"><option value="recommended">Recommended</option><option value="stars">Most starred</option><option value="recent">Recent activity</option></select></div></form>
+      <p id="result-count" class="result-count" aria-live="polite" aria-atomic="true"></p>
+      <div id="resource-grid" class="resource-grid"></div>
+      <div id="empty-state" class="empty-state" hidden><h3>No matching resources.</h3><p>Try another topic or choose all areas.</p><button id="reset-filters" type="button">Clear filters</button></div>
+      <div id="load-error" class="empty-state" hidden><h3>The collection could not be loaded.</h3><p>Please reconnect and try again. The rest of the project is still available from the link above.</p><button id="retry" type="button">Try again</button></div>
+      <noscript><p class="empty-state">Enable JavaScript to search this collection, or <a href="./catalog.json">read the bundled JSON collection</a>.</p></noscript>
+    </section>
+    <section class="source-note" aria-labelledby="source-title"><h2 id="source-title">A starting point for discovery.</h2><p>This page checks the automatically refreshed GitHub snapshot on each visit and uses its bundled snapshot if that request fails. Descriptions, activity, and stars retain the observation time shown on each card. The collection can include older cached observations when a refresh is unavailable. Check each repository’s license and documentation before reusing its code or data.</p><p>These references complement this project’s own content. They do not automatically become reviewed lessons, answers, or operational data.</p></section>
+  </main>
+  <footer><span>Made for thoughtful exploration.</span><a href="/">Return to project <span aria-hidden="true">↗</span></a></footer>
+</body>
+</html>

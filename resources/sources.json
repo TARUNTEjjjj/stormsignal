@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "project": "stormsignal",
+  "title": "StormSignal evidence resources",
+  "minStars": 500,
+  "maxPerCategory": 12,
+  "categories": [
+    {
+      "id": "weather",
+      "title": "Weather and climate data tools",
+      "queries": [
+        "topic:weather"
+      ],
+      "seeds": [
+        "open-meteo/open-meteo",
+        "Unidata/MetPy",
+        "pydata/xarray"
+      ]
+    },
+    {
+      "id": "maps",
+      "title": "Geospatial visualization",
+      "queries": [
+        "topic:geospatial"
+      ],
+      "seeds": [
+        "Leaflet/Leaflet",
+        "maplibre/maplibre-gl-js"
+      ]
+    }
+  ]
+}

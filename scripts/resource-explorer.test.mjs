@@ -51,7 +51,7 @@ test('published explorer includes only the explicit public files, never cache/co
   const root=await mkdtemp(join(tmpdir(),'resource-explorer-'));
   t.after(()=>rm(root,{recursive:true,force:true}));
   await mkdir(join(root,'resources'));
-  for(const file of publicResourceFiles) await writeFile(join(root,'resources',file), file==='catalog.json'?JSON.stringify(catalog([])):'public asset');
+  for(const file of publicResourceFiles) await writeFile(join(root,'resources',file), file==='catalog.json'?JSON.stringify(catalog([])):file==='offline-worker.js'?await readFile(new URL('../resources/offline-worker.js',import.meta.url),'utf8'):'public asset');
   await writeFile(join(root,'resources','sources.json'),'private collection configuration');
   await writeFile(join(root,'resources','.cache.json'),'private response cache');
   const output=join(root,'public','resources');

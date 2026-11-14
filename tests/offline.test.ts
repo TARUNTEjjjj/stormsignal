@@ -11,6 +11,7 @@ function harness(origin = 'https://example.org') {
   const stores = new Map<string, Map<string, Response>>([
     ['stormsignal-ancient', new Map()],
     ['unrelated-app', new Map()],
+    ['resource-library-shell:/resources/:current', new Map()],
     ['stormsignal-previous', new Map()],
     ['stormsignal-v1', store],
   ]);
@@ -300,6 +301,11 @@ test('worker never intercepts remote feeds, API/private/arbitrary assets, query 
     '/assets/private.js',
     '/assets/main-Ab123456.js?token=private',
     '/assets/main-a1.js?token=private',
+    '/resources/',
+    '/resources/offline-worker.js',
+    '/resources/background.mjs',
+    '/resources/catalog.json',
+    'https://raw.githubusercontent.com/TARUNTEjjjj/stormsignal/main/resources/catalog.json',
   ])
     assert.equal(h.dispatch(path).response, undefined, path);
   assert.equal(h.dispatch('/', 'POST').response, undefined);

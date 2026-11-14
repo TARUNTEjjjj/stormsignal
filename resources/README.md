@@ -37,3 +37,11 @@ The deployed resource explorer fetches the latest public catalog from this repos
 - **Geospatial visualization**: [Leaflet/Leaflet](https://github.com/Leaflet/Leaflet), [maplibre/maplibre-gl-js](https://github.com/maplibre/maplibre-gl-js). Discovery: `topic:geospatial`.
 
 Implementation follows the official [GitHub search API](https://docs.github.com/en/rest/search/search), [repository search syntax](https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories), and [API best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).
+
+## Automatic checks and offline collections in the web app
+
+While an app or resource-library tab is open, the browser checks the fixed public GitHub snapshot on startup and every 15 minutes after the preceding check completes. Returning to a tab, restoring it from the back/forward cache, or reconnecting checks again when due. Background-tab throttling and device sleep can defer a timer; a closed browser does not run these checks. This is separate from the daily server-side GitHub collection job.
+
+Validated public metadata is saved in this site's IndexedDB storage. The saved edition is available immediately on later visits, and an older CDN response cannot replace newer saved data. Network or validation failures preserve the last valid collection; storage denial or quota failures are reported without blocking the library. Source observation dates remain unchanged, and the library distinguishes the last successful check from the collection date.
+
+A service worker scoped to `/resources/` saves the resource-library page and its explicit public assets. It does not take over the main application, cache arbitrary URLs, or delete the application's existing caches. After an online visit prepares this library, it can reopen offline with its latest saved catalog. Browser storage can be cleared or evicted, and private browsing or policy restrictions can prevent saving; the UI reports availability. The catalog contains reference metadata and links, not offline copies of the third-party repositories or websites. Learning progress, notes, credentials and operational application data are not stored in this resource cache.

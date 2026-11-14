@@ -27,9 +27,9 @@ The refresh job uses rate-limit cooldowns and conditional requests when its loca
 
 ## Automated updates
 
-`.github/workflows/resources.yml` tests changes and, after it reaches the default branch, refreshes once daily or through **Run workflow**. A successful refresh commits only the public snapshot (and the native bundle copy in Forge for Mac). Failed refreshes stop before committing; branch protections can also prevent the bot push. The workflow has read-only permissions for tests and grants content-write permission only to the refresh job.
+`.github/workflows/resources.yml` tests changes and, after it reaches the default branch, refreshes once daily or through **Run workflow**. A usable validated refresh commits only the public snapshot (and the native bundle copy in Forge for Mac). Partial refreshes publish validated last-good entries with stale/error information and a workflow warning. Fatal refresh or validation errors stop before committing; branch protections can also prevent the bot push. The workflow has read-only permissions for tests and grants content-write permission only to the refresh job.
 
-A catalog update in GitHub does not by itself publish every hosted app: use that repository's existing deployment procedure. Static sites consume the checked-in snapshot during their build, while the optional API reads the on-disk snapshot. No GitHub credential goes into a browser build.
+The deployed resource explorer fetches the latest public catalog from this repository's default branch through GitHub's raw-content CDN, with bounded requests and project/schema validation. It uses the bundled snapshot when remote metadata is unavailable. CDN caching can briefly delay new entries; the interface shows observation dates and its data source. A catalog-only update therefore reaches the deployed explorer without rebuilding the application. Application code changes still follow the existing deployment procedure. The optional local API reads the on-disk snapshot; no GitHub credential goes into a browser build.
 
 ## Source policy
 

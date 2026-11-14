@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A project-specific collection of open-source tools, learning references, and datasets with source and freshness information.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' https://raw.githubusercontent.com; img-src 'self'; base-uri 'none'; form-action 'none'">
   <title>Resource library</title>
   <link rel="stylesheet" href="./explorer.css">
   <script type="module" src="./explorer.mjs"></script>
@@ -25,9 +25,9 @@
       <div id="resource-grid" class="resource-grid"></div>
       <div id="empty-state" class="empty-state" hidden><h3>No matching resources.</h3><p>Try another topic or choose all areas.</p><button id="reset-filters" type="button">Clear filters</button></div>
       <div id="load-error" class="empty-state" hidden><h3>The collection could not be loaded.</h3><p>Please reconnect and try again. The rest of the project is still available from the link above.</p><button id="retry" type="button">Try again</button></div>
-      <noscript><p class="empty-state">Enable JavaScript to search this collection, or <a href="./catalog.json">read the published JSON collection</a>.</p></noscript>
+      <noscript><p class="empty-state">Enable JavaScript to search this collection, or <a href="./catalog.json">read the bundled JSON collection</a>.</p></noscript>
     </section>
-    <section class="source-note" aria-labelledby="source-title"><h2 id="source-title">A starting point for discovery.</h2><p>Descriptions, activity, and stars come from GitHub at the observation time shown on each card. The collection can include older cached observations when a refresh is unavailable. Check each repository’s license and documentation before reusing its code or data.</p><p>These references complement this project’s own content. They do not automatically become reviewed lessons, answers, or operational data.</p></section>
+    <section class="source-note" aria-labelledby="source-title"><h2 id="source-title">A starting point for discovery.</h2><p>This page checks the automatically refreshed GitHub snapshot on each visit and uses its bundled snapshot if that request fails. Descriptions, activity, and stars retain the observation time shown on each card. The collection can include older cached observations when a refresh is unavailable. Check each repository’s license and documentation before reusing its code or data.</p><p>These references complement this project’s own content. They do not automatically become reviewed lessons, answers, or operational data.</p></section>
   </main>
   <footer><span>Made for thoughtful exploration.</span><a href="/">Return to project <span aria-hidden="true">↗</span></a></footer>
 </body>

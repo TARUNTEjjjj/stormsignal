@@ -1,6 +1,7 @@
 import {PROJECT, normalizeCatalog, safeRepositoryUrl, dateValue, loadCatalog} from './catalog.mjs';
 import {createCatalogController, bindCatalogLifecycle} from './live.mjs';
 import {ensureOfflineShell} from './offline.mjs';
+import {startAppUpdates} from './app-updates.mjs';
 export {PROJECT, LIVE_CATALOG_URL, normalizeCatalog, safeRepositoryUrl, loadCatalog} from './catalog.mjs';
 
 export function filterItems(items, {query = '', category = '', sort = 'recommended'} = {}) {
@@ -63,6 +64,7 @@ function card(item, categories) {
 }
 
 export async function startExplorer() {
+  startAppUpdates();
   const byId = id => document.getElementById(id);
   const search = byId('search'), category = byId('category'), sort = byId('sort');
   let catalog, catalogText, downloadUrl, shell = {available: false, pending: true}, latestState;

@@ -21,7 +21,7 @@ export default {
     const headers = new Headers({
       'Content-Type': asset.type,
       ETag: asset.etag,
-      'Cache-Control': path.startsWith('/assets/')
+      'Cache-Control': path === '/app-version.json' ? 'no-store' : path.startsWith('/assets/')
         ? 'public, max-age=31536000, immutable'
         : 'no-cache',
       'X-Content-Type-Options': 'nosniff',

@@ -66,6 +66,7 @@ import { value, finite, localTime, age, readPlaces, modelSpread } from './presen
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 import { placeResourceKey, nextSearchIndex } from './place-navigation';
 import { focusableControls } from './focus-trap';
+import { canApplyAppUpdate, restoreUpdatePlace } from './app-update-guard';
 import {
   currentResource,
   loadResource,
@@ -252,7 +253,10 @@ function PanelHeader({
 }
 
 export default function App() {
-  const [place, setPlace] = useState<Place>(PRESETS[0]);
+  const [place, setPlace] = useState<Place>(() => {
+    try { return restoreUpdatePlace(sessionStorage, PRESETS[0]); }
+    catch { return PRESETS[0]; }
+  });
   const [revision, setRevision] = useState(0);
   const [alertRevision, setAlertRevision] = useState(0);
   const [query, setQuery] = useState('');
@@ -325,6 +329,13 @@ export default function App() {
   const [notifications, setNotifications] = useState(false);
   const [offlineStatus, setOfflineStatus] = useState('Checking offline availability');
   useEffect(() => {
+    window.appUpdateCanReload = () => {
+      try { return canApplyAppUpdate({query, searching, geoBusy, drawerOpen, notifications, place}, sessionStorage); }
+      catch { return false; }
+    };
+    return () => { window.appUpdateCanReload = () => false; };
+  }, [query, searching, geoBusy, drawerOpen, notifications, place]);
+  useEffect(() => {
     if (!import.meta.env.PROD || !('serviceWorker' in navigator)) {
       setOfflineStatus('Download the kit for offline use');
       return;
@@ -357,7 +368,7 @@ export default function App() {
     navigator.serviceWorker.addEventListener('controllerchange', controllerChanged);
     timeout = setTimeout(unconfirmed, 10000);
     navigator.serviceWorker
-      .register('/sw.js')
+      .register('/sw.js', {updateViaCache: 'none'})
       .then(() => navigator.serviceWorker.ready)
       .then((registration) => {
         if (active) confirmCache(registration.active);

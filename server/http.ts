@@ -11,6 +11,10 @@ export interface TextResult {
 }
 const memory = new Map<string, TextResult>();
 const pending = new Map<string, Promise<TextResult>>();
+/** Upstream reads that may be in progress at once, for all callers together. */
+export const MAX_PENDING_READS = 32;
+/** How many of them are in progress now. */
+export const pendingReads = () => pending.size;
 const MAX_ENTRIES = 96;
 const MAX_MEMORY_BYTES = 12_000_000;
 const RETENTION = 24 * 60 * 60_000;
@@ -103,6 +107,67 @@ function cancel(body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<U
   }
 }
 
+function joined(chunks: Uint8Array[]): Uint8Array {
+  const body = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+/** The runtime's name for an encoding label; '' for a label it cannot decode. */
+function encodingName(label: string): string {
+  try {
+    return new TextDecoder(label).encoding;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The encoding other than UTF-8 that a body itself declares and this runtime can decode, as XML
+ * allows: a UTF-16 byte-order mark (RFC 7303), or the encoding named in its XML declaration. An
+ * HTTP charset alone is not enough, because servers often send a default one. An HTTP charset that
+ * names yet another encoding leaves the body unverifiable; one that says UTF-8 is already disproved
+ * by the bytes.
+ */
+function declaredEncoding(body: Uint8Array, contentType: string | null): string | null {
+  if (body[0] === 0xef && body[1] === 0xbb && body[2] === 0xbf) return null;
+  if (body[0] === 0xff && body[1] === 0xfe) return 'utf-16le';
+  if (body[0] === 0xfe && body[1] === 0xff) return 'utf-16be';
+  const head = String.fromCharCode(...body.subarray(0, 512));
+  const stated = /^\s*<\?xml\s[^>]*?\bencoding\s*=\s*["']([A-Za-z][\w.-]*)["']/.exec(head)?.[1];
+  const encoding = stated ? encodingName(stated) : '';
+  if (!encoding || encoding === 'utf-8') return null;
+  const charset = /;\s*charset\s*=\s*"?([^\s";]+)/i.exec(contentType ?? '')?.[1];
+  const sent = charset === undefined ? encoding : encodingName(charset);
+  return sent === encoding || sent === 'utf-8' ? encoding : null;
+}
+
+function declaredText(body: Uint8Array, contentType: string | null, invalid: unknown): string {
+  const encoding = declaredEncoding(body, contentType);
+  if (!encoding) throw invalid;
+  if (!encoding.startsWith('utf-16')) {
+    // A UTF-8 document with a few damaged bytes and a wrong declaration stays rejected: read in
+    // another encoding, every accented or non-Latin character in it would be garbled without
+    // notice. The declared encoding is used only when the bytes do not read as UTF-8 text.
+    let damaged = 0,
+      intact = 0;
+    for (const character of new TextDecoder().decode(body)) {
+      if (character === '\ufffd') damaged++;
+      else if (character > '\u007f') intact++;
+    }
+    if (intact >= damaged) throw invalid;
+  }
+  try {
+    return new TextDecoder(encoding, { fatal: true }).decode(body);
+  } catch {
+    throw invalid; // The bytes are not valid in the declared encoding either.
+  }
+}
+
 async function boundedText(
   response: Response,
   maxBytes: number,
@@ -116,8 +181,12 @@ async function boundedText(
   if (!response.body) throw new Error('Warning feed is empty');
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  const type = response.headers.get('content-type');
+  // Provider text is UTF-8 unless it is not valid UTF-8 and declares another encoding.
+  const chunks: Uint8Array[] = [];
   let bytes = 0,
-    text = '';
+    text = '',
+    invalid: unknown = null;
   try {
     for (;;) {
       const chunk = await interrupted(reader.read(), signal);
@@ -125,9 +194,24 @@ async function boundedText(
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes > maxBytes) throw new Error('Warning feed exceeds the size limit');
-      text += decoder.decode(chunk.value, { stream: true });
+      chunks.push(chunk.value);
+      if (invalid !== null) continue;
+      try {
+        text += decoder.decode(chunk.value, { stream: true });
+      } catch (error) {
+        // Read on only for a declared encoding. A lone first byte may begin a byte-order mark.
+        if (bytes > 1 && !declaredEncoding(joined(chunks), type)) throw error;
+        invalid = error;
+      }
     }
-    return text + decoder.decode();
+    if (invalid === null) {
+      try {
+        return text + decoder.decode();
+      } catch (error) {
+        invalid = error;
+      }
+    }
+    return declaredText(joined(chunks), type, invalid);
   } catch (error) {
     cancel(reader);
     throw error;
@@ -297,8 +381,11 @@ export async function requestText(target: string, options: TextOptions = {}): Pr
   const maxBytes = Math.min(options.maxBytes ?? 2_000_000, 4_000_000);
   const ttlMs = Math.min(Math.max(options.ttlMs ?? 60_000, 0), 24 * 60 * 60_000);
   let task = pending.get(target);
+  const kept = memory.get(target);
+  // A fresh copy in memory needs no upstream read, so it is served even when reads are at capacity.
+  if (!task && kept && Date.now() - kept.fetchedAt < ttlMs) task = Promise.resolve(kept);
   if (!task) {
-    if (pending.size >= 32)
+    if (pending.size >= MAX_PENDING_READS)
       throw new Error('Warning service busy; retry shortly or check the official source');
     task = retrieve(target, maxBytes, ttlMs);
     pending.set(target, task);

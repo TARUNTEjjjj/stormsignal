@@ -1,13 +1,33 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
-import { activeCapRecords, parseCap, parseRss, type CapArea, type CapDocument } from './cap.ts';
-import { capPolygonContains } from './global.ts';
+import {
+  activeCapRecords,
+  capAreaText,
+  capReferencesInForce,
+  newestFirst,
+  parseCap,
+  parseRss,
+  upcomingCapNote,
+  upcomingCapRecords,
+  type CapArea,
+  type CapDocument,
+} from './cap.ts';
+import { capAreaGeometry, capPolygonContains } from './global.ts';
 import { requestText, type TextOptions, type TextResult } from './http.ts';
 
 type RequestText = (url: string, options?: TextOptions) => Promise<TextResult>;
 export interface NationalAlertResult extends AlertResult {
-  /** Exact verified document/reference prefixes supersede possibly older WMO copies. */
+  /**
+   * Exact verified document/reference prefixes supersede possibly older WMO copies. A current
+   * document this check could not evaluate at the point (an area without polygon or circle) is
+   * left out, so WMO's area-description/geocode match for it stays visible. An Update's
+   * references are listed once it is in effect.
+   */
   excludedCapKeys: string[];
+  /** Matched documents that take effect later; disclosed in coverage, never listed as current. */
+  upcomingDocuments: number;
+  /** The earliest time one of them takes effect. */
+  upcomingAt?: number;
 }
 const SOURCES = {
   PH: {
@@ -94,8 +114,10 @@ function detailUrl(raw: string, country: 'PH' | 'ID'): string {
   return url.href;
 }
 interface Feed {
-  items: Array<{ url: string; publishedAt: number | null }>;
+  items: Array<{ url: string; publishedAt: number | null; order: number | null }>;
   truncated: boolean;
+  /** RSS only: some publication times name no time zone, so they order entries but are no instants. */
+  unzonedTimes?: boolean;
 }
 function feedItems(raw: string, country: 'PH' | 'ID', now: number): Feed {
   if (country === 'ID') return parseRss(raw);
@@ -129,10 +151,8 @@ function feedItems(raw: string, country: 'PH' | 'ID', now: number): Feed {
       throw new Error('Unexpected official feed link namespace.');
     const cap = links.find((link) => link['@_type'] === 'application/cap+xml');
     if (!cap) throw new Error('Official feed entry has no CAP bulletin link.');
-    return {
-      url: text(cap['@_href'], 4000),
-      publishedAt: timestamp(entry.updated ?? entry.published, now),
-    };
+    const publishedAt = timestamp(entry.updated ?? entry.published, now);
+    return { url: text(cap['@_href'], 4000), publishedAt, order: publishedAt };
   });
   return { items, truncated: entries.length > items.length };
 }
@@ -152,6 +172,8 @@ function contains(area: CapArea, place: Place): boolean {
 }
 const key = (document: Pick<CapDocument, 'sender' | 'identifier'>) =>
   `${document.sender}/${document.identifier}/`;
+/** Point matching here uses polygons and circles only; such an area cannot be evaluated. */
+const withoutGeometry = (area: CapArea) => !area.polygons.length && !area.circles.length;
 
 /** Direct national CAP check supplements WMO; bounded history is always incomplete. */
 export function createNationalAlertAdapter(
@@ -203,9 +225,12 @@ export function createNationalAlertAdapter(
         feed.items.some((item) => item.publishedAt !== null && item.publishedAt > now() + 300_000)
       )
         throw new Error('Official feed publication time is in the future.');
-      const ordered = [...feed.items].sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0));
-      const unique = [...new Map(ordered.map((item) => [item.url, item])).values()];
+      // The most recently published entries are read first. Times without a zone (RSS) still
+      // order the entries of one feed; entries with no usable time follow in feed order.
+      const newest = newestFirst(feed.items);
+      const unique = [...new Map(newest.items.map((item) => [item.url, item])).values()];
       const candidates = unique.slice(0, MAX_DOCUMENTS);
+      const unordered = unique.length > candidates.length && !newest.certain;
       const loaded: Array<{ document: CapDocument; url: string; fetchedAt: number }> = [];
       let failed = 0,
         attempted = 0,
@@ -240,22 +265,34 @@ export function createNationalAlertAdapter(
       const actual = checked.filter(
         (document) => document.status === 'Actual' && document.scope === 'Public',
       );
+      const active = activeCapRecords(checked, now());
+      // A current document with an area this check cannot evaluate must not suppress WMO's copy,
+      // which may match that area by its description or geocode. References still supersede.
+      const unevaluated = new Set(
+        active
+          .filter((document) => document.infos.some((info) => info.areas.some(withoutGeometry)))
+          .map(key),
+      );
       const excludedCapKeys = [
         ...new Set(
           actual.flatMap((document) => [
-            key(document),
-            ...(['Update', 'Cancel'].includes(document.msgType)
-              ? document.references.map(key)
-              : []),
+            ...(unevaluated.has(key(document)) ? [] : [key(document)]),
+            ...(capReferencesInForce(document, now()) ? document.references.map(key) : []),
           ]),
         ),
       ];
-      const active = activeCapRecords(checked, now());
+      const upcoming = upcomingCapRecords(checked, now()).flatMap((document) => {
+        const matched = document.infos.filter((info) =>
+          info.areas.some((area) => contains(area, place)),
+        );
+        return matched.length ? [Math.min(...matched.map((info) => info.effective))] : [];
+      });
       const alerts: WeatherAlert[] = [];
       let unmapped = 0;
       for (const document of active) {
         const matching = document.infos.filter((info) => {
-          if (info.areas.some((area) => !area.polygons.length && !area.circles.length)) unmapped++;
+          // CAP allows information with no area at all; it cannot be matched to a point either.
+          if (!info.areas.length || info.areas.some(withoutGeometry)) unmapped++;
           return info.areas.some((area) => contains(area, place));
         });
         const preferred = matching.some((info) => /^en(?:-|$)/i.test(info.language))
@@ -266,19 +303,12 @@ export function createNationalAlertAdapter(
         )!.url;
         for (const [index, info] of preferred.entries()) {
           const areas = info.areas.filter((area) => contains(area, place));
-          // Preserve boundaries exactly; omit large map geometry to conserve mobile transfer.
-          const polygons = areas.flatMap((area) =>
-            area.polygons.map((polygon) => [polygon.map(([lat, lon]) => [lon, lat])]),
-          );
           alerts.push({
             id: `${key(document)}${index}`.slice(0, 2000),
             title: info.headline || info.event,
             event: info.event,
             severity: info.severity,
-            area: areas
-              .map((area) => area.description)
-              .join('; ')
-              .slice(0, 8000),
+            area: capAreaText(areas),
             sent: document.sent,
             effective: info.effective,
             expires: info.expires!,
@@ -286,11 +316,8 @@ export function createNationalAlertAdapter(
             instruction: info.instruction,
             source: info.senderName || source.name,
             url,
-            geometry:
-              polygons.length &&
-              polygons.reduce((sum, polygon) => sum + polygon[0].length, 0) <= 1000
-                ? { type: 'MultiPolygon', coordinates: polygons }
-                : null,
+            // Preserve boundaries exactly; omit large map geometry to conserve mobile transfer.
+            geometry: capAreaGeometry(areas),
           });
         }
       }
@@ -313,6 +340,8 @@ export function createNationalAlertAdapter(
         status: 'available',
         alerts: alerts.slice(0, 30),
         excludedCapKeys,
+        upcomingDocuments: upcoming.length,
+        ...(upcoming.length ? { upcomingAt: Math.min(...upcoming) } : {}),
         fetchedAt: Math.min(received.fetchedAt, ...loaded.map((item) => item.fetchedAt)),
         source: `${source.name} · direct official CAP feed`,
         officialUrl: source.officialUrl,
@@ -327,7 +356,14 @@ export function createNationalAlertAdapter(
           (omitted || feed.truncated
             ? ` ${omitted ? `${omitted} additional` : 'Additional'} feed entries were not checked.`
             : '') +
+          (unordered
+            ? ' Some feed entries have no usable publication time, so the bulletins checked may not be the most recent.'
+            : '') +
+          (feed.unzonedTimes
+            ? ' Some feed publication times have no time zone; they only set the order in which bulletins are read.'
+            : '') +
           (unmapped ? ' Some warning areas have no usable point geometry and were omitted.' : '') +
+          upcomingCapNote(upcoming, 'matched bulletin(s)') +
           (missingExpiry
             ? ' Bulletins without a stated expiry were not treated as current warnings.'
             : '') +

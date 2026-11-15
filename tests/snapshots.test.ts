@@ -11,6 +11,8 @@ import {
   clearBriefings,
   briefingText,
   officialBriefingUrl,
+  pastStatedExpiry,
+  savedClockNote,
   type StorageAccess,
 } from '../src/offline';
 import type { Place, Forecast, AlertResult } from '../src/types';
@@ -274,6 +276,161 @@ test('future-dated and old forecasts cannot be relabeled as new snapshots', () =
     createBriefing(place, { ...forecast, current: hour(NOW - 3 * HOUR) }, alerts, NOW),
   );
   assert.throws(() => validateBriefing({ ...pack(), savedAt: NOW + 6 * 60000 }, NOW));
+});
+
+test('saved briefings stay readable, removable and downloadable after the device clock is set back', () => {
+  const disk = storage();
+  // Miami is saved with a correct clock, a second place while the clock ran 30 minutes fast.
+  const fast = NOW + 30 * 60000;
+  const ahead = createBriefing(
+    { ...place, name: 'Fort Lauderdale', latitude: 26.1224 },
+    { ...forecast, fetchedAt: fast, current: hour(fast) },
+    { ...alerts, fetchedAt: fast },
+    fast,
+  );
+  assert.equal(saveBriefing(disk, pack(), NOW).error, null);
+  assert.equal(saveBriefing(disk, ahead, fast).error, null);
+  // Network time corrects the clock, or it resets after the battery runs out.
+  for (const clock of [NOW + 2 * 60000, NOW - 10 * 60000, Date.UTC(2026, 2, 1), 86400000]) {
+    const loaded = loadBriefings(disk, clock);
+    assert.equal(loaded.error, null, new Date(clock).toISOString());
+    assert.deepEqual(loaded.briefings, [ahead, pack()]);
+    assert.match(briefingText(loaded.briefings[1], clock), /Do not enter floodwater/);
+  }
+  // Saving and removing still work, and keep the stored briefings.
+  const earlier = NOW - 10 * 60000;
+  const next = createBriefing(
+    { ...place, name: 'Key West', latitude: 24.5551 },
+    { ...forecast, fetchedAt: earlier, current: hour(earlier) },
+    { ...alerts, fetchedAt: earlier },
+    earlier,
+  );
+  assert.deepEqual(
+    saveBriefing(disk, next, earlier).briefings.map((b) => b.place.name),
+    ['Key West', 'Fort Lauderdale', 'Miami'],
+  );
+  const removed = removeBriefing(disk, ahead.id, earlier);
+  assert.equal(removed.error, null);
+  assert.deepEqual(
+    loadBriefings(disk, earlier).briefings.map((b) => b.place.name),
+    ['Key West', 'Miami'],
+  );
+  // A new briefing still needs a plausible device clock.
+  assert.throws(() => createBriefing(place, forecast, alerts, 86400000));
+});
+
+test('a briefing saved on a device whose clock runs slow or fast keeps a just-issued bulletin', () => {
+  const MINUTE = 60_000;
+  const manila: Place = {
+    id: 'manila',
+    name: 'Manila',
+    country: 'Philippines',
+    countryCode: 'PH',
+    latitude: 14.6042,
+    longitude: 120.9822,
+    timezone: 'Asia/Manila',
+  };
+  // NOW is the gateway's clock; the device reads NOW + skew. The feed and its bulletin are `issued`
+  // ms old, and the check itself arrived a second ago.
+  const check = (skew: number, issued: number): AlertResult => ({
+    status: 'available',
+    fetchedAt: NOW + skew - 1_000,
+    source: 'PAGASA direct + WMO SWIC',
+    coverage: 'Incomplete coverage; an empty list is not an all-clear.',
+    officialUrl: 'https://www.pagasa.dost.gov.ph/',
+    scope: 'point',
+    scopeLabel: 'Manila',
+    partial: true,
+    feedUpdatedAt: NOW - issued,
+    clockOffset: skew,
+    alerts: [
+      {
+        ...alerts.alerts[0],
+        id: 'pagasa:rainfall:0',
+        sent: NOW - issued,
+        effective: NOW - issued,
+        expires: NOW + 3 * HOUR,
+        url: 'https://publicalert.pagasa.dost.gov.ph/output/gfa/00000000-0000-4000-8000-000000000001.cap',
+      },
+    ],
+  });
+  const local = (skew: number): Forecast => ({
+    ...forecast,
+    fetchedAt: NOW + skew,
+    current: hour(NOW),
+  });
+  for (const [skew, issued] of [
+    [-10 * MINUTE, MINUTE],
+    [-60 * MINUTE, 20 * MINUTE],
+    [30 * MINUTE, MINUTE],
+    [0, MINUTE],
+  ]) {
+    const note = `device ${skew / MINUTE} min, issued ${issued / MINUTE} min ago`;
+    const device = NOW + skew;
+    const item = createBriefing(manila, local(skew), check(skew, issued), device);
+    assert.equal(item.savedAt, device, note);
+    assert.equal(item.warnings.status, 'available', note);
+    assert.equal(item.warnings.alerts[0].sent, NOW - issued, note);
+    assert.equal(item.warnings.feedUpdatedAt, NOW - issued, note);
+    assert.equal(item.warnings.clockOffset, skew, note);
+    // It is stored, and read back whatever the device clock shows later.
+    const disk = storage();
+    assert.equal(saveBriefing(disk, item, device).error, null, note);
+    for (const later of [device, NOW, NOW + 30 * 86_400_000]) {
+      const loaded = loadBriefings(disk, later);
+      assert.equal(loaded.error, null, note);
+      assert.deepEqual(loaded.briefings, [item], note);
+    }
+    const exported = briefingText(item, device);
+    assert.match(exported, /Do not enter floodwater/, note);
+    // Device-clock and authority times differ visibly, so the copy says which is which.
+    assert.equal(/the device clock was about \d+ minutes/.test(exported), skew !== 0, note);
+  }
+  assert.match(
+    savedClockNote(createBriefing(manila, local(-600_000), check(-600_000, MINUTE), NOW - 600_000)),
+    /^When this was saved, the device clock was about 10 minutes behind the warning service’s clock\./,
+  );
+  // Authority times are still checked, on the gateway's clock: none may be later than the save.
+  const slow = -10 * MINUTE;
+  for (const issued of [-5 * MINUTE - 1, -HOUR])
+    assert.throws(
+      () => createBriefing(manila, local(slow), check(slow, issued), NOW + slow),
+      /Invalid feed update time|Invalid warning timing/,
+    );
+  const late = check(slow, MINUTE);
+  late.alerts[0].sent = NOW + 5 * MINUTE + 1;
+  assert.throws(
+    () => createBriefing(manila, local(slow), late, NOW + slow),
+    /Invalid warning timing/,
+  );
+  // Without a stated gateway clock (NWS) the device clock is the reference, as before.
+  const direct = { ...check(slow, MINUTE), clockOffset: undefined };
+  assert.throws(() => createBriefing(manila, local(slow), direct, NOW + slow));
+  // A stored offset is bounded metadata; anything else is unreadable.
+  for (const offset of [0.5, NaN, Infinity, '600000', null, 4e12, -4e12]) {
+    const item = createBriefing(manila, local(0), check(0, MINUTE), NOW);
+    Object.assign(item.warnings, { clockOffset: offset });
+    assert.throws(() => validateBriefing(item, NOW, true), /Invalid clock offset/, String(offset));
+  }
+  // A saved warning is called past its stated expiry only once both the device clock and the
+  // service's clock have passed it. Saved on a device an hour fast, with 30 minutes left:
+  const fast = 60 * MINUTE;
+  const ending = check(fast, MINUTE);
+  ending.alerts[0].expires = NOW + 30 * MINUTE;
+  const saved = createBriefing(manila, local(fast), ending, NOW + fast);
+  const past = (device: number) => /PAST STATED EXPIRY/.test(briefingText(saved, device));
+  // The device clock still runs an hour fast: the copy is not called expired before the warning ends.
+  assert.equal(past(NOW + fast), false);
+  assert.equal(past(NOW + fast + 30 * MINUTE - 1), false);
+  assert.equal(past(NOW + fast + 30 * MINUTE), true);
+  // The device clock was corrected after the save: the copy stays "status unknown" a while longer.
+  assert.equal(past(NOW + 30 * MINUTE), false);
+  assert.equal(pastStatedExpiry(saved, saved.warnings.alerts[0], NOW + fast - 1), false);
+  assert.equal(pastStatedExpiry(saved, saved.warnings.alerts[0], NOW + fast + 30 * MINUTE), true);
+  // Without a measured offset (NWS, older briefings) the device clock decides, as before.
+  const plain = pack();
+  assert.equal(pastStatedExpiry(plain, plain.warnings.alerts[0], NOW + HOUR - 1), false);
+  assert.equal(pastStatedExpiry(plain, plain.warnings.alerts[0], NOW + HOUR), true);
 });
 
 test('invalid coordinates, dates, timezones, arrays, and nonfinite weather are rejected', () => {

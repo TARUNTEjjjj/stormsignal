@@ -257,6 +257,191 @@ test('empty and invalid UTF-8 responses fail instead of becoming reusable feed t
   }
 });
 
+/** Raw bytes: each string character is one byte (Latin-1), and each number is one byte. */
+const raw = (...parts: (string | number)[]) =>
+  Uint8Array.from(
+    parts.flatMap((part) =>
+      typeof part === 'number' ? [part] : [...part].map((c) => c.charCodeAt(0)),
+    ),
+  );
+/** UTF-16 text after its byte-order mark. */
+function utf16(text: string, littleEndian: boolean) {
+  const view = new DataView(new ArrayBuffer(2 + text.length * 2));
+  view.setUint16(0, 0xfeff, littleEndian);
+  for (let i = 0; i < text.length; i++) view.setUint16(2 + i * 2, text.charCodeAt(i), littleEndian);
+  return new Uint8Array(view.buffer);
+}
+/** A body that arrives in separate chunks, as a network read can. */
+const chunked = (...chunks: Uint8Array[]) =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+const LATIN1_CAP = raw(
+  '<?xml version="1.0" encoding="ISO-8859-1"?><areaDesc>C',
+  0xf3,
+  'rdoba</areaDesc>',
+);
+const LATIN1_TEXT = '<?xml version="1.0" encoding="ISO-8859-1"?><areaDesc>Córdoba</areaDesc>';
+
+test('provider text that is not UTF-8 is read in the encoding it declares', async () => {
+  const wide = '<?xml version="1.0" encoding="UTF-16"?><areaDesc>Córdoba</areaDesc>';
+  const at = LATIN1_CAP.indexOf(0xf3);
+  const cases: [BodyInit, Record<string, string>, string][] = [
+    // Declared in both the XML declaration and the HTTP charset.
+    [LATIN1_CAP, { 'Content-Type': 'application/xml; charset=ISO-8859-1' }, LATIN1_TEXT],
+    // Declared only in the XML declaration; 0x96 is an en dash in windows-1252.
+    [
+      raw('<?xml version="1.0" encoding="windows-1252"?><event>Storm ', 0x96, ' C', 0xf3, 'rdoba'),
+      {},
+      '<?xml version="1.0" encoding="windows-1252"?><event>Storm – Córdoba',
+    ],
+    // The HTTP charset names the same encoding under another label.
+    [LATIN1_CAP, { 'Content-Type': 'text/xml; charset="windows-1252"' }, LATIN1_TEXT],
+    // A server's default UTF-8 charset cannot read these bytes; the document's declaration can.
+    [LATIN1_CAP, { 'Content-Type': 'text/xml; charset=utf-8' }, LATIN1_TEXT],
+    // UTF-16 with its byte-order mark, in either byte order, and with the mark split by the network.
+    [utf16(wide, true), {}, wide],
+    [utf16(wide, false), { 'Content-Type': 'application/xml' }, wide],
+    [chunked(utf16(wide, true).subarray(0, 1), utf16(wide, true).subarray(1)), {}, wide],
+    // The byte that is not UTF-8 arrives after earlier chunks were already read as UTF-8.
+    [
+      chunked(
+        LATIN1_CAP.subarray(0, at - 1),
+        LATIN1_CAP.subarray(at - 1, at),
+        LATIN1_CAP.subarray(at),
+      ),
+      {},
+      LATIN1_TEXT,
+    ],
+  ];
+  for (const [body, headers, expected] of cases) {
+    clearWarningCache();
+    mockFetch(async () => new Response(body, { headers }));
+    assert.equal((await requestText(SOURCE)).text, expected);
+  }
+});
+
+test('a damaged UTF-8 document is never re-read in another encoding it does not use', async () => {
+  // Hindi and Spanish text in UTF-8, with one stray byte (a windows-1252 dash) in the middle.
+  const damaged = (prolog: string) => {
+    const [before, after] = `${prolog}<alert><headline>बाढ़ की चेतावनी |Córdoba</headline></alert>`
+      .split('|')
+      .map((part) => new TextEncoder().encode(part));
+    return Uint8Array.from([...before, 0x96, ...after]);
+  };
+  const latin1 = { 'Content-Type': 'text/xml; charset=ISO-8859-1' };
+  const cases: [BodyInit, Record<string, string>][] = [
+    // A server's default ISO-8859-1 charset on a UTF-8 document, with and without its declaration.
+    [damaged(''), latin1],
+    [damaged('<?xml version="1.0" encoding="UTF-8"?>'), latin1],
+    // A wrong XML declaration, alone or repeated by the server: the bytes still read as UTF-8.
+    [damaged('<?xml version="1.0" encoding="ISO-8859-1"?>'), {}],
+    [damaged('<?xml version="1.0" encoding="ISO-8859-1"?>'), latin1],
+    [
+      damaged('<?xml version="1.0" encoding="windows-1252"?>'),
+      { 'Content-Type': 'text/xml; charset=utf-8' },
+    ],
+    // An HTTP charset alone is not the document's own statement, even for bytes it could read.
+    [
+      raw('<rss><title>R', 0xed, 'o Cuarto</title></rss>'),
+      { 'Content-Type': 'text/xml; charset="iso-8859-1"' },
+    ],
+    // The HTTP charset and the XML declaration name different encodings, or one that is unknown.
+    [LATIN1_CAP, { 'Content-Type': 'text/xml; charset=shift_jis' }],
+    [LATIN1_CAP, { 'Content-Type': 'text/xml; charset=x-unknown' }],
+  ];
+  for (const [index, [body, headers]] of cases.entries()) {
+    clearWarningCache();
+    mockFetch(async () => new Response(body, { headers }));
+    await assert.rejects(requestText(SOURCE), /encoded data|encoding/i, `case ${index}`);
+    // Nothing unverified was kept: the next read asks the provider again.
+    mockFetch(async () => new Response('valid feed'));
+    assert.equal((await requestText(SOURCE)).text, 'valid feed', `case ${index}`);
+  }
+  // The same document without the stray byte is plain UTF-8, whatever is declared around it.
+  clearWarningCache();
+  const intact =
+    '<?xml version="1.0" encoding="ISO-8859-1"?><headline>बाढ़ की चेतावनी Córdoba</headline>';
+  mockFetch(async () => new Response(new TextEncoder().encode(intact), { headers: latin1 }));
+  assert.equal((await requestText(SOURCE)).text, intact);
+});
+
+test('valid UTF-8 is read as UTF-8 whatever other encoding it declares', async () => {
+  const text = '<?xml version="1.0" encoding="ISO-8859-1"?><areaDesc>Córdoba</areaDesc>';
+  mockFetch(
+    async () =>
+      new Response(new TextEncoder().encode(text), {
+        headers: { 'Content-Type': 'text/xml; charset=windows-1252' },
+      }),
+  );
+  assert.equal((await requestText(SOURCE)).text, text);
+});
+
+test('text read in a declared encoding is cached as UTF-8 and read back unchanged', async () => {
+  const edge = optionalEdgeCache();
+  mockFetch(async () => new Response(LATIN1_CAP));
+  const first = await requestText(SOURCE);
+  assert.equal(first.text, LATIN1_TEXT);
+  assert.equal(edge.size, 1);
+  clearWarningCache();
+  now += 30_000;
+  // The shared copy still names ISO-8859-1, but it is stored as UTF-8 and read as UTF-8.
+  assert.deepEqual(await requestText(SOURCE), first);
+  assert.equal(calls.length, 1);
+});
+
+test('text invalid in UTF-8 and in every encoding it declares is still rejected', async () => {
+  const cases: [BodyInit, Record<string, string>][] = [
+    // A UTF-8 byte-order mark decides the encoding, whatever the XML declaration says.
+    [
+      raw(0xef, 0xbb, 0xbf, '<?xml version="1.0" encoding="ISO-8859-1"?><a>C', 0xf3, 'rdoba</a>'),
+      {},
+    ],
+    // An encoding this runtime cannot decode.
+    [raw('<?xml version="1.0" encoding="x-unknown"?><a>C', 0xf3, 'rdoba</a>'), {}],
+    // UTF-16 cut off inside a character.
+    [raw(0xff, 0xfe, 0x3c, 0x00, 0x61), { 'Content-Type': 'application/xml; charset=utf-16le' }],
+  ];
+  for (const [body, headers] of cases) {
+    clearWarningCache();
+    mockFetch(async () => new Response(body, { headers }));
+    await assert.rejects(requestText(SOURCE), /encoded data|encoding/i);
+  }
+  // Reading on in a declared encoding keeps the byte limit.
+  clearWarningCache();
+  mockFetch(async () => new Response(chunked(LATIN1_CAP, raw('x'.repeat(100)))));
+  await assert.rejects(requestText(SOURCE, { maxBytes: 100 }), /exceeds the size limit/);
+});
+
+test('invalid UTF-8 that declares only UTF-8 still stops the read at once', async () => {
+  for (const [bytes, headers] of [
+    [
+      raw('<?xml version="1.0" encoding="UTF-8"?><a>C', 0xf3, 'rdoba</a>'),
+      { 'Content-Type': 'text/xml; charset=utf-8' },
+    ],
+    [raw('<a>C', 0xf3, 'rdoba</a>'), { 'Content-Type': 'text/xml' }],
+  ] as const) {
+    clearWarningCache();
+    let cancelled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        // The transfer stays open, so only an immediate rejection ends this read.
+      },
+      cancel() {
+        cancelled++;
+      },
+    });
+    mockFetch(async () => new Response(body, { headers }));
+    await assert.rejects(requestText(SOURCE), /encoded data|encoding/i);
+    assert.equal(cancelled, 1);
+    assert.equal(body.locked, false);
+  }
+});
+
 test('a caller with a smaller byte limit cannot reuse an oversized cached response', async () => {
   mockFetch(async () => new Response('sixsix'));
   await requestText(SOURCE, { maxBytes: 10 });
@@ -594,4 +779,53 @@ test('persistent failures retry at most once and redirects or authorization erro
     await assert.rejects(requestText(SOURCE), new RegExp(`HTTP ${status}`));
     assert.equal(calls.length, before + 1);
   }
+});
+
+test('a fresh cached copy is served while upstream reads are at capacity', async () => {
+  mockFetch(async () => new Response('cached warning feed'));
+  await requestText(SOURCE);
+  const release: Array<() => void> = [];
+  mockFetch(
+    () => new Promise<Response>((resolve) => release.push(() => resolve(new Response('late')))),
+  );
+  const busy = Array.from({ length: 32 }, (_, i) =>
+    requestText(`https://severeweather.wmo.int/f/ows/busy_${i}.json`),
+  );
+  await assert.rejects(
+    requestText('https://severeweather.wmo.int/f/ows/busy_32.json'),
+    /Warning service busy/,
+  );
+  assert.equal((await requestText(SOURCE)).text, 'cached warning feed');
+  while (release.length < 32) await Promise.resolve();
+  for (const resolve of release) resolve();
+  await Promise.all(busy);
+  assert.equal(calls.length, 33);
+});
+
+test('a body read on in its declared encoding still settles by the upstream deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let cancelled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      // Not valid UTF-8 but declared ISO-8859-1, so the read goes on; the transfer then stalls.
+      controller.enqueue(LATIN1_CAP);
+    },
+    cancel() {
+      cancelled++;
+      return never();
+    },
+  });
+  mockFetch(async () => new Response(body));
+  const rejected = assert.rejects(requestText(SOURCE), { name: 'TimeoutError' });
+  await flush();
+  await advance(t, 7_999);
+  assert.equal(cancelled, 0);
+  await advance(t, 1);
+  await rejected;
+  assert.equal(cancelled, 1);
+  assert.equal(body.locked, false);
+  // The stalled read holds no shared slot: the next request reads the complete document.
+  mockFetch(async () => new Response(LATIN1_CAP));
+  assert.equal((await requestText(SOURCE)).text, LATIN1_TEXT);
+  assert.equal(calls.length, 2);
 });

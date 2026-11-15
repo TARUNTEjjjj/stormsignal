@@ -107,7 +107,70 @@ test('point outside polygon and geometry-free labels cannot be presented as loca
   );
   const r = await h.fetch(manila);
   assert.equal(r.alerts.length, 0);
-  assert.equal(r.excludedCapKeys.length, 2);
+  // Only the polygon document was evaluated at this point; the geometry-free one cannot suppress
+  // a WMO copy matched by its area description or geocode.
+  assert.deepEqual(r.excludedCapKeys, ['agency@example.gov/alert-1/']);
+  assert.match(r.coverage, /no usable point geometry/);
+});
+
+test('information with no area at all is disclosed as having no usable point geometry', async () => {
+  const r = await harness(
+    atom([ph(1)]),
+    new Map([[ph(1), cap(1, { infos: info().replace(/<area>.*?<\/area>/, '') })]]),
+  ).fetch(manila);
+  assert.equal(r.alerts.length, 0);
+  assert.match(r.coverage, /no usable point geometry/);
+  // WMO cannot match information without an area either, so the document still counts as checked.
+  assert.deepEqual(r.excludedCapKeys, ['agency@example.gov/alert-1/']);
+});
+
+test('only documents evaluated at the point, and referenced originals, suppress WMO copies', async () => {
+  const earlier = new Date(now - 7_200_000).toISOString();
+  const area = (shape: string, name = 'Named district') =>
+    `<area><areaDesc>${name}</areaDesc>${shape}</area>`;
+  const docs = new Map([
+    // Current, geometry-free area only.
+    [ph(1), cap(1, { infos: info({ shape: '' }) })],
+    // Current, a polygon elsewhere plus a geometry-free area.
+    [
+      ph(2),
+      cap(2, {
+        infos: info({ shape: squareID }).replace(
+          '</area>',
+          `</area>${area('<geocode><valueName>PSGC</valueName><value>1300000000</value></geocode>', 'Metro Manila')}`,
+        ),
+      }),
+    ],
+    // Expired: not current, whatever its geometry.
+    [
+      ph(3),
+      cap(3, { infos: info({ shape: '', expires: old }).replaceAll(sent, earlier) }).replace(
+        `<sent>${sent}</sent>`,
+        `<sent>${earlier}</sent>`,
+      ),
+    ],
+    // A geometry-free update still supersedes the original it references.
+    [
+      ph(4),
+      cap(4, {
+        type: 'Update',
+        refs: `agency@example.gov,alert-5,${earlier}`,
+        infos: info({ shape: '' }),
+      }),
+    ],
+    // Current polygon containing Manila: matched and shown here.
+    [ph(6), cap(6)],
+  ]);
+  const r = await harness(atom([...docs.keys()]), docs).fetch(manila);
+  assert.deepEqual(
+    r.alerts.map((alert) => alert.id),
+    ['agency@example.gov/alert-6/0'],
+  );
+  assert.deepEqual([...r.excludedCapKeys].sort(), [
+    'agency@example.gov/alert-3/',
+    'agency@example.gov/alert-5/',
+    'agency@example.gov/alert-6/',
+  ]);
   assert.match(r.coverage, /no usable point geometry/);
 });
 
@@ -167,6 +230,93 @@ test('cancellation and expired updates suppress original and emit WMO exclusion 
   ]);
 });
 
+test('a Cancel whose information ends at its issue time removes the warning it references', async () => {
+  const docs = new Map([
+    [ph(1), cap(1)],
+    [
+      ph(2),
+      cap(2, {
+        type: 'Cancel',
+        refs: `agency@example.gov,alert-1,${sent}`,
+        infos: info({ expires: sent }),
+      }),
+    ],
+  ]);
+  const r = await harness(atom([...docs.keys()]), docs).fetch(manila);
+  assert.equal(r.alerts.length, 0);
+  assert.doesNotMatch(r.coverage, /could not be verified/);
+  assert.deepEqual([...r.excludedCapKeys].sort(), [
+    'agency@example.gov/alert-1/',
+    'agency@example.gov/alert-2/',
+  ]);
+});
+
+test('an Alert whose expiry precedes its issue time is reported as not verified, never as an empty result', async () => {
+  // A mistyped date: the stated expiry is an hour before the bulletin was issued.
+  const mistyped = cap(2, { infos: info({ expires: old }) });
+  await assert.rejects(
+    harness(atom([ph(2)]), new Map([[ph(2), mistyped]])).fetch(manila),
+    /could not be verified/,
+  );
+  const r = await harness(
+    atom([ph(1), ph(2)]),
+    new Map([
+      [ph(1), cap(1)],
+      [ph(2), mistyped],
+    ]),
+  ).fetch(manila);
+  assert.equal(r.alerts.length, 1);
+  assert.match(r.coverage, /1 of 2 selected recent bulletins verified/);
+  assert.match(r.coverage, /1 selected bulletin\(s\) could not be verified/);
+  // It was not verified, so it does not suppress WMO's copy of that bulletin either.
+  assert.deepEqual(r.excludedCapKeys, ['agency@example.gov/alert-1/']);
+});
+
+test('a matched bulletin taking effect later is disclosed; a pending Update keeps the original', async () => {
+  const later = new Date(now + 6 * 3_600_000).toISOString();
+  const end = new Date(now + 30 * 3_600_000).toISOString();
+  const effectiveLater = (body: string) =>
+    body.replace(`<effective>${sent}</effective>`, `<effective>${later}</effective>`);
+  const advance = await harness(
+    atom([ph(1), ph(2)]),
+    new Map([
+      [ph(1), cap(1, { infos: effectiveLater(info({ expires: end })) })],
+      // Takes effect later, but its polygon does not cover Manila.
+      [ph(2), cap(2, { infos: effectiveLater(info({ expires: end, shape: squareID })) })],
+    ]),
+  ).fetch(manila);
+  assert.equal(advance.alerts.length, 0);
+  assert.equal(advance.upcomingDocuments, 1);
+  // The earliest such time is handed on for the combined coverage text of both sources.
+  assert.equal(advance.upcomingAt, Date.parse(later));
+  assert.match(
+    advance.coverage,
+    new RegExp(
+      `1 matched bulletin\\(s\\) take effect later and are not listed as current warnings yet; the earliest takes effect at ${later.replaceAll('.', '\\.')}\\.`,
+    ),
+  );
+  const update = cap(3, {
+    type: 'Update',
+    refs: `agency@example.gov,alert-4,${sent}`,
+    infos: effectiveLater(info({ expires: end })),
+  });
+  const both = await harness(
+    atom([ph(3), ph(4)]),
+    new Map([
+      [ph(3), update],
+      [ph(4), cap(4)],
+    ]),
+  ).fetch(manila);
+  assert.deepEqual(
+    both.alerts.map((alert) => alert.id),
+    ['agency@example.gov/alert-4/0'],
+  );
+  assert.match(both.coverage, /1 matched bulletin\(s\) take effect later/);
+  // Until the Update takes effect it does not withdraw WMO's copy of the original either.
+  const updateOnly = await harness(atom([ph(3)]), new Map([[ph(3), update]])).fetch(manila);
+  assert.deepEqual(updateOnly.excludedCapKeys, ['agency@example.gov/alert-3/']);
+});
+
 test('national work is bounded at 20 unique documents and 4 simultaneous requests', async () => {
   const docs = new Map(Array.from({ length: 25 }, (_, i) => [ph(i + 1), cap(i + 1)]));
   const h = harness(atom([ph(1), ...docs.keys()]), docs);
@@ -178,6 +328,67 @@ test('national work is bounded at 20 unique documents and 4 simultaneous request
   assert.ok(
     h.calls.every((call) => call.options?.maxBytes === 256_000 && call.options.ttlMs === 60_000),
   );
+});
+
+test('a BMKG feed is read newest first, also when its times name no zone; an unknown order is disclosed', async () => {
+  // Twenty-five entries, oldest first. Jakarta clock time (UTC+7) with no zone named.
+  const local = (minutesAgo: number) =>
+    new Date(now + 7 * 3_600_000 - minutesAgo * 60_000).toUTCString().replace(' GMT', '');
+  const feed = (stamp: (index: number) => string | null) =>
+    `<rss version="2.0"><channel>${Array.from({ length: 25 }, (_, i) => {
+      const published = stamp(i);
+      return `<item><link>${id(i + 1)}</link>${published === null ? '' : `<pubDate>${published}</pubDate>`}</item>`;
+    }).join('')}</channel></rss>`;
+  const docs = new Map(
+    Array.from({ length: 25 }, (_, i) => [
+      id(i + 1),
+      cap(i + 1, { infos: info({ shape: squareID }) }),
+    ]),
+  );
+  const read = (h: ReturnType<typeof harness>) =>
+    h.calls.slice(1).map((call) => Number(/(\d\d)_alert/.exec(call.url)![1]));
+  const zoneless = harness(
+    feed((i) => local(25 - i)),
+    docs,
+  );
+  const r = await zoneless.fetch(jakarta);
+  // The five oldest entries are the ones left out; the current bulletins are read.
+  assert.deepEqual(
+    read(zoneless).sort((a, b) => a - b),
+    Array.from({ length: 20 }, (_, i) => i + 6),
+  );
+  assert.equal(r.alerts.length, 20);
+  assert.match(
+    r.coverage,
+    /Some feed publication times have no time zone; they only set the order in which bulletins are read\./,
+  );
+  assert.doesNotMatch(r.coverage, /may not be the most recent/);
+  // The same feed with zones is read in the same order and makes no such statement.
+  const zoned = harness(
+    feed((i) => new Date(now - (25 - i) * 60_000).toUTCString()),
+    docs,
+  );
+  const control = await zoned.fetch(jakarta);
+  assert.deepEqual(read(zoned), read(zoneless));
+  assert.doesNotMatch(control.coverage, /no time zone|may not be the most recent/);
+  // Entries without any time follow the dated ones in feed order: the order is unknown, and said so.
+  const undated = harness(
+    feed((i) => (i % 2 ? new Date(now - (25 - i) * 60_000).toUTCString() : null)),
+    docs,
+  );
+  const unknown = await undated.fetch(jakarta);
+  assert.equal(read(undated).length, 20);
+  assert.match(
+    unknown.coverage,
+    /Some feed entries have no usable publication time, so the bulletins checked may not be the most recent\./,
+  );
+  // When every entry is read, their order does not matter and nothing is claimed about it.
+  const all = await harness(
+    `<rss version="2.0"><channel><item><link>${id(1)}</link></item><item><link>${id(2)}</link><pubDate>${new Date(sent).toUTCString()}</pubDate></item></channel></rss>`,
+    docs,
+  ).fetch(jakarta);
+  assert.equal(all.alerts.length, 2);
+  assert.doesNotMatch(all.coverage, /may not be the most recent/);
 });
 
 test('a stalled national detail leaves free slots for later verified bulletins', async () => {

@@ -5,7 +5,12 @@ import { fetchNationalAlerts } from './national.ts';
 import { fetchKolkataAlerts, supportsKolkata } from './kolkata.ts';
 import { warningSourceFallback } from '../src/warning-sources.ts';
 
-type SourceResult = AlertResult & { excludedCapKeys?: string[]; revokedCapKeys?: string[] };
+type SourceResult = AlertResult & {
+  excludedCapKeys?: string[];
+  revokedCapKeys?: string[];
+  upcomingDocuments?: number;
+  upcomingAt?: number;
+};
 type Loader = (place: Place, signal?: AbortSignal) => Promise<SourceResult>;
 interface SourceSpec {
   id: string;
@@ -17,7 +22,8 @@ interface SourceSpec {
 /**
  * Each source must settle before the gateway's 18-second deadline (router.ts). Otherwise one
  * slow feed aborts the whole check and discards the other source's verified warnings. This is
- * longer than the direct national (14 s) and WMO (16 s) checks' own budgets.
+ * longer than the direct national (14 s), WMO (16 s) and SACHET (16.75 s, below) checks' own
+ * budgets, which return the documents they verified in time.
  */
 export const SOURCE_DEADLINE_MS = 17_000;
 
@@ -137,16 +143,23 @@ export function createLocalAlertAdapter(
     const alerts = new Map<string, WeatherAlert>();
     const content = new Set<string>();
     const now = Date.now();
+    // A source's matched bulletins that take effect later are named here with the earliest time,
+    // not only in its check: a saved briefing keeps this text but not the source checks.
+    let later = available.some(({ result }) => (result.upcomingDocuments ?? 0) > 0);
+    const laterTimes = available.flatMap(({ result }) =>
+      result.upcomingDocuments && result.upcomingAt !== undefined ? [result.upcomingAt] : [],
+    );
     for (const { spec, result } of available) {
       for (const alert of result.alerts) {
-        if (
-          alert.expires <= now ||
-          alert.effective > now ||
-          revoked.some((key) => alert.id.startsWith(key))
-        )
+        if (alert.expires <= now || revoked.some((key) => alert.id.startsWith(key))) continue;
+        if (alert.effective > now) {
+          later = true;
+          laterTimes.push(alert.effective);
           continue;
+        }
         // A directly inspected document (including an expired, cancelled or nonmatching one)
-        // takes precedence over an indexed copy, even when it has no displayed alert.
+        // takes precedence over an indexed copy, even when it has no displayed alert. The direct
+        // adapter omits current documents it could not evaluate for lack of polygon/circle.
         if (spec.id === 'wmo' && primary?.excludedCapKeys?.some((key) => alert.id.startsWith(key)))
           continue;
         // Some BMKG documents regenerate their identifier while preserving the entire bulletin.
@@ -202,6 +215,9 @@ export function createLocalAlertAdapter(
           ? 'Direct IMD district nowcasts are checked alongside West Bengal regional SACHET bulletins. Read each bulletin’s affected area; regional notices do not automatically apply to Kolkata.'
           : `Direct ${authority} bulletins are checked alongside WMO’s mapped copies. Only warnings whose original boundaries cover this point are matched by the direct feed.`) +
         ` Coverage remains incomplete. ${failed ? `${failed} of ${checks.length} sources could not be verified. ` : ''}Each feed contains a bounded selection of bulletins. An empty list is not an all-clear.` +
+        (later
+          ? ` Some checked bulletins take effect later and are not listed as current warnings yet${laterTimes.length ? `; the earliest takes effect at ${new Date(Math.min(...laterTimes)).toISOString()}` : ''}.`
+          : '') +
         (ordered.length > 30
           ? ' Additional bulletins were omitted from this bounded response.'
           : ''),
@@ -213,5 +229,7 @@ export const fetchLocalAlerts = createLocalAlertAdapter({
   national: fetchNationalAlerts,
   global: fetchGlobalAlerts,
   kolkata: fetchKolkataAlerts,
-  india: (place, signal) => fetchIndiaAlerts(place, { signal }),
+  // SACHET stops a quarter second before the source deadline and returns what it verified.
+  india: (place, signal) =>
+    fetchIndiaAlerts(place, { signal, deadlineMs: SOURCE_DEADLINE_MS - 250 }),
 });

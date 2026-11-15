@@ -81,6 +81,12 @@ export interface AlertResult {
   partial?: boolean;
   feedUpdatedAt?: number | null;
   checks?: AlertSourceCheck[];
+  /**
+   * Gateway checks only: this device's clock minus the gateway's clock, in milliseconds, measured
+   * when the check arrived. Official issue and expiry times are instants on the gateway's clock, so
+   * they are compared with the device clock less this offset (`sourceClock` in connectivity.ts).
+   */
+  clockOffset?: number;
 }
 export interface AlertSourceCheck {
   id: string;

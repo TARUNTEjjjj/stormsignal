@@ -150,7 +150,9 @@ class Node {
   }
 }
 
-function harness(options: { stored?: unknown; embedded?: unknown; blocked?: boolean } = {}) {
+function harness(
+  options: { stored?: unknown; embedded?: unknown; blocked?: boolean; clock?: number } = {},
+) {
   const elements = new Map<string, Node>();
   for (const id of [
     'kit-seed',
@@ -204,12 +206,21 @@ function harness(options: { stored?: unknown; embedded?: unknown; blocked?: bool
     document,
     localStorage,
     window: { addEventListener() {}, print() {} },
-    Date,
+    // An optional fixed device clock, as after a correction or a reset.
+    Date:
+      options.clock === undefined
+        ? Date
+        : class extends Date {
+            static now() {
+              return options.clock!;
+            }
+          },
     Error,
   });
   return {
     elements,
     boxes,
+    raw: () => stored,
     saved: () => (stored === null ? null : JSON.parse(stored)),
     element: (id: string) => elements.get(id)!,
   };
@@ -226,6 +237,12 @@ test('device storage failure leaves the editable offline kit usable', () => {
   h.boxes[1].checked = true;
   h.boxes[1].dispatch('change');
   assert.match(h.element('check-status').textContent, /could not be saved/);
+  // Nothing was read from blocked storage, and Save fails too: the message claims neither.
+  assert.equal(
+    h.element('check-status').textContent,
+    'Checklist changed here but could not be saved. Download a copy to keep it.',
+  );
+  assert.equal(h.raw(), null);
 });
 
 test('downloaded file reload uses newer explicitly saved edits over its embedded snapshot', () => {
@@ -273,4 +290,64 @@ test('invalid backups leave current plan and checklist untouched', async () => {
   const corrupt = harness({ stored: '{' });
   assert.equal(corrupt.element('contact').value, '');
   assert.match(corrupt.element('plan-status').textContent, /could not be read/);
+});
+
+test('the kit reads its own saved plan after the device clock is set back; imported backups keep the time check', () => {
+  // Saved, then the clock was corrected to read 10 minutes earlier.
+  const ahead = { ...plan('Saved contact'), savedAt: now + 600000 };
+  assert.equal(core.restore(JSON.stringify(ahead)).plan.contact, 'Saved contact');
+  assert.throws(() => core.parse(JSON.stringify(ahead)), /invalid save time/);
+  const h = harness({ stored: ahead });
+  assert.equal(h.element('contact').value, 'Saved contact');
+  assert.match(h.element('plan-status').textContent, /Loaded your latest saved plan/);
+  h.boxes[2].checked = true;
+  h.boxes[2].dispatch('change');
+  assert.match(h.element('check-status').textContent, /Checklist saved on this device/);
+  assert.equal(h.saved().plan.contact, 'Saved contact');
+  assert.deepEqual(h.saved().checked, ['radio', 'supplies', 'copy']);
+  const download = harness({ embedded: { ...plan('Downloaded contact'), savedAt: now + 600000 } });
+  assert.equal(download.element('contact').value, 'Downloaded contact');
+  assert.match(download.element('plan-status').textContent, /included in this offline copy/);
+  // A record an earlier kit stored while the clock read 1970 is readable too.
+  const legacy = harness({ stored: { ...plan('Legacy contact'), savedAt: 1800000 } });
+  assert.equal(legacy.element('contact').value, 'Legacy contact');
+});
+
+test('a stored plan that cannot be read is never replaced by a checklist change, only by Save', () => {
+  for (const stored of ['{', JSON.stringify({ ...plan('Newer format'), version: 2 })]) {
+    const h = harness({ stored });
+    assert.match(h.element('plan-status').textContent, /could not be read/);
+    h.boxes[0].checked = true;
+    h.boxes[0].dispatch('change');
+    assert.match(h.element('check-status').textContent, /could not be saved.*left unchanged/);
+    assert.equal(h.raw(), stored);
+    h.element('contact').value = 'New contact';
+    h.element('plan-form').dispatch('submit');
+    assert.equal(h.saved().plan.contact, 'New contact');
+    h.boxes[1].checked = true;
+    h.boxes[1].dispatch('change');
+    assert.match(h.element('check-status').textContent, /Checklist saved on this device/);
+    assert.equal(h.saved().plan.contact, 'New contact');
+  }
+  // An unreadable embedded copy skips the device read; that record must survive a tick as well.
+  const seed = harness({ embedded: { ...plan('Seed'), version: 2 }, stored: plan('Device plan') });
+  assert.match(seed.element('plan-status').textContent, /saved copy could not be read/);
+  seed.boxes[0].checked = true;
+  seed.boxes[0].dispatch('change');
+  assert.equal(seed.saved().plan.contact, 'Device plan');
+  // The device record was never read there, so the message does not say that it was unreadable.
+  assert.equal(
+    seed.element('check-status').textContent,
+    'Checklist changed here but could not be saved. Download a copy to keep it.',
+  );
+});
+
+test('a checklist change never stores a save time the kit would later reject', () => {
+  const h = harness({ stored: plan('Saved contact'), clock: Date.UTC(1970, 0, 1, 0, 30) });
+  assert.equal(h.element('contact').value, 'Saved contact');
+  const before = h.raw();
+  h.boxes[3].checked = true;
+  h.boxes[3].dispatch('change');
+  assert.match(h.element('check-status').textContent, /could not be saved/);
+  assert.equal(h.raw(), before);
 });

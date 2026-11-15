@@ -77,9 +77,9 @@ const StormKitCore = (() => {
   const limits = { contact:80, phone:40, meeting:180, authority:180, notes:1200 };
   const ids = ['radio','charge','supplies','contacts','route','copy'];
   const empty = () => ({version:1,savedAt:null,plan:{contact:'',phone:'',meeting:'',authority:'',notes:''},checked:[]});
-  function normalize(value, now=Date.now()) {
+  function normalize(value, now=Date.now(), anyTime=false) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || value.version !== 1 || !value.plan || typeof value.plan !== 'object' || Array.isArray(value.plan)) throw Error('Choose a valid StormSignal field-kit backup.');
-    if (value.savedAt !== null && (!Number.isSafeInteger(value.savedAt) || value.savedAt < 946684800000 || value.savedAt > now + 300000)) throw Error('The backup has an invalid save time.');
+    if (value.savedAt !== null && (!Number.isSafeInteger(value.savedAt) || (!anyTime && (value.savedAt < 946684800000 || value.savedAt > now + 300000)))) throw Error('The backup has an invalid save time.');
     const plan = {};
     for (const [key,max] of Object.entries(limits)) {
       const text=value.plan[key];
@@ -89,10 +89,13 @@ const StormKitCore = (() => {
     if (!Array.isArray(value.checked) || value.checked.length > ids.length || !value.checked.every(id => ids.includes(id)) || new Set(value.checked).size !== value.checked.length) throw Error('The checklist in this backup is invalid.');
     return {version:1,savedAt:value.savedAt,plan,checked:[...value.checked]};
   }
-  function parse(raw, now=Date.now()) {
+  function parse(raw, now=Date.now(), anyTime=false) {
     if (typeof raw !== 'string' || raw.length > 12000) throw Error('Choose a field-kit JSON file smaller than 12 KB.');
-    return normalize(JSON.parse(raw),now);
+    return normalize(JSON.parse(raw),now,anyTime);
   }
+  // This kit's own saved record and embedded copy stay readable when the device clock is later set
+  // back (or was wrong when saving); every field is still checked. Imported backups keep the time check.
+  const restore = raw => parse(raw, Date.now(), true);
   function embed(value) {
     return JSON.stringify(normalize(value)).replace(/[<>&\u2028\u2029]/g, c => '\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
   }
@@ -101,7 +104,7 @@ const StormKitCore = (() => {
     const number=phone.trim().replace(/[ ()-]/g,'');
     return /^\+?\d{3,20}$/.test(number) ? 'tel:'+number : null;
   }
-  return {empty,normalize,parse,embed,phoneHref};
+  return {empty,normalize,parse,restore,embed,phoneHref};
 })();
 </script>
 <script>
@@ -118,16 +121,19 @@ const StormKitCore = (() => {
   function updateCount(){byId('check-count').textContent=boxes.filter(b=>b.checked).length+' of 6 preparations checked';}
   function contactLink(){const link=byId('call-contact'),href=core.phoneHref(state.plan.phone);link.hidden=!href;if(href){link.href=href;link.textContent='Call '+(state.plan.contact||'saved contact');}else link.removeAttribute('href');}
   function render(){for(const id of fields)byId(id).value=state.plan[id];for(const box of boxes)box.checked=state.checked.includes(box.value);updateCount();printPlan();contactLink();}
+  // Until the record stored on this device has been read, no automatic save may replace it:
+  // 'storage' while device storage itself has not been read, 'record' when what it holds is not a readable plan.
+  let unread='storage';
   try {
-    const embedded=core.parse(byId('kit-seed').textContent);
+    const embedded=core.restore(byId('kit-seed').textContent);
     if(embedded.savedAt!==null){state=embedded;announce('plan-status','Loaded the plan included in this offline copy.');}
-    try{const saved=localStorage.getItem(key);if(saved){const stored=core.parse(saved);if(state.savedAt===null||(stored.savedAt!==null&&stored.savedAt>=state.savedAt)){state=stored;announce('plan-status','Loaded your latest saved plan on this device.');}}}catch{announce('plan-status','Device storage could not be read. Any plan included in this file is still available; you can edit, print, and download a copy.',true);}
+    try{const saved=localStorage.getItem(key);unread='record';if(saved){const stored=core.restore(saved);if(state.savedAt===null||(stored.savedAt!==null&&stored.savedAt>=state.savedAt)){state=stored;announce('plan-status','Loaded your latest saved plan on this device.');}}unread='';}catch{announce('plan-status','Device storage could not be read. Any plan included in this file is still available; you can edit, print, and download a copy.',true);}
   } catch {announce('plan-status','The saved copy could not be read. The action cards remain available.',true);}
   render();
   let persistedPlan=state.plan;
-  byId('plan-form').addEventListener('submit',event=>{event.preventDefault();try{const next=capture();localStorage.setItem(key,JSON.stringify(next));state=next;persistedPlan=next.plan;contactLink();printPlan();announce('plan-status','Plan and checklist saved only on this device. Keep a downloaded or printed copy too.');}catch{announce('plan-status','This browser could not save the plan. Your fields remain here; download or print a copy before closing.',true);}});
+  byId('plan-form').addEventListener('submit',event=>{event.preventDefault();try{const next=capture();localStorage.setItem(key,JSON.stringify(next));state=next;persistedPlan=next.plan;unread='';contactLink();printPlan();announce('plan-status','Plan and checklist saved only on this device. Keep a downloaded or printed copy too.');}catch{announce('plan-status','This browser could not save the plan. Your fields remain here; download or print a copy before closing.',true);}});
   for(const id of fields)byId(id).addEventListener('input',()=>{printPlan();announce('plan-status','Unsaved changes. Choose Save or download an updated copy.');});
-  for(const box of boxes)box.addEventListener('change',()=>{updateCount();state={...state,checked:boxes.filter(b=>b.checked).map(b=>b.value),savedAt:Date.now()};try{localStorage.setItem(key,JSON.stringify({...state,plan:persistedPlan}));announce('check-status','Checklist saved on this device. Plan edits still need Save.');}catch{announce('check-status','Checklist changed here but could not be saved. Download a copy to keep it.',true);}});
+  for(const box of boxes)box.addEventListener('change',()=>{updateCount();state={...state,checked:boxes.filter(b=>b.checked).map(b=>b.value),savedAt:Date.now()};if(unread){announce('check-status',unread==='record'?'Checklist changed here but could not be saved: the plan stored on this device could not be read, so it was left unchanged. Download a copy to keep this checklist; Save plan replaces the stored plan.':'Checklist changed here but could not be saved. Download a copy to keep it.',true);return;}try{localStorage.setItem(key,JSON.stringify(core.normalize({...state,plan:persistedPlan})));announce('check-status','Checklist saved on this device. Plan edits still need Save.');}catch{announce('check-status','Checklist changed here but could not be saved. Download a copy to keep it.',true);}});
   function download(contents,type,name){const blob=new Blob([contents],{type});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
   byId('download-kit').addEventListener('click',()=>{try{const data=capture();const clone=document.documentElement.cloneNode(true);clone.querySelector('#kit-seed').textContent=core.embed(data);for(const id of ['plan-status','file-status','check-status'])clone.querySelector('#'+id).textContent='';download('<!doctype html>\n'+clone.outerHTML,'text/html;charset=utf-8','stormsignal-offline-kit.html');announce('file-status','Offline copy prepared with your current fields. Open the downloaded HTML from Files / Downloads to test it.');}catch{announce('file-status','The file could not be created. Try Print / save PDF instead.',true);}});
   byId('export-plan').addEventListener('click',()=>{try{download(JSON.stringify(capture(),null,2),'application/json','stormsignal-field-plan.json');announce('file-status','Plan backup prepared. It contains your contact and meeting details; keep it private.');}catch{announce('file-status','The backup could not be created. Your fields remain on this page.',true);}});

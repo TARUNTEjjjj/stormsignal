@@ -48,6 +48,8 @@ import {
   readConnectionMode,
   networkPolicy,
   alertCheckIsRecent,
+  startClock,
+  unexpiredAlerts,
   type ConnectionMode,
 } from './connectivity';
 import {
@@ -62,7 +64,16 @@ import {
 } from './data';
 import { deriveHazards, getOutlook, FORECAST_STALE_MS } from './risk';
 import { localWarningSources, warningSourceFallback } from './warning-sources';
-import { value, finite, localTime, age, readPlaces, modelSpread } from './presentation';
+import {
+  value,
+  finite,
+  localTime,
+  age,
+  readPlaces,
+  modelSpread,
+  warningTime,
+  clockNotice,
+} from './presentation';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
 import { placeResourceKey, nextSearchIndex } from './place-navigation';
 import { focusableControls } from './focus-trap';
@@ -410,7 +421,9 @@ export default function App() {
   const isStale = !!f && (now - f.fetchedAt > FORECAST_STALE_MS || f.fetchedAt > now + 300000);
   const outlook = getOutlook(isStale ? [] : hours, now);
   const alertsRecent = alertCheckIsRecent(alerts.data?.fetchedAt, now, policy.essentials);
-  const activeAlerts = alertsRecent ? alerts.data?.alerts.filter((a) => a.expires > now) || [] : [];
+  // Expiry is judged on the clock of the source that answered, not on this device's clock.
+  const activeAlerts = alertsRecent ? unexpiredAlerts(alerts.data, now) : [];
+  const clockWarning = clockNotice(alerts.data?.clockOffset);
   const spread = modelSpread(models.data || [], hours.slice(0, 24));
   const selectedSaved = saved.some(
     (p) =>
@@ -437,11 +450,10 @@ export default function App() {
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
-    const clock = setInterval(() => {
-      setNow(Date.now());
+    const stopClock = startClock(setNow, () => {
       if (connectionMode === 'full' && navigator.onLine && document.visibilityState === 'visible')
         setAlertRevision((v) => v + 1);
-    }, 60000);
+    });
     const refresh = setInterval(() => {
       if (connectionMode === 'full' && navigator.onLine && document.visibilityState === 'visible')
         setRevision((v) => v + 1);
@@ -451,7 +463,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('online', update);
       window.removeEventListener('offline', update);
-      clearInterval(clock);
+      stopClock();
       clearInterval(refresh);
     };
   }, [connectionMode]);
@@ -517,8 +529,8 @@ export default function App() {
       Notification.permission !== 'granted'
     )
       return;
-    for (const alert of alerts.data.alerts) {
-      if (alert.expires <= Date.now() || alerted.current.has(alert.id)) continue;
+    for (const alert of unexpiredAlerts(alerts.data, Date.now())) {
+      if (alerted.current.has(alert.id)) continue;
       alerted.current.add(alert.id);
       try {
         new Notification(`${alert.event} · ${place.name}`, {
@@ -1106,6 +1118,7 @@ export default function App() {
                       <WeatherMap
                         place={place}
                         alerts={activeAlerts}
+                        clockOffset={alerts.data?.clockOffset}
                         lowBandwidth={lowBandwidth}
                         onSelect={selectPlace}
                       />
@@ -1292,14 +1305,8 @@ export default function App() {
                       {alerts.data.feedUpdatedAt && (
                         <span>
                           Latest bulletin in {alerts.data.checks ? 'checked feeds' : 'feed'}:{' '}
-                          {localTime(alerts.data.feedUpdatedAt, tz, {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                          . This is an issue time, not a feed-health guarantee.
+                          {warningTime(alerts.data.feedUpdatedAt, tz, true)}. This is an issue time,
+                          not a feed-health guarantee.
                         </span>
                       )}
                     </p>
@@ -1333,14 +1340,7 @@ export default function App() {
                             <p>{check.coverage}</p>
                             {check.feedUpdatedAt && (
                               <small>
-                                Latest source bulletin:{' '}
-                                {localTime(check.feedUpdatedAt, tz, {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  year: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                Latest source bulletin: {warningTime(check.feedUpdatedAt, tz, true)}
                               </small>
                             )}
                           </li>
@@ -1358,6 +1358,11 @@ export default function App() {
                         source; saved briefings remain historical.
                       </p>
                     )}
+                  {clockWarning && (
+                    <p className="wide-notice" role="status">
+                      {clockWarning}
+                    </p>
+                  )}
                   {activeAlerts.map((alert) => (
                     <details
                       className="official-alert"
@@ -1369,13 +1374,7 @@ export default function App() {
                         <span>
                           <strong>{alert.event}</strong>
                           <small>
-                            {alert.severity} · Bulletin valid to{' '}
-                            {localTime(alert.expires, tz, {
-                              day: '2-digit',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {alert.severity} · Bulletin valid to {warningTime(alert.expires, tz)}
                           </small>
                         </span>
                         <ChevronDown size={16} />
@@ -1393,14 +1392,7 @@ export default function App() {
                           <p className="preserve-lines">{alert.description}</p>
                         </details>
                         <p className="muted">
-                          Issued{' '}
-                          {localTime(alert.sent, tz, {
-                            day: '2-digit',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}{' '}
-                          · {alert.source}
+                          Issued {warningTime(alert.sent, tz)} · {alert.source}
                         </p>
                         <a href={alert.url} target="_blank" rel="noreferrer">
                           Read official bulletin <ExternalLink size={13} />
@@ -1414,7 +1406,7 @@ export default function App() {
                     !activeAlerts.length && (
                       <p className="empty-alert">
                         {alerts.data.partial || alerts.data.scope !== 'point'
-                          ? 'No unexpired bulletins were matched in this limited feed. Current warning status is not confirmed; check the official sources below.'
+                          ? 'No bulletins currently in effect were matched in this limited feed. Current warning status is not confirmed; check the official sources below.'
                           : 'No active alerts returned for this point. Conditions can change; this is not an assurance of safety.'}
                       </p>
                     )}

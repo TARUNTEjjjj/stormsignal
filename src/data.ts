@@ -1,3 +1,4 @@
+import { areaNamesText } from './presentation';
 import type {
   AirQuality,
   AlertResult,
@@ -448,6 +449,9 @@ function officialLink(candidate: unknown, fallback: string): string {
     return fallback;
   }
 }
+// The warning gateway sends up to 1,000 outline positions in rings of at least four, so up to 250
+// polygons; BMKG province bulletins can list more than 100 district polygons.
+const MAX_OUTLINE_POLYGONS = 250;
 function alertGeometry(value: unknown): unknown | null {
   const geometry = record(value);
   if (geometry.type !== 'Polygon' && geometry.type !== 'MultiPolygon') return null;
@@ -465,11 +469,60 @@ function alertGeometry(value: unknown): unknown | null {
     geometry.type === 'Polygon'
       ? isPolygon(geometry.coordinates)
       : Array.isArray(geometry.coordinates) &&
-        geometry.coordinates.length <= 100 &&
+        geometry.coordinates.length <= MAX_OUTLINE_POLYGONS &&
         geometry.coordinates.every(isPolygon)
   )
     ? value
     : null;
+}
+
+/**
+ * The outline to draw for an alert's geometry on a map marker at `longitude`. Map renderers join
+ * vertices as given and draw each polygon only at its own longitudes. So every ring is made
+ * continuous (no edge longer than 180° of longitude, as rings crossing 180° are written) and each
+ * polygon is moved whole turns to the world copy nearest the marker: an area cut at 180° is drawn
+ * on both sides of it, never around the world. A ring that circles a pole has no faithful outline,
+ * so none is drawn; the alert itself is still listed. A polygon without rings has nothing to draw
+ * and is left out; the others are still outlined.
+ */
+export function alertOutline(
+  geometry: unknown,
+  longitude: number,
+): { type: 'MultiPolygon'; coordinates: number[][][][] } | null {
+  const valid = record(alertGeometry(geometry));
+  if (!valid.type || !Number.isFinite(longitude)) return null;
+  const polygons = (
+    valid.type === 'Polygon' ? [valid.coordinates] : valid.coordinates
+  ) as number[][][][];
+  const nearest = (x: number, target: number) => 360 * Math.round((target - x) / 360);
+  const coordinates: number[][][][] = [];
+  for (const polygon of polygons) {
+    if (!polygon.length) continue;
+    const rings: number[][][] = [];
+    for (const ring of polygon) {
+      // Whole turns keep consecutive vertices within 180°, as in the gateway's point matching.
+      let turns = 0;
+      const continuous = ring.map(([lon, lat], index) => {
+        const step = index ? lon - ring[index - 1][0] : 0;
+        if (step > 180) turns--;
+        else if (step < -180) turns++;
+        return [lon + 360 * turns, lat];
+      });
+      const closing = ring[0][0] - ring[ring.length - 1][0];
+      if (turns + (closing > 180 ? -1 : closing < -180 ? 1 : 0) !== 0) return null;
+      rings.push(continuous);
+    }
+    const xs = rings[0].map(([x]) => x);
+    const shift = nearest((Math.min(...xs) + Math.max(...xs)) / 2, longitude);
+    coordinates.push(
+      rings.map((ring, index) => {
+        // A hole stays in the same world copy as its outer ring.
+        const offset = shift + (index ? nearest(ring[0][0], rings[0][0][0]) : 0);
+        return ring.map(([x, lat]) => [x + offset, lat]);
+      }),
+    );
+  }
+  return coordinates.length ? { type: 'MultiPolygon', coordinates } : null;
 }
 
 export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<AlertResult> {
@@ -506,13 +559,16 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       ends = stamp(p.ends),
       effective = stamp(p.effective),
       sent = stamp(p.sent);
+    // NWS times are compared with this device's clock. A warning normally takes effect when it is
+    // issued, so its effective time gets the same allowance for a slow device clock as its issue
+    // time; otherwise a just-issued warning would be dropped while its issue time is accepted.
     if (
       expires === null ||
       expires <= now ||
       (ends !== null && ends <= now) ||
       sent === null ||
       effective === null ||
-      effective > now ||
+      effective > now + 300_000 ||
       sent > now + 300_000 ||
       expires <= sent ||
       expires <= effective
@@ -526,7 +582,9 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       title: str(p.headline, 1000) || str(p.event),
       event: str(p.event),
       severity: str(p.severity),
-      area: str(p.areaDesc, 4000),
+      // NWS lists its zones in one "; "-separated text. A very long list keeps whole leading names
+      // and says how many more there are, as the gateway does; it is never cut off silently.
+      area: areaNamesText(typeof p.areaDesc === 'string' ? p.areaDesc.split('; ') : []),
       sent,
       effective,
       expires: Math.min(expires, ends ?? expires),
@@ -591,8 +649,16 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
   });
   const response = await requestJson(`/api/alerts?${params}`, 30_000, signal);
   const result = record(response.value);
-  const fetchedAt = number(result.fetchedAt),
-    now = Date.now();
+  // The gateway states its clock when answering (servedAt). Ages and validity times are judged on
+  // that clock, and its read times are moved onto this device's clock for display, so a device
+  // clock running fast or slow neither makes a fresh check look stale nor hides a warning that has
+  // just taken effect. The offset is returned with the result (clockOffset), because the dashboard
+  // and saved briefings must judge expiry and issue times on the gateway's clock too. Without
+  // servedAt the two clocks are taken to agree.
+  const served = number(result.servedAt),
+    offset = served === null ? 0 : Math.round(response.fetchedAt - served),
+    fetchedAt = number(result.fetchedAt),
+    now = Date.now() - offset; // the gateway's clock now
   if (
     !['available', 'unsupported'].includes(String(result.status)) ||
     !Array.isArray(result.alerts) ||
@@ -664,7 +730,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
         name: str(check.name, 200),
         url: warningLink(check.url),
         status: check.status as AlertSourceCheck['status'],
-        fetchedAt: checkedAt,
+        fetchedAt: checkedAt === null ? null : checkedAt + offset,
         feedUpdatedAt: published !== null && published <= now + 300000 ? published : null,
         coverage: str(check.coverage, 2500),
       };
@@ -673,7 +739,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
   return {
     status: result.status as AlertResult['status'],
     alerts: result.status === 'available' ? alerts : [],
-    fetchedAt,
+    fetchedAt: fetchedAt + offset,
     source: str(result.source),
     coverage: str(result.coverage, 4000),
     officialUrl: warningLink(result.officialUrl),
@@ -682,6 +748,7 @@ async function fetchInternationalAlerts(place: Place, signal?: AbortSignal): Pro
     partial: result.partial,
     feedUpdatedAt: feedUpdatedAt !== null && feedUpdatedAt <= now + 300000 ? feedUpdatedAt : null,
     ...(checks ? { checks } : {}),
+    ...(served === null ? {} : { clockOffset: offset }),
   };
 }
 

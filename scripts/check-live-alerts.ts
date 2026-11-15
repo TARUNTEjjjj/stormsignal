@@ -170,6 +170,10 @@ async function check(item: (typeof cases)[number]) {
       `${place.name}: a direct or supplementary source failed`,
     );
   }
+  // NWS is read on this machine's clock and lists a warning up to five minutes before its effective
+  // time, the allowance for a slow device clock that its issue time already has (src/data.ts). The
+  // warning API lists only warnings already in effect, so its results get no such allowance.
+  const latestEffective = place.countryCode === 'US' ? now + 300_000 : now;
   const seen = new Set<string>();
   for (const warning of result.alerts) {
     assert.ok(
@@ -180,7 +184,7 @@ async function check(item: (typeof cases)[number]) {
     assert.ok(
       [warning.sent, warning.effective, warning.expires].every(Number.isFinite) &&
         warning.sent <= now + 300_000 &&
-        warning.effective <= now &&
+        warning.effective <= latestEffective &&
         warning.expires > now &&
         warning.expires > warning.sent &&
         warning.expires > warning.effective,
@@ -202,7 +206,7 @@ async function check(item: (typeof cases)[number]) {
     meaning: result.alerts.length
       ? 'Verified active bulletins returned; follow the issuing authority.'
       : result.partial
-        ? 'No matching unexpired bulletins in this limited feed; this is not an all-clear.'
+        ? 'No matching bulletins currently in effect in this limited feed; this is not an all-clear.'
         : 'No active point warnings returned; this is not a safety guarantee.',
   };
 }

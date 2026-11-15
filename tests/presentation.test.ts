@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { value, readPlaces, chartPaths, modelSpread, localTime, age } from '../src/presentation';
+import {
+  value,
+  readPlaces,
+  chartPaths,
+  modelSpread,
+  localTime,
+  age,
+  warningTime,
+  clockDifference,
+  clockNotice,
+} from '../src/presentation';
 import type { ModelForecast, Hour } from '../src/types';
 test('missing numbers and NaN are never rendered as zero', () => {
   assert.equal(value(null), '—');
@@ -113,6 +123,41 @@ test('zone labels distinguish repeated local hours across daylight-saving change
   assert.match(before, /01:00/);
   assert.match(after, /01:00/);
   assert.notEqual(before, after);
+});
+test('official warning times name their time zone wherever the viewer is', () => {
+  // A Miami expiry read by a viewer in India must not look like an Indian time.
+  const expires = Date.UTC(2026, 10, 9, 22);
+  assert.match(warningTime(expires, 'America/New_York'), /^09 Nov\D+17:00 GMT-5$/);
+  assert.match(warningTime(expires, 'Asia/Kolkata'), /^10 Nov\D+03:30 GMT\+5:30$/);
+  assert.match(warningTime(expires, 'UTC', true), /^09 Nov 2026\D+22:00 UTC$/);
+  // The UTC fallback for an unknown zone says so.
+  assert.match(warningTime(expires, 'invalid-zone'), /22:00 UTC$/);
+  // The repeated New York hour at the fall-back change stays distinct.
+  const first = warningTime(Date.UTC(2026, 10, 1, 5, 30), 'America/New_York');
+  const second = warningTime(Date.UTC(2026, 10, 1, 6, 30), 'America/New_York');
+  assert.match(first, /01:30 GMT-4$/);
+  assert.match(second, /01:30 GMT-5$/);
+});
+
+test('a device clock five minutes or more from the warning service is named, with its direction', () => {
+  const MINUTE = 60_000;
+  for (const quiet of [undefined, NaN, Infinity, 0, 4_000, -299_999, 299_999]) {
+    assert.equal(clockDifference(quiet), '');
+    assert.equal(clockNotice(quiet), '');
+  }
+  assert.equal(clockDifference(5 * MINUTE), 'about 5 minutes ahead of');
+  assert.equal(clockDifference(-10 * MINUTE - 20_000), 'about 10 minutes behind');
+  assert.equal(clockDifference(119 * MINUTE), 'about 119 minutes ahead of');
+  assert.equal(clockDifference(-3 * 60 * MINUTE), 'about 3 hours behind');
+  assert.equal(clockDifference(47 * 60 * MINUTE), 'about 47 hours ahead of');
+  assert.equal(clockDifference(-30 * 24 * 60 * MINUTE), 'about 30 days behind');
+  const notice = clockNotice(60 * MINUTE);
+  assert.match(
+    notice,
+    /^This device’s clock is about 60 minutes ahead of the warning service’s clock\./,
+  );
+  assert.match(notice, /listed by the service’s clock/);
+  assert.match(notice, /check this device’s date and time/);
 });
 
 test('equivalent option objects reuse a formatter without caching the timestamp or changing timezone precedence', (t) => {

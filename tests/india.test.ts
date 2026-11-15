@@ -145,6 +145,67 @@ test('unknown region avoids requests and missing publication time remains explic
   assert.equal(empty.partial, true);
 });
 
+test('feed times without a time zone are unknown: the feed stays available and says so', async () => {
+  // NOW is 06:30 in India. A zone-less 05:30 bulletin was read by a UTC server as 4.5 h ahead
+  // (the whole feed then failed), and by an IST machine as one hour old.
+  const result = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed([link(1)], 'Sun, 01 Nov 2026 05:30:00')),
+  });
+  assert.equal(result.status, 'available');
+  assert.equal(result.alerts.length, 1);
+  assert.equal(result.feedUpdatedAt, null);
+  assert.match(
+    result.coverage,
+    /Feed publication times have no time zone, so the latest bulletin time is unknown\. Current regional coverage is unverified/,
+  );
+  // A zoned channel time is still used, and the zone-less entry times are disclosed.
+  const mixed = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(
+      `<rss><channel><lastBuildDate>Sun, 01 Nov 2026 00:30:00 GMT</lastBuildDate><item><link>${link(1)}</link><pubDate>Sun, 01 Nov 2026 05:30:00</pubDate></item></channel></rss>`,
+    ),
+  });
+  assert.equal(mixed.feedUpdatedAt, Date.UTC(2026, 10, 1, 0, 30));
+  assert.match(
+    mixed.coverage,
+    /Some feed publication times have no time zone; they only set the order in which entries are read\./,
+  );
+});
+
+test('a regional bulletin taking effect later is disclosed; a pending Update keeps the original', async () => {
+  const later = (raw: string) =>
+    raw
+      .replace(
+        '<effective>2026-11-01T00:00:00Z</effective>',
+        '<effective>2026-11-01T06:00:00Z</effective>',
+      )
+      .replace('2026-11-01T03:00:00Z', '2026-11-01T12:00:00Z');
+  const advance = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed(), { [link(1)]: later(cap()) }),
+  });
+  assert.deepEqual(advance.alerts, []);
+  assert.equal(advance.upcomingDocuments, 1);
+  assert.equal(advance.upcomingAt, Date.UTC(2026, 10, 1, 6));
+  assert.match(
+    advance.coverage,
+    /1 regional bulletin\(s\) take effect later and are not listed as current warnings yet; the earliest takes effect at 2026-11-01T06:00:00\.000Z\./,
+  );
+  const pending = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed([link(1), link(2)]), {
+      [link(1)]: cap(),
+      [link(2)]: later(cap(2, 'Update', 'IMD-fixture,fixture-1,2026-11-01T00:00:00Z')),
+    }),
+  });
+  assert.deepEqual(
+    pending.alerts.map((alert) => alert.id),
+    ['sachet:fixture-1:0'],
+  );
+  assert.match(pending.coverage, /1 regional bulletin\(s\) take effect later/);
+});
+
 test('future feed dates, all failed details and arbitrary-host links cannot become available', async () => {
   await assert.rejects(
     fetchIndiaAlerts(place, {
@@ -196,6 +257,42 @@ test('cancellation metadata removes referenced original from the regional result
   });
   assert.deepEqual(result.alerts, []);
   assert.equal(result.partial, true);
+});
+
+test('an Alert whose expiry precedes its issue time is counted as not verified; a Cancel like it still withdraws', async () => {
+  // A mistyped date: the bulletin "expires" the day before it was issued.
+  const ended = '<expires>2026-10-31T03:00:00Z</expires>';
+  const mistyped = cap(2).replace('<expires>2026-11-01T03:00:00Z</expires>', ended);
+  const listed = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed([link(1), link(2)]), { [link(1)]: cap(), [link(2)]: mistyped }),
+  });
+  assert.deepEqual(
+    listed.alerts.map((alert) => alert.id),
+    ['sachet:fixture-1:0'],
+  );
+  assert.match(listed.coverage, /1 warning detail request\(s\) could not be verified/);
+  // Alone, it is an error, never an available feed with nothing in it.
+  await assert.rejects(
+    fetchIndiaAlerts(place, {
+      now: NOW,
+      request: request(feed([link(2)]), { [link(2)]: mistyped }),
+    }),
+    /could not be verified/,
+  );
+  // The same interval in a Cancel that carries information is valid CAP and ends the warning.
+  const cancel = mistyped
+    .replace('<msgType>Alert</msgType>', '<msgType>Cancel</msgType>')
+    .replace(
+      '<scope>Public</scope>',
+      '<scope>Public</scope><references>IMD-fixture,fixture-1,2026-11-01T00:00:00Z</references>',
+    );
+  const withdrawn = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed([link(1), link(2)]), { [link(1)]: cap(), [link(2)]: cancel }),
+  });
+  assert.deepEqual(withdrawn.alerts, []);
+  assert.doesNotMatch(withdrawn.coverage, /could not be verified/);
 });
 
 test('missing CAP expiry is not invented and omitted validity is explained', async () => {
@@ -326,4 +423,234 @@ test('caller cancellation propagates instead of returning an available empty lis
     fetchIndiaAlerts(place, { now: NOW, signal: controller.signal, request: request() }),
     /cancelled/,
   );
+});
+
+test('feed entries are read newest first whatever their feed order; unknown order is disclosed', async () => {
+  // Twelve entries listed oldest first: the ten most recently published are the ones read.
+  const items = (published: boolean) =>
+    `<rss><channel>${Array.from(
+      { length: 12 },
+      (_, i) =>
+        `<item><link>${link(i + 1)}</link>${published ? `<pubDate>${new Date(NOW - (12 - i) * 60_000).toUTCString()}</pubDate>` : ''}</item>`,
+    ).join('')}</channel></rss>`;
+  const requested: number[] = [];
+  const reader = (rss: string) => async (url: string) => {
+    if (url.includes('/rss/')) return { text: rss, fetchedAt: NOW };
+    const id = Number(new URL(url).searchParams.get('identifier'));
+    requested.push(id);
+    return { text: cap(id), fetchedAt: NOW };
+  };
+  const ordered = await fetchIndiaAlerts(place, { now: NOW, request: reader(items(true)) });
+  assert.deepEqual(requested, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+  assert.equal(ordered.feedUpdatedAt, NOW - 60_000);
+  assert.match(ordered.coverage, /Additional feed entries were not checked/);
+  assert.doesNotMatch(ordered.coverage, /may not be the most recent/);
+  // Without usable publication times the feed order is kept, and the result says so.
+  requested.length = 0;
+  const unknown = await fetchIndiaAlerts(place, { now: NOW, request: reader(items(false)) });
+  assert.deepEqual(requested, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.match(
+    unknown.coverage,
+    /Some feed entries have no usable publication time, so the entries checked may not be the most recent\./,
+  );
+});
+
+test('an oldest-first feed whose times have no zone is still read newest first', async () => {
+  // Twelve entries, oldest first, with Indian clock times that name no zone (NOW is 06:30 there).
+  const local = (minutesAgo: number) =>
+    new Date(NOW + 330 * 60_000 - minutesAgo * 60_000).toUTCString().replace(' GMT', '');
+  const items = (stamp: (index: number) => string) =>
+    `<rss><channel>${Array.from(
+      { length: 12 },
+      (_, i) => `<item><link>${link(i + 1)}</link><pubDate>${stamp(i)}</pubDate></item>`,
+    ).join('')}</channel></rss>`;
+  const requested: number[] = [];
+  const reader = (rss: string) => async (url: string) => {
+    if (url.includes('/rss/')) return { text: rss, fetchedAt: NOW };
+    const id = Number(new URL(url).searchParams.get('identifier'));
+    requested.push(id);
+    return { text: cap(id), fetchedAt: NOW };
+  };
+  const zoneless = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: reader(items((i) => local(12 - i))),
+  });
+  // The current bulletins (11 and 12) are among those read; the two oldest are left out.
+  assert.deepEqual(requested, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+  assert.equal(zoneless.alerts.length, 10);
+  // The times order the entries but are never used as instants.
+  assert.equal(zoneless.feedUpdatedAt, null);
+  assert.match(zoneless.coverage, /have no time zone, so the latest bulletin time is unknown/);
+  assert.doesNotMatch(zoneless.coverage, /may not be the most recent/);
+  // A feed that mixes times with and without a zone cannot be ordered reliably: say so.
+  requested.length = 0;
+  const mixed = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: reader(
+      items((i) => (i % 2 ? local(12 - i) : new Date(NOW - (12 - i) * 60_000).toUTCString())),
+    ),
+  });
+  assert.equal(requested.length, 10);
+  assert.match(mixed.coverage, /they only set the order in which entries are read/);
+  assert.match(mixed.coverage, /so the entries checked may not be the most recent/);
+});
+
+test('the most severe bulletins are listed first and kept when there are more texts than the bound', async () => {
+  const bulletin = (id: number, severity: string, sent: string, blocks: number) =>
+    `<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2"><identifier>fixture-${id}</identifier><sender>IMD-fixture</sender><sent>${sent}</sent><status>Actual</status><msgType>Alert</msgType><scope>Public</scope>${`<info><language>en-IN</language><category>Met</category><event>${severity} fixture</event><urgency>Expected</urgency><severity>${severity}</severity><certainty>Likely</certainty><effective>${sent}</effective><expires>2026-11-01T06:00:00Z</expires><area><areaDesc>District ${id}</areaDesc></area></info>`.repeat(blocks)}</alert>`;
+  const check = (blocks: number, minor: number) =>
+    fetchIndiaAlerts(place, {
+      now: NOW,
+      request: request(
+        feed(Array.from({ length: minor + 1 }, (_, i) => link(i + 1))),
+        Object.fromEntries(
+          Array.from({ length: minor + 1 }, (_, i) => [
+            link(i + 1),
+            i === 0
+              ? // An Extreme cyclone bulletin issued three hours before newer minor ones.
+                bulletin(1, 'Extreme', '2026-10-31T22:00:00Z', blocks)
+              : bulletin(
+                  i + 1,
+                  'Minor',
+                  `2026-11-01T00:${String(i * 5).padStart(2, '0')}:00Z`,
+                  blocks,
+                ),
+          ]),
+        ),
+      ),
+    });
+  // Twenty texts for a bound of ten: both Extreme texts are kept, ahead of the newer Minor ones.
+  const bounded = await check(2, 9);
+  assert.deepEqual(
+    bounded.alerts.map((alert) => alert.severity),
+    ['Extreme', 'Extreme', ...Array(8).fill('Minor')],
+  );
+  assert.match(bounded.coverage, /10 additional warning text\(s\) were not included/);
+  // With one text per bulletin nothing is cut, and the Extreme warning leads the list.
+  const listed = await check(1, 5);
+  assert.deepEqual(
+    listed.alerts.map((alert) => alert.severity),
+    ['Extreme', ...Array(5).fill('Minor')],
+  );
+  // Equal severities keep the newest first.
+  assert.deepEqual(
+    listed.alerts.slice(1).map((alert) => alert.id),
+    [6, 5, 4, 3, 2].map((id) => `sachet:fixture-${id}:0`),
+  );
+});
+
+test('a current bulletin without an <area> is listed, with its missing area stated', async () => {
+  const withoutArea = (raw: string) => raw.replace(/<area>.*?<\/area>/, '');
+  const result = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed(), { [link(1)]: withoutArea(cap()) }),
+  });
+  assert.equal(result.alerts.length, 1);
+  assert.equal(result.alerts[0].severity, 'Severe');
+  assert.equal(result.alerts[0].area, 'Affected area not stated; read the official bulletin.');
+  // An English block without an area is still the one listed beside a regional-language copy.
+  const english = /<info>[\s\S]*<\/info>/.exec(cap())![0];
+  const mixed = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: request(feed(), {
+      [link(1)]: cap().replace(english, withoutArea(english) + english.replace('en-IN', 'ta-IN')),
+    }),
+  });
+  assert.deepEqual(
+    mixed.alerts.map((alert) => alert.area),
+    ['Affected area not stated; read the official bulletin.'],
+  );
+});
+
+test('a long list of affected areas is shortened with a count, never cut off silently', async () => {
+  const areas = Array.from({ length: 100 }, (_, i) =>
+    i === 99 ? 'Howrah district' : `Block ${i + 1}, Purba Medinipur district, West Bengal`,
+  );
+  const source = cap().replace(
+    '<area><areaDesc>Raigad district of Maharashtra</areaDesc></area>',
+    areas.map((name) => `<area><areaDesc>${name}</areaDesc></area>`).join(''),
+  );
+  const result = await fetchIndiaAlerts(
+    { ...place, name: 'Howrah', admin: 'West Bengal' },
+    { now: NOW, request: request(feed(), { [link(1)]: source }) },
+  );
+  const area = result.alerts[0].area;
+  assert.ok(area.length <= 4000, String(area.length));
+  assert.match(area, /^Block 1, Purba Medinipur district, West Bengal; Block 2, /);
+  assert.match(
+    area,
+    /; Block \d+, Purba Medinipur district, West Bengal … \[\d+ more area\(s\) named in the official bulletin\]$/,
+  );
+});
+
+test('the check deadline keeps the bulletins verified in time; the caller can still cancel', async () => {
+  const links = Array.from({ length: 8 }, (_, i) => link(i + 1));
+  // Details 5 to 8 never answer and ignore cancellation.
+  const slow = async (url: string) => {
+    if (url.includes('/rss/')) return { text: feed(links), fetchedAt: NOW };
+    const id = Number(new URL(url).searchParams.get('identifier'));
+    if (id > 4) return new Promise<never>(() => {});
+    return { text: cap(id), fetchedAt: NOW };
+  };
+  const result = await fetchIndiaAlerts(place, { now: NOW, request: slow, deadlineMs: 50 });
+  assert.equal(result.status, 'available');
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id).sort(),
+    [1, 2, 3, 4].map((id) => `sachet:fixture-${id}:0`),
+  );
+  assert.match(result.coverage, /4 warning detail request\(s\) could not be verified/);
+  // The caller's cancellation still ends the check without a partial result.
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(new Error('Location changed')), 10);
+  await assert.rejects(
+    fetchIndiaAlerts(place, {
+      now: NOW,
+      request: slow,
+      deadlineMs: 5_000,
+      signal: controller.signal,
+    }),
+    /Location changed/,
+  );
+  // A feed that does not arrive by the deadline fails the check; it is never an empty result.
+  await assert.rejects(
+    fetchIndiaAlerts(place, {
+      now: NOW,
+      request: () => new Promise<never>(() => {}),
+      deadlineMs: 20,
+    }),
+    /timed out/,
+  );
+});
+
+test('a stalled detail holds one slot until the check deadline; the other bulletins are verified', async () => {
+  const links = Array.from({ length: 8 }, (_, i) => link(i + 1));
+  const started: number[] = [];
+  // Only the listed details answer; the others never do and ignore cancellation.
+  const reader = (answering: number[]) => async (url: string) => {
+    if (url.includes('/rss/')) return { text: feed(links), fetchedAt: NOW };
+    const id = Number(new URL(url).searchParams.get('identifier'));
+    started.push(id);
+    if (!answering.includes(id)) return new Promise<never>(() => {});
+    return { text: cap(id), fetchedAt: NOW };
+  };
+  const stalled = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: reader([2, 3, 4, 5, 6, 7, 8]),
+    deadlineMs: 100,
+  });
+  assert.deepEqual(started, [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(
+    stalled.alerts.map((alert) => alert.id).sort(),
+    [2, 3, 4, 5, 6, 7, 8].map((id) => `sachet:fixture-${id}:0`),
+  );
+  assert.match(stalled.coverage, /1 warning detail request\(s\) could not be verified/);
+  // Once the deadline passes no queued detail is started, and the one verified bulletin is kept.
+  started.length = 0;
+  const queued = await fetchIndiaAlerts(place, { now: NOW, request: reader([1]), deadlineMs: 100 });
+  assert.deepEqual(started, [1, 2, 3, 4, 5]);
+  assert.deepEqual(
+    queued.alerts.map((alert) => alert.id),
+    ['sachet:fixture-1:0'],
+  );
+  assert.match(queued.coverage, /7 warning detail request\(s\) could not be verified/);
 });

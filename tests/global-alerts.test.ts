@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capPolygonContains, createGlobalAlertAdapter, globalPointUrl } from '../server/global';
+import {
+  capPolygonContains,
+  capPolygonGeoJson,
+  createGlobalAlertAdapter,
+  globalPointUrl,
+} from '../server/global';
 import type { TextOptions } from '../server/http';
 import type { Place } from '../src/types';
 
@@ -129,6 +134,111 @@ test('point matching handles boundaries and the antimeridian without opposite-wo
   assert.equal(capPolygonContains(dateline, 0, 0), false);
 });
 
+test('map outlines keep CAP rings exactly, and cut a ring that crosses 180° on that meridian', () => {
+  const square = [
+    [-1, -10],
+    [-1, 10],
+    [1, 10],
+    [1, -10],
+    [-1, -10],
+  ];
+  assert.deepEqual(capPolygonGeoJson(square), [[square.map(([lat, lon]) => [lon, lat])]]);
+  // Written westward from 179.5° W; each part stays on one side and keeps original vertices.
+  assert.deepEqual(
+    capPolygonGeoJson([
+      [-16.5, -179.5],
+      [-16.5, 179.25],
+      [-17.75, 179.25],
+      [-17.75, -179.5],
+      [-16.5, -179.5],
+    ]),
+    [
+      [
+        [
+          [-179.5, -16.5],
+          [-180, -16.5],
+          [-180, -17.75],
+          [-179.5, -17.75],
+          [-179.5, -16.5],
+        ],
+      ],
+      [
+        [
+          [180, -16.5],
+          [179.25, -16.5],
+          [179.25, -17.75],
+          [180, -17.75],
+          [180, -16.5],
+        ],
+      ],
+    ],
+  );
+  // An edge written at -180° instead of 180° is the same meridian, not a band around the world.
+  assert.deepEqual(
+    capPolygonGeoJson([
+      [0, 170],
+      [0, -180],
+      [1, -180],
+      [1, 170],
+      [0, 170],
+    ]),
+    [
+      [
+        [
+          [170, 0],
+          [180, 0],
+          [180, 1],
+          [170, 1],
+          [170, 0],
+        ],
+      ],
+    ],
+  );
+  // A ring around a pole has no faithful outline.
+  assert.equal(
+    capPolygonGeoJson([
+      [80, 0],
+      [80, 120],
+      [80, -120],
+      [80, 0],
+    ]),
+    null,
+  );
+});
+
+test('a warning polygon crossing 180° is outlined on both sides, never around the world', async () => {
+  const lakeba: Place = { ...place, name: 'Lakeba', latitude: -18.2, longitude: -178.8 };
+  const shape = '<polygon>-16,178 -16,-178 -20,-178 -20,178 -16,178</polygon>';
+  const result = await harness(
+    [feature(1)],
+    new Map([[path(1), cap(1, { infos: info({ area: area(shape) }) })]]),
+  ).fetch(lakeba);
+  assert.equal(result.alerts.length, 1);
+  assert.deepEqual(result.alerts[0].geometry, {
+    type: 'MultiPolygon',
+    coordinates: [
+      [
+        [
+          [178, -16],
+          [180, -16],
+          [180, -20],
+          [178, -20],
+          [178, -16],
+        ],
+      ],
+      [
+        [
+          [-180, -16],
+          [-178, -16],
+          [-178, -20],
+          [-180, -20],
+          [-180, -16],
+        ],
+      ],
+    ],
+  });
+});
+
 test('original CAP publisher timestamps override known incorrect WFS timestamps', async () => {
   const h = harness();
   const result = await h.fetch(place);
@@ -239,11 +349,56 @@ test('duplicate features are deduplicated and work is capped at six documents / 
   assert.ok(h.calls.every((call) => call.options?.maxBytes && call.options.maxBytes <= 500_000));
 });
 
+test('indexed documents past the six-document bound are reported, never dropped silently', async () => {
+  const run = (count: number) =>
+    harness(
+      Array.from({ length: count }, (_, index) => feature(index + 1)),
+      new Map(Array.from({ length: count }, (_, index) => [path(index + 1), cap(index + 1)])),
+    ).fetch(place);
+  const six = await run(6);
+  assert.equal(six.alerts.length, 6);
+  assert.doesNotMatch(six.coverage, /not checked|not read/);
+  const seven = await run(7);
+  assert.equal(seven.alerts.length, 6);
+  assert.match(
+    seven.coverage,
+    /1 additional indexed warning document\(s\) for this point were not checked\./,
+  );
+  assert.doesNotMatch(seven.coverage, /not read/);
+  // The 41st feature only shows that the index holds more than the 40 entries read.
+  const sentinel = await run(41);
+  assert.match(
+    sentinel.coverage,
+    /34 additional indexed warning document\(s\) for this point were not checked\. Further index entries for this point were not read\./,
+  );
+});
+
 test('partial detail failures are visible and total detail failure is an error', async () => {
   const result = await harness([feature(1), feature(2)]).fetch(place);
   assert.equal(result.alerts.length, 1);
   assert.match(result.coverage, /Some warning details could not be loaded/);
   await assert.rejects(harness([feature(2)]).fetch(place), /could not be verified/);
+});
+
+test('an Alert whose expiry precedes its issue time is reported as not verified, never as an empty result', async () => {
+  // A mistyped date: the only stated expiry is a day before the bulletin was issued.
+  const mistyped = cap(2, { infos: info({ expires: new Date(now - 86_400_000).toISOString() }) });
+  await assert.rejects(
+    harness([feature(2)], new Map([[path(2), mistyped]])).fetch(place),
+    /could not be verified/,
+  );
+  const result = await harness(
+    [feature(1), feature(2)],
+    new Map([
+      [path(1), cap(1)],
+      [path(2), mistyped],
+    ]),
+  ).fetch(place);
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id),
+    ['weather@example.gov/alert-1/0'],
+  );
+  assert.match(result.coverage, /1 selected source document\(s\) could not be verified/);
 });
 
 function deadlineHarness(
@@ -367,6 +522,51 @@ test('future-effective and cancelled replacement documents cannot revive an old 
     ]),
   ).fetch(place);
   assert.equal(result.alerts.length, 0);
+});
+
+test('a matched document that takes effect later is disclosed; a pending Update revokes nothing yet', async () => {
+  const later = new Date(now + 6 * 3_600_000).toISOString();
+  const end = new Date(now + 30 * 3_600_000).toISOString();
+  const effectiveLater = (body: string) =>
+    body.replace(`<effective>${issued}</effective>`, `<effective>${later}</effective>`);
+  const docs = new Map([
+    [path(1), cap(1, { infos: effectiveLater(info({ expires: end })) })],
+    [
+      path(2),
+      cap(2, {
+        infos: effectiveLater(
+          info({ expires: end, area: area('<polygon>0,0 0,1 1,1 1,0 0,0</polygon>') }),
+        ),
+      }),
+    ],
+    [
+      path(3),
+      cap(3, {
+        type: 'Update',
+        references: `weather@example.gov,alert-9,${issued}`,
+        infos: effectiveLater(info({ expires: end })),
+      }),
+    ],
+    [path(4), cap(4, { type: 'Update', references: `weather@example.gov,alert-8,${issued}` })],
+  ]);
+  const result = await harness(
+    [1, 2, 3, 4].map((id) => feature(id)),
+    docs,
+  ).fetch(place);
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id),
+    ['weather@example.gov/alert-4/0'],
+  );
+  assert.equal(result.upcomingDocuments, 2);
+  assert.equal(result.upcomingAt, Date.parse(later));
+  assert.match(
+    result.coverage,
+    new RegExp(
+      `2 matched warning document\\(s\\) take effect later and are not listed as current warnings yet; the earliest takes effect at ${later.replaceAll('.', '\\.')}\\.`,
+    ),
+  );
+  // Only the Update in effect withdraws its original from another source.
+  assert.deepEqual(result.revokedCapKeys, ['weather@example.gov/alert-8/']);
 });
 
 test('caller abort returns promptly even if a shared source request is pending', async () => {

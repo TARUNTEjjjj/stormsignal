@@ -1,3 +1,4 @@
+import { clockDifference } from './presentation';
 import type { AlertResult, Forecast, Place, WeatherAlert } from './types';
 
 export const OFFLINE_PACK_KEY = 'stormsignal:offline-packs:v1';
@@ -22,6 +23,12 @@ interface WarningCoverageMetadata {
   scope?: 'point' | 'region' | 'country';
   scopeLabel?: string;
   feedUpdatedAt?: number | null;
+  /**
+   * The device clock minus the warning gateway's clock when the check arrived, in milliseconds
+   * (AlertResult.clockOffset). Issue and feed times are instants on the gateway's clock, so they
+   * are checked against the save time on that clock, whatever the device clock read.
+   */
+  clockOffset?: number;
 }
 export interface OfflineBriefingData {
   version: 1;
@@ -155,6 +162,9 @@ function safeUrl(value: unknown, place: Place): string {
     throw new Error('Invalid source URL');
   return u.href;
 }
+/** The save time as the warning source's clock read it; authority times are compared with this. */
+const sourceTime = (savedAt: number, warnings: WarningCoverageMetadata) =>
+  savedAt - (warnings.clockOffset ?? 0);
 function warningMetadata(value: unknown, savedAt: number): WarningCoverageMetadata {
   const w = record(value);
   const result: WarningCoverageMetadata = {};
@@ -170,20 +180,28 @@ function warningMetadata(value: unknown, savedAt: number): WarningCoverageMetada
     result.scope = w.scope as WarningCoverageMetadata['scope'];
   }
   if (w.scopeLabel !== undefined) result.scopeLabel = text(w.scopeLabel, 400);
+  if (w.clockOffset !== undefined) {
+    if (
+      !Number.isSafeInteger(w.clockOffset) ||
+      Math.abs(w.clockOffset as number) >= MAX_TIME - MIN_TIME
+    )
+      throw new Error('Invalid clock offset');
+    result.clockOffset = w.clockOffset as number;
+  }
   if (w.feedUpdatedAt !== undefined) {
     const updatedAt = w.feedUpdatedAt === null ? null : time(w.feedUpdatedAt);
-    if (updatedAt !== null && updatedAt > savedAt + 300000)
+    if (updatedAt !== null && updatedAt > sourceTime(savedAt, result) + 300000)
       throw new Error('Invalid feed update time');
     result.feedUpdatedAt = updatedAt;
   }
   return result;
 }
-function cleanAlert(value: unknown, place: Place, savedAt: number): BriefingAlert {
+function cleanAlert(value: unknown, place: Place, sourceSavedAt: number): BriefingAlert {
   const a = record(value);
   const sent = time(a.sent),
     effective = time(a.effective),
     expires = time(a.expires);
-  if (sent > savedAt + 300000 || expires <= effective || expires <= sent)
+  if (sent > sourceSavedAt + 300000 || expires <= effective || expires <= sent)
     throw new Error('Invalid warning timing');
   return {
     id: text(a.id, 2000),
@@ -201,14 +219,23 @@ function cleanAlert(value: unknown, place: Place, savedAt: number): BriefingAler
   };
 }
 
-/** Rebuild from a strict bounded shape. Never trust saved status as a live warning. */
-export function validateBriefing(value: unknown, now = Date.now()): OfflineBriefingData {
-  time(now);
+/**
+ * Rebuild from a strict bounded shape. Never trust saved status as a live warning.
+ * A `stored` briefing (one this app already saved) is read whatever the device clock shows now: the
+ * clock may have been set back since, or was fast when saving. Every other check still applies, and
+ * a new briefing keeps the device-clock check.
+ */
+export function validateBriefing(
+  value: unknown,
+  now = Date.now(),
+  stored = false,
+): OfflineBriefingData {
+  if (!stored) time(now);
   const v = record(value);
   if (v.version !== 1) throw new Error('Unknown briefing version');
   const place = cleanPlace(v.place),
     savedAt = time(v.savedAt);
-  if (savedAt > now + 300000 || v.id !== briefingId(place))
+  if ((!stored && savedAt > now + 300000) || v.id !== briefingId(place))
     throw new Error('Invalid briefing identity');
   const f = record(v.forecast),
     fetchedAt = time(f.fetchedAt),
@@ -254,7 +281,8 @@ export function validateBriefing(value: unknown, now = Date.now()): OfflineBrief
     throw new Error('Unsupported warning content');
   if (w.status === 'unavailable' && warningFetchedAt !== null)
     throw new Error('Unverified retrieval time');
-  const alerts = w.alerts.map((a) => cleanAlert(a, place, savedAt));
+  const metadata = warningMetadata(w, savedAt);
+  const alerts = w.alerts.map((a) => cleanAlert(a, place, sourceTime(savedAt, metadata)));
   if (new Set(alerts.map((a) => a.id)).size !== alerts.length) throw new Error('Duplicate warning');
   return {
     version: 1,
@@ -269,7 +297,7 @@ export function validateBriefing(value: unknown, now = Date.now()): OfflineBrief
       hours,
     },
     warnings: {
-      ...warningMetadata(w, savedAt),
+      ...metadata,
       status: w.status as OfflineBriefingData['warnings']['status'],
       fetchedAt: warningFetchedAt,
       source: text(w.source, 400),
@@ -350,7 +378,7 @@ export function loadBriefings(
       value.briefings.length > MAX_BRIEFINGS
     )
       throw new Error('Invalid storage');
-    const briefings = value.briefings.map((item) => validateBriefing(item, now));
+    const briefings = value.briefings.map((item) => validateBriefing(item, now, true));
     if (new Set(briefings.map((b) => b.id)).size !== briefings.length)
       throw new Error('Duplicate location');
     return { briefings, error: null };
@@ -423,13 +451,37 @@ export function clearBriefings(storage: StorageAccess): BriefingResult {
     return { briefings: [], error: 'Browser storage could not be cleared.' };
   }
 }
+/**
+ * A saved briefing's save and retrieval times are device-clock readings; its issue, effective and
+ * expiry times are the authority's. When the two clocks differed by five minutes or more at the
+ * save, this says so; otherwise it is empty.
+ */
+export function savedClockNote(briefing: OfflineBriefingData): string {
+  const difference = clockDifference(briefing.warnings.clockOffset);
+  return difference
+    ? `When this was saved, the device clock was ${difference} the warning service’s clock. Saved and retrieved times are that device clock’s readings; issue, effective and expiry times are the authority’s.`
+    : '';
+}
+/**
+ * Whether a saved warning is past its stated expiry at `now` on this device's clock. The device
+ * clock may still differ from the warning service's as it did at the save, or may have been
+ * corrected since, so a warning counts as past only when both readings agree: a device clock that
+ * was fast never marks a warning that is still valid as expired.
+ */
+export function pastStatedExpiry(
+  briefing: Pick<OfflineBriefingData, 'warnings'>,
+  alert: Pick<BriefingAlert, 'expires'>,
+  now: number,
+): boolean {
+  return alert.expires <= Math.min(now, now - (briefing.warnings.clockOffset ?? 0));
+}
 // Saved and retrieval times carry milliseconds; print whole seconds with an explicit zone.
 const utc = (value: number) =>
   `${new Date(value).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 const numberText = (value: number | null, suffix: string) =>
   value === null ? 'unavailable' : `${value}${suffix}`;
 export function briefingText(briefing: OfflineBriefingData, now = Date.now()): string {
-  const b = validateBriefing(briefing, now);
+  const b = validateBriefing(briefing, now, true);
   const lines = [
     'STORMSIGNAL — SAVED HISTORICAL BRIEFING',
     'NOT LIVE. Warnings may have changed or been cancelled. This is not a safety clearance.',
@@ -451,6 +503,8 @@ export function briefingText(briefing: OfflineBriefingData, now = Date.now()): s
       : `Warning feed retrieved: ${utc(b.warnings.fetchedAt)}`,
     `Official source (internet required): ${b.warnings.officialUrl}`,
   ];
+  const clockNote = savedClockNote(b);
+  if (clockNote) lines.push(clockNote);
   if (b.warnings.scope)
     lines.push(
       `Warning scope saved: ${b.warnings.scope.toUpperCase()}${b.warnings.scopeLabel ? ` — ${b.warnings.scopeLabel}` : ''}`,
@@ -470,7 +524,7 @@ export function briefingText(briefing: OfflineBriefingData, now = Date.now()): s
   for (const a of b.warnings.alerts)
     lines.push(
       '',
-      `${a.event} — ${a.severity} — ${a.expires <= now ? 'PAST STATED EXPIRY' : 'SAVED COPY; CURRENT STATUS UNKNOWN'}`,
+      `${a.event} — ${a.severity} — ${pastStatedExpiry(b, a, now) ? 'PAST STATED EXPIRY' : 'SAVED COPY; CURRENT STATUS UNKNOWN'}`,
       a.title,
       `Area: ${a.area}`,
       `Issued: ${utc(a.sent)} | Effective: ${utc(a.effective)} | Stated expiry: ${utc(a.expires)}`,

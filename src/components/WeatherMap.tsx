@@ -21,6 +21,8 @@ import {
   isFrameStale,
   normalizeLongitude,
 } from '../imagery';
+import { alertOutline } from '../data';
+import { sourceClock } from '../connectivity';
 import type { Place, WeatherAlert } from '../types';
 import 'leaflet/dist/leaflet.css';
 import './WeatherMap.css';
@@ -28,12 +30,14 @@ import './WeatherMap.css';
 interface Props {
   place: Place;
   alerts: WeatherAlert[];
+  /** The warning check's clock offset (AlertResult.clockOffset); expiry is judged on its clock. */
+  clockOffset: number | undefined;
   lowBandwidth: boolean;
   onSelect: (place: Place) => void;
 }
 const clampLatitude = (latitude: number) => Math.max(-85, Math.min(85, latitude));
 
-export default function WeatherMap({ place, alerts, lowBandwidth, onSelect }: Props) {
+export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, onSelect }: Props) {
   const holder = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -190,13 +194,16 @@ export default function WeatherMap({ place, alerts, lowBandwidth, onSelect }: Pr
   useEffect(() => {
     if (!map.current) return;
     const group = L.layerGroup().addTo(map.current);
+    // Leaflet does not wrap longitudes: outlines are drawn in the world copy around the marker.
+    const longitude = Number.isFinite(place.longitude) ? normalizeLongitude(place.longitude) : NaN;
+    const current = sourceClock(Date.now(), clockOffset);
     for (const alert of alerts) {
-      if (alert.expires <= Date.now() || !alert.geometry || typeof alert.geometry !== 'object')
+      if (alert.expires <= current || !alert.geometry || typeof alert.geometry !== 'object')
         continue;
-      const type = (alert.geometry as { type?: string }).type;
-      if (type !== 'Polygon' && type !== 'MultiPolygon') continue;
       try {
-        const shape = L.geoJSON(alert.geometry as GeoJsonObject, {
+        const outline = alertOutline(alert.geometry, longitude);
+        if (!outline) continue;
+        const shape = L.geoJSON(outline as GeoJsonObject, {
           style: {
             color: '#ff6b75',
             weight: 2,
@@ -215,7 +222,7 @@ export default function WeatherMap({ place, alerts, lowBandwidth, onSelect }: Pr
     return () => {
       group.remove();
     };
-  }, [alerts, ready]);
+  }, [alerts, ready, place.longitude, clockOffset]);
 
   useEffect(() => {
     if (!playing || frames.length < 2 || !enabled) return;
@@ -437,7 +444,9 @@ export default function WeatherMap({ place, alerts, lowBandwidth, onSelect }: Pr
         </p>
         <p className="storm-map-hint">
           Select any point on the map to inspect its forecast. Red outlines show supplied official
-          warning polygons only; some alerts have no polygon.
+          warning polygons only; some alerts have no polygon, or one too large to show here. An area
+          that crosses 180° longitude is drawn in parts; a dashed line along 180° is where they
+          join, not a warning boundary.
         </p>
       </div>
     </section>

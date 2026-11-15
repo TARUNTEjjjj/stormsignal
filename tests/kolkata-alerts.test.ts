@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createKolkataAlertAdapter, supportsKolkata } from '../server/kolkata';
+import { createLocalAlertAdapter } from '../server/local-alerts';
 import type { TextOptions } from '../server/http';
 import type { Place } from '../src/types';
 
@@ -31,6 +32,14 @@ function item(options: Record<string, string> = {}) {
     .join(
       '',
     )}<link>https://mausam.imd.gov.in/imd_latest/contents/districtwisewarnings.php</link><sender>nowcastnwfc@gmail.com</sender><SenderName>nowcastnwfc@gmail.com</SenderName><pubDate>Sat, 31 Oct 2026 17:36:52 </pubDate></item>`;
+}
+/** Field order, namespace, CDATA and timezone spelling of the public item observed 1 November 2026. */
+function observed(
+  district: string,
+  index: number,
+  options: { sent?: number; description?: string } = {},
+) {
+  return `<item xmlns:dc='ns:1'><title>${district}</title><guid>${index.toString(16).padStart(32, '0')}</guid><link>https://mausam.imd.gov.in/imd_latest/contents/districtwisewarnings.php</link><sent>${ist(options.sent ?? now - 60_000)}</sent><sender>nowcastnwfc@gmail.com</sender><pubDate>Sat, 31 Oct 2026 17:36:52 </pubDate><SenderName>nowcastnwfc@gmail.com</SenderName><Onset>${ist(now - 120_000)}</Onset><Expires>${ist(now + 3_600_000)}</Expires><description><![CDATA[${options.description ?? 'Moderate rain: 5-15 mm/hr ,\nModerate Thunderstorms with maximum surface wind speed between 41 - 61 kmph (In gusts) ,'}]]></description><category>NOWCAST</category></item>`;
 }
 const rss = (items = item()) =>
   `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>IMD WARNING </title><description>IMD RSS</description><language>en</language>${items}</channel></rss>`;
@@ -69,7 +78,7 @@ test('direct IMD RSS read is bounded, caches for one minute, and keeps explicit 
     h.calls[0].url,
     'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php',
   );
-  assert.equal(h.calls[0].options?.maxBytes, 256_000);
+  assert.equal(h.calls[0].options?.maxBytes, 1_000_000);
   assert.equal(h.calls[0].options?.ttlMs, 60_000);
   assert.equal(result.source, 'IMD Kolkata district nowcasts (direct)');
   assert.equal(result.scope, 'region');
@@ -102,6 +111,90 @@ test('actual public-feed RSS shape without Kolkata remains explicitly unmatched'
   assert.match(result.coverage, /No Kolkata entry was present/);
 });
 
+test('every retrieved entry is checked: a late Kolkata entry is found and sets the feed time', async () => {
+  // A busy day's national list: 249 other districts (the first 200 issued 26 hours ago), Kolkata last.
+  const others = Array.from({ length: 249 }, (_, i) =>
+    observed(`DISTRICT ${i + 1}`, i + 1, { sent: i < 200 ? now - 26 * 3_600_000 : now - 60_000 }),
+  );
+  const raw = rss(others.join('') + observed('KOLKATA', 250));
+  assert.ok(Buffer.byteLength(raw) < 256_000, 'well inside the byte bound');
+  const result = await harness(raw).fetch(place);
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id),
+    [`imd-kolkata:${(250).toString(16).padStart(32, '0')}`],
+  );
+  assert.equal(result.feedUpdatedAt, Math.floor((now - 60_000) / 1000) * 1000);
+  assert.doesNotMatch(result.coverage, /No Kolkata entry|not checked|over 24 hours old/);
+});
+
+test('a damaged entry that names no district is disclosed and does not hide the Kolkata bulletin', async () => {
+  // A long national list with Kolkata first and damaged, unrelated entries far down the list.
+  const others = Array.from({ length: 300 }, (_, i) => observed(`DISTRICT ${i + 1}`, i + 2));
+  const feed = (...damaged: string[]) =>
+    rss(observed('KOLKATA', 1) + others.join('') + damaged.join(''));
+  const untitled = observed('X', 900).replace('<title>X</title>', '');
+  const damaged = [
+    '<item/>',
+    '<item>not an entry</item>',
+    untitled,
+    observed(' ', 901),
+    observed('A', 902).replace('<title>A</title>', '<title>A</title><title>B</title>'),
+  ];
+  const result = await harness(feed(...damaged)).fetch(place);
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id),
+    [`imd-kolkata:${(1).toString(16).padStart(32, '0')}`],
+  );
+  assert.match(
+    result.coverage,
+    /5 feed entries name no district and could not be checked; a newer Kolkata bulletin may be missing\./,
+  );
+  const one = await harness(feed(untitled)).fetch(place);
+  assert.equal(one.alerts.length, 1);
+  assert.match(one.coverage, /1 feed entry names no district and could not be checked/);
+  // A district name of any length is still a name: the entry is another district's.
+  const long = await harness(feed(observed('D'.repeat(300), 903))).fetch(place);
+  assert.equal(long.alerts.length, 1);
+  assert.doesNotMatch(long.coverage, /no district/);
+  assert.doesNotMatch((await harness(feed()).fetch(place)).coverage, /no district/);
+  // An unnamed entry that mentions Kolkata may be Kolkata's own: the source still fails closed.
+  for (const suspect of [
+    '<item>KOLKATA</item>',
+    observed('A', 904).replace('<title>A</title>', '<title>A</title><title>Kolkata</title>'),
+    untitled.replace('Moderate rain', 'Kolkata: moderate rain'),
+  ])
+    await assert.rejects(harness(feed(suspect)).fetch(place), /unreadable Kolkata entry/);
+  // Without a Kolkata bulletin, an unnamed entry cannot be told from Kolkata's: no empty result.
+  await assert.rejects(
+    harness(rss(others.join('') + untitled)).fetch(place),
+    /name no district; Kolkata cannot be checked/,
+  );
+  // A damaged entry that is named Kolkata fails closed as before.
+  await assert.rejects(
+    harness(feed(observed('KOLKATA', 905).replace(/<Expires>[^<]*<\/Expires>/, ''))).fetch(place),
+  );
+});
+
+test('a national feed of realistic entries up to the entry limit is read, not rejected for size', async () => {
+  // About 640 bytes per entry; the former 256,000-byte bound rejected anything over ~400 districts.
+  const severe =
+    'Moderate rain: 5-15 mm/hr ,\nSevere Thunderstorms with maximum surface wind speed between 62 - 87 kmph (In gusts) ,\nHail ,';
+  const entries = (count: number) =>
+    observed('KOLKATA', 1, { description: severe }) +
+    Array.from({ length: count - 1 }, (_, i) =>
+      observed(`DISTRICT ${i + 2}`, i + 2, { description: severe }),
+    ).join('');
+  const raw = rss(entries(1000));
+  const bytes = Buffer.byteLength(raw);
+  assert.ok(bytes > 600_000, `fixture has ${bytes} bytes`);
+  const h = harness(raw);
+  const result = await h.fetch(place);
+  assert.ok(bytes <= h.calls[0].options!.maxBytes!, 'the provider read accepts the whole feed');
+  assert.equal(result.alerts.length, 1);
+  assert.match(result.alerts[0].description, /62 - 87 kmph \(In gusts\)/);
+  await assert.rejects(harness(rss(entries(1001))).fetch(place), /too many entries/);
+});
+
 test('district bulletin text decodes XML numeric character references', async () => {
   const result = await harness(
     rss(item({ description: 'Moderate rain&#44; don&#39;t travel &#x2014; IMD' })),
@@ -121,6 +214,44 @@ test('district names match exactly and latest district publication suppresses ol
   ).fetch(place);
   assert.deepEqual(result.alerts, []);
   assert.equal(result.scopeLabel, 'Kolkata district');
+});
+
+test('an issue stamped slightly ahead of the server clock is current, not dropped with the one it replaced', async () => {
+  const feed = rss(
+    item({ guid: 'older', sent: ist(now - 2 * 3_600_000) }) +
+      item({ guid: 'newer', sent: ist(now + 30_000), Expires: ist(now + 3 * 3_600_000) }),
+  );
+  const direct = await harness(feed).fetch(place);
+  assert.deepEqual(
+    direct.alerts.map((alert) => alert.id),
+    ['imd-kolkata:newer'],
+  );
+  assert.equal(direct.alerts[0].sent, Math.floor((now + 30_000) / 1000) * 1000);
+  assert.ok(direct.alerts[0].effective <= Date.now());
+  // The combined Kolkata check keeps it as well.
+  const unused = async (): Promise<never> => {
+    throw new Error('Not used for Kolkata.');
+  };
+  const combined = await createLocalAlertAdapter({
+    national: unused,
+    global: unused,
+    kolkata: harness(feed).fetch,
+    india: async () => ({
+      status: 'available',
+      alerts: [],
+      fetchedAt: now - 500,
+      source: 'NDMA SACHET',
+      officialUrl: 'https://sachet.ndma.gov.in/',
+      scope: 'region',
+      scopeLabel: 'West Bengal',
+      partial: true,
+      coverage: 'Limited regional feed.',
+    }),
+  })(place);
+  assert.deepEqual(
+    combined.alerts.map((alert) => alert.id),
+    ['imd-kolkata:newer'],
+  );
 });
 
 test('published warnings for future weather remain visible, while explicit no-warning updates are excluded', async () => {
@@ -186,12 +317,71 @@ test('provider-supplied links are not followed and description markup is never r
   assert.match(result.alerts[0].description, /Heavy rain.*Follow IMD/);
 });
 
+test('comparison signs in hazard bands are official text, never stripped as markup', async () => {
+  const text = (result: { alerts: { description: string }[] }) =>
+    result.alerts[0].description.split('\n\nSource weather onset:')[0];
+  const bands =
+    'Light rain: <5 mm/hr ,\nSevere Thunderstorms with maximum surface wind speed >87 kmph (In gusts) ,\nHail ,';
+  const spaced =
+    'Light rain: < 5 mm/hr ,\nVery Severe Thunderstorms with maximum surface wind speed > 87 kmph ,';
+  for (const [description, expected] of [
+    [`<![CDATA[${bands}]]>`, bands],
+    [bands.replace('<', '&lt;').replace('>', '&gt;'), bands],
+    [bands.replace('<', '&#60;').replace('>', '&#62;'), bands],
+    [`<![CDATA[${spaced}]]>`, spaced],
+  ])
+    assert.equal(text(await harness(rss(item({ description }))).fetch(place)), expected);
+  const mixed = await harness(
+    rss(
+      item({
+        description:
+          '<![CDATA[Heavy rain <br/>wind >87 kmph, rain <5 mm/hr<p class="x">Hail</p>]]>',
+      }),
+    ),
+  ).fetch(place);
+  assert.equal(text(mixed), 'Heavy rain wind >87 kmph, rain <5 mm/hr Hail');
+  // A "<" directly before a letter is official text too, unless it opens a formatting tag or link.
+  for (const official of [
+    'Rainfall <a few mm, gusts >40 kmph',
+    'Visibility <one km; wind speed >40 kmph',
+    'Thunderstorm <T> with hail',
+    'Temperature <normal (departure = -2), humidity >90%',
+    'Gusts <big hail likely> expected',
+    // A formatting tag's name followed by words, not by name=value attributes, is text as well.
+    'Winds <strong at times, gusts >40 kmph',
+    'Hail <small to medium size>, gusts >40 kmph',
+    'Category <B (minor), gusts >40 kmph',
+    'Wind <u 40 kmph> gusts',
+  ])
+    assert.equal(
+      text(await harness(rss(item({ description: `<![CDATA[${official}]]>` }))).fetch(place)),
+      official,
+    );
+  const formatted = await harness(
+    rss(
+      item({
+        description:
+          '<![CDATA[<P><b>Heavy</b> rain<BR>expected <font color="red">now</font>, <span\tclass="x">rain <5 mm/hr</span></P><div>See <a href="https://evil.example/x">the bulletin</a>.</div><small>IMD</small>]]>',
+      }),
+    ),
+  ).fetch(place);
+  assert.equal(text(formatted), 'Heavy rain expected now , rain <5 mm/hr See the bulletin . IMD');
+  const attributes = await harness(
+    rss(
+      item({
+        description: `<![CDATA[Rain<br />likely <p align=center>now</p><font face='Arial' size=2>gusts >40 kmph</font> <a target=_blank href="https://evil.example/">here</a>]]>`,
+      }),
+    ),
+  ).fetch(place);
+  assert.equal(text(attributes), 'Rain likely now gusts >40 kmph here');
+});
+
 test('malformed XML, entity declarations, unexpected feed schema and oversized feeds fail closed', async () => {
   for (const raw of [
     '<rss><channel></rss>',
     '<!DOCTYPE rss [<!ENTITY test "unsafe">]>' + rss(),
     rss().replace('IMD WARNING ', 'Other feed'),
-    rss('x'.repeat(256_000)),
+    rss('x'.repeat(1_000_000)),
     rss(item({ category: 'OTHER' })),
   ])
     await assert.rejects(harness(raw).fetch(place));

@@ -5,8 +5,11 @@ import { requestText, type TextOptions, type TextResult } from './http.ts';
 // Public RSS endpoint documented by IMD's API list. The authenticated JSON API is not used.
 const FEED = 'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php';
 const OFFICIAL = 'https://mausam.imd.gov.in/kolkataums/district_nowcast_kolums.php';
-const MAX_BYTES = 256_000;
-const MAX_ITEMS = 200;
+// One national list of district nowcasts. Every retrieved entry is checked, so a Kolkata entry is
+// found wherever it appears. Observed entries are about 610-640 bytes; the byte bound leaves room
+// for the full entry limit, so a busy day's long feed is read rather than rejected whole.
+const MAX_ENTRIES = 1000;
+const MAX_BYTES = 1_000_000;
 type RequestText = (url: string, options?: TextOptions) => Promise<TextResult>;
 type Row = Record<string, unknown>;
 type Bulletin = {
@@ -27,6 +30,14 @@ const parser = new XMLParser({
   htmlEntities: true,
 });
 const clean = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+// The only markup removed from bulletin text: formatting tags by name and links, whose attributes
+// are written as name=value. Any other "<" is official text, also directly before a letter or a
+// tag name ("<a few mm", "<one km", "<T>", "<strong at times", "<B (minor)").
+const ATTRIBUTE = String.raw`[ \t]+[a-z][\w:.-]*[ \t]*=[ \t]*(?:"[^"<>\n]*"|'[^'<>\n]*'|[^\s"'<>=]+)`;
+const FORMATTING_TAG = new RegExp(
+  String.raw`<\/?(?:br|p|b|i|u|em|strong|span|div|font|small)(?:${ATTRIBUTE})*[ \t]*\/?>|<a(?:${ATTRIBUTE})+[ \t]*>|<\/a[ \t]*>`,
+  'gi',
+);
 const row = (value: unknown): Row => {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Unexpected IMD district feed structure.');
@@ -93,13 +104,23 @@ function parseFeed(raw: string, now: number) {
     throw new Error('Unexpected IMD district feed title.');
   const value = channel.item;
   const all = value === undefined ? [] : Array.isArray(value) ? value : [value];
-  if (all.length > 1000) throw new Error('IMD district feed has too many entries.');
+  if (all.length > MAX_ENTRIES) throw new Error('IMD district feed has too many entries.');
   const records: Bulletin[] = [];
   let latest: number | null = null;
-  let invalidOtherTimes = 0;
-  for (const value of all.slice(0, MAX_ITEMS)) {
-    const item = row(value);
-    const district = clean(text(item.title, 200));
+  let invalidOtherTimes = 0,
+    unnamed = 0;
+  for (const value of all) {
+    // An entry that names no district cannot be matched to Kolkata or to any other district. One
+    // such damaged entry among up to 1,000 must not hide a Kolkata bulletin that was read, so it
+    // is counted and disclosed. If it mentions Kolkata it may be Kolkata's, and the feed fails.
+    const item = value && typeof value === 'object' && !Array.isArray(value) ? row(value) : null;
+    const district = item && typeof item.title === 'string' ? clean(item.title) : '';
+    if (!item || !district) {
+      if (/kolkata/i.test(JSON.stringify(value) ?? ''))
+        throw new Error('The IMD district feed has an unreadable Kolkata entry.');
+      unnamed++;
+      continue;
+    }
     let sent: number;
     try {
       sent = timestamp(item.sent);
@@ -119,15 +140,22 @@ function parseFeed(raw: string, now: number) {
       throw new Error('Kolkata bulletin has an invalid validity interval.');
     const id = text(item.guid, 200);
     if (!/^[A-Za-z0-9._:-]+$/.test(id)) throw new Error('Invalid Kolkata bulletin identifier.');
-    // Never render provider markup or follow links supplied inside the RSS document.
+    // Never render provider markup or follow links supplied inside the RSS document. By now CDATA
+    // is unwrapped and entities are decoded, so this is plain text, and it is shown as text. Only
+    // known formatting tags (<br/>, <p>, <b>) and links are removed; a comparison sign in a hazard
+    // band ("<5 mm/hr", "> 87 kmph", "<a few mm") is official text and must survive. A tag never
+    // spans lines.
     const description = text(item.description, 20_000)
-      .replace(/<[^>]*>/g, ' ')
+      .replace(FORMATTING_TAG, ' ')
       .replace(/[ \t]+/g, ' ')
       .trim();
     if (!description) throw new Error('Kolkata bulletin description is empty.');
     records.push({ id, sent, onset, expires, description });
   }
-  return { records, latest, truncated: all.length > MAX_ITEMS, invalidOtherTimes };
+  // With no Kolkata bulletin read, an unnamed entry cannot be told from Kolkata's own.
+  if (unnamed && !records.length)
+    throw new Error('IMD district feed entries name no district; Kolkata cannot be checked.');
+  return { records, latest, invalidOtherTimes, unnamed };
 }
 
 export function createKolkataAlertAdapter(request: RequestText) {
@@ -152,8 +180,10 @@ export function createKolkataAlertAdapter(request: RequestText) {
     }
     if (unique.size > 1)
       throw new Error('Kolkata feed contains conflicting latest bulletin identifiers.');
+    // An issue time up to 5 minutes ahead of this server's clock is accepted above, because IMD's
+    // clock can run ahead. That issue has already replaced the previous one, so it is current.
     const alerts: WeatherAlert[] = [...unique.values()]
-      .filter((item) => item.sent <= now && item.expires > now)
+      .filter((item) => item.expires > now)
       // A source may publish an explicit withdrawal/no-warning update; never turn it into an alert.
       .filter((item) => !/^no (?:warning|weather)[.!]?$/i.test(item.description))
       .map((item) => ({
@@ -164,8 +194,9 @@ export function createKolkataAlertAdapter(request: RequestText) {
         area: 'Kolkata district',
         sent: item.sent,
         // RSS has no separate effective field. A published warning remains useful before
-        // the expected weather onset; expose it from its source issue time.
-        effective: item.sent,
+        // the expected weather onset; expose it from its source issue time, or from now when
+        // that time is slightly ahead of this server's clock.
+        effective: Math.min(item.sent, now),
         expires: item.expires,
         description: `${item.description}\n\nSource weather onset: ${new Date(item.onset).toISOString()}.`,
         instruction: '',
@@ -183,7 +214,7 @@ export function createKolkataAlertAdapter(request: RequestText) {
       scopeLabel: 'Kolkata district',
       partial: true,
       feedUpdatedAt: feed.latest,
-      coverage: `Direct IMD public district-nowcast RSS, matched by the exact Kolkata district name. This rolling national feed is limited and may omit Kolkata updates; it is not a complete local warning service. No matching unexpired bulletin is not an all-clear. Warnings are shown from the source issue time; the source weather onset is preserved separately in the description. Expiry must be stated by IMD, and no severity is inferred.${!feed.records.length ? ' No Kolkata entry was present in the retrieved feed.' : ''}${feed.latest === null ? ' No verifiable feed publication time was supplied.' : now - feed.latest > 86_400_000 ? ' The latest bulletin in the feed is over 24 hours old; current coverage is unverified.' : ''}${feed.truncated ? ' Additional feed entries were not checked.' : ''}${feed.invalidOtherTimes ? ' Some unrelated bulletin timestamps were invalid.' : ''} Check IMD Kolkata directly for current instructions.`,
+      coverage: `Direct IMD public district-nowcast RSS, matched by the exact Kolkata district name. This rolling national feed is limited and may omit Kolkata updates; it is not a complete local warning service. No matching unexpired bulletin is not an all-clear. Warnings are shown from the source issue time; the source weather onset is preserved separately in the description. Expiry must be stated by IMD, and no severity is inferred.${!feed.records.length ? ' No Kolkata entry was present in the retrieved feed.' : ''}${feed.latest === null ? ' No verifiable feed publication time was supplied.' : now - feed.latest > 86_400_000 ? ' The latest bulletin in the feed is over 24 hours old; current coverage is unverified.' : ''}${feed.invalidOtherTimes ? ' Some unrelated bulletin timestamps were invalid.' : ''}${feed.unnamed ? ` ${feed.unnamed} feed ${feed.unnamed === 1 ? 'entry names' : 'entries name'} no district and could not be checked; a newer Kolkata bulletin may be missing.` : ''} Check IMD Kolkata directly for current instructions.`,
     };
   };
 }

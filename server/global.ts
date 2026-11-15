@@ -1,5 +1,15 @@
 import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
-import { activeCapRecords, parseCap, type CapArea, type CapDocument, type CapInfo } from './cap.ts';
+import {
+  activeCapRecords,
+  capAreaText,
+  capReferencesInForce,
+  parseCap,
+  upcomingCapNote,
+  upcomingCapRecords,
+  type CapArea,
+  type CapDocument,
+  type CapInfo,
+} from './cap.ts';
 import { requestText, type TextOptions, type TextResult } from './http.ts';
 
 const ORIGIN = 'https://severeweather.wmo.int';
@@ -89,7 +99,11 @@ export function globalPointUrl(place: Pick<Place, 'latitude' | 'longitude'>): st
   return url.href;
 }
 
-function candidatesFor(raw: string, sources: Source[]): Candidate[] {
+/** Documents past the bound, and index entries past those read, are counted for disclosure. */
+function candidatesFor(
+  raw: string,
+  sources: Source[],
+): { candidates: Candidate[]; unchecked: number; unread: boolean } {
   const data = record(JSON.parse(raw));
   if (
     data.type !== 'FeatureCollection' ||
@@ -125,7 +139,12 @@ function candidatesFor(raw: string, sources: Source[]): Candidate[] {
     for (const code of text(p.gc, 1000).split(/[;,]/))
       if (code.trim()) candidate.geocodes.add(code.trim());
   }
-  return [...candidates.values()].slice(0, MAX_DOCUMENTS);
+  const all = [...candidates.values()];
+  return {
+    candidates: all.slice(0, MAX_DOCUMENTS),
+    unchecked: Math.max(0, all.length - MAX_DOCUMENTS),
+    unread: data.features.length > MAX_FEATURES,
+  };
 }
 
 /** Inclusive boundary test; unwrap longitudes around the selected point for dateline crossings. */
@@ -163,6 +182,82 @@ export function capPolygonContains(
     }
     return inside;
   });
+}
+
+/**
+ * GeoJSON polygons for one CAP ring of [lat, lon] pairs. Map renderers join vertices as given, so a
+ * ring that crosses ±180° is cut there into parts that do not (RFC 7946 §3.1.9); otherwise it is
+ * drawn around the opposite side of the world. Original vertices are kept exactly. A ring that
+ * circles a pole has no such outline and returns null.
+ */
+export function capPolygonGeoJson(polygon: number[][]): number[][][][] | null {
+  // Whole turns added to a longitude keep consecutive vertices within 180°, as in point matching.
+  let turns = 0;
+  const points = polygon.map(([lat, lon], index) => {
+    const step = index ? lon - polygon[index - 1][1] : 0;
+    if (step > 180) turns--;
+    else if (step < -180) turns++;
+    return { lat, lon, turns, x: lon + 360 * turns };
+  });
+  if (points.every((point) => point.turns === 0))
+    return [[polygon.map(([lat, lon]) => [lon, lat])]];
+  if (points.at(-1)!.turns !== 0) return null;
+  type Vertex = { lat: number; x: number; lon?: number; turns?: number };
+  // Sutherland-Hodgman clipping of the open ring to one meridian; new vertices lie on it.
+  const clip = (ring: Vertex[], inside: (x: number) => boolean, edge: number) =>
+    ring.flatMap((current, index): Vertex[] => {
+      const previous = ring.at(index - 1)!;
+      const crossing =
+        inside(current.x) === inside(previous.x)
+          ? []
+          : [
+              {
+                x: edge,
+                lat:
+                  previous.lat +
+                  ((edge - previous.x) / (current.x - previous.x)) * (current.lat - previous.lat),
+              },
+            ];
+      return inside(current.x) ? [...crossing, current] : crossing;
+    });
+  const parts: number[][][][] = [];
+  for (const band of new Set(points.map((point) => point.turns))) {
+    const low = 360 * band - 180,
+      high = 360 * band + 180;
+    const clipped = clip(
+      clip(points.slice(0, -1), (x) => x >= low, low),
+      (x) => x <= high,
+      high,
+    ).map(({ lat, x, lon, turns }) => [
+      lon === undefined ? x - 360 * band : turns === band ? lon : lon + 360 * (turns! - band),
+      lat,
+    ]);
+    const ring = clipped.filter(
+      ([lon, lat], index) => lon !== clipped.at(index - 1)![0] || lat !== clipped.at(index - 1)![1],
+    );
+    const area = ring.reduce((sum, [x1, y1], index) => {
+      const [x2, y2] = ring[(index + 1) % ring.length];
+      return sum + x1 * y2 - x2 * y1;
+    }, 0);
+    // Only vertices on the cut meridian (no area) do not form an outline.
+    if (ring.length >= 3 && Math.abs(area) > 1e-12) parts.push([[...ring, ring[0]]]);
+  }
+  return parts;
+}
+
+/** Map outline of matched areas: exact original rings, cut at ±180°, or none; never simplified. */
+export function capAreaGeometry(
+  areas: CapArea[],
+): { type: 'MultiPolygon'; coordinates: number[][][][] } | null {
+  const parts = areas.flatMap((area) => area.polygons.map(capPolygonGeoJson));
+  // A ring without a faithful outline withholds the whole outline rather than draw part of it.
+  if (parts.some((part) => part === null)) return null;
+  const polygons = parts.flatMap((part) => part!);
+  // Avoid transferring large map outlines on a weak connection.
+  return polygons.length &&
+    polygons.reduce((count, polygon) => count + polygon[0].length, 0) <= 1000
+    ? { type: 'MultiPolygon', coordinates: polygons }
+    : null;
 }
 
 function areaMatches(area: CapArea, candidate: Candidate, place: Place): boolean {
@@ -247,20 +342,13 @@ function toAlert(
   place: Place,
 ): WeatherAlert {
   const matching = info.areas.filter((area) => areaMatches(area, candidate, place));
-  const polygons = matching.flatMap((area) =>
-    area.polygons.map((polygon) => [polygon.map(([lat, lon]) => [lon, lat])]),
-  );
   const capUrl = `${ORIGIN}/v2/cap-alerts/${candidate.path}`;
   return {
     id: `${document.sender}/${document.identifier}/${index}`.slice(0, 2000),
     title: info.headline || info.event,
     event: info.event,
     severity: info.severity,
-    area: matching
-      .map((area) => area.description)
-      .filter(Boolean)
-      .join('; ')
-      .slice(0, 8000),
+    area: capAreaText(matching),
     sent: document.sent,
     effective: info.effective,
     expires: info.expires!,
@@ -268,11 +356,7 @@ function toAlert(
     instruction: info.instruction,
     source: info.senderName || candidate.source.name || document.sender,
     url: capUrl,
-    // Avoid transferring large map outlines on a weak connection; never simplify an official boundary.
-    geometry:
-      polygons.length && polygons.reduce((count, polygon) => count + polygon[0].length, 0) <= 1000
-        ? { type: 'MultiPolygon', coordinates: polygons }
-        : null,
+    geometry: capAreaGeometry(matching),
   };
 }
 
@@ -283,7 +367,9 @@ export function createGlobalAlertAdapter(
   return async (
     place: Place,
     signal?: AbortSignal,
-  ): Promise<AlertResult & { revokedCapKeys?: string[] }> => {
+  ): Promise<
+    AlertResult & { revokedCapKeys?: string[]; upcomingDocuments?: number; upcomingAt?: number }
+  > => {
     const queryUrl = globalPointUrl(place);
     const code = place.countryCode.toUpperCase();
     if (!/^[A-Z]{2}$/.test(code)) throw Error('A valid country is required for official warnings.');
@@ -338,7 +424,7 @@ export function createGlobalAlertAdapter(
             'No operating official CAP source for this country is listed in the connected WMO registry. Check the official authority. Missing warnings never mean safe conditions.',
         };
       const query = await read(queryUrl, { ...options, ttlMs: 60_000, maxBytes: 250_000 });
-      const candidates = candidatesFor(query.text, sources);
+      const { candidates, unchecked, unread } = candidatesFor(query.text, sources);
       const loaded: { document: CapDocument; candidate: Candidate; fetchedAt: number }[] = [];
       let failed = 0,
         next = 0;
@@ -384,6 +470,19 @@ export function createGlobalAlertAdapter(
       >();
       const identity = (document: CapDocument) =>
         `${document.sender}\u0000${document.identifier}\u0000${document.sent}`;
+      // Matched documents that take effect later are disclosed with their earliest effective time.
+      const upcoming = upcomingCapRecords(
+        loaded.map((item) => item.document),
+        now,
+      ).flatMap((document) => {
+        const candidate = loaded.find(
+          (item) => identity(item.document) === identity(document),
+        )!.candidate;
+        const matched = document.infos.filter((info) =>
+          info.areas.some((area) => areaMatches(area, candidate, place)),
+        );
+        return matched.length ? [Math.min(...matched.map((info) => info.effective))] : [];
+      });
       const translate = async (document: CapDocument) => {
         const candidate = loaded.find(
           (item) => identity(item.document) === identity(document),
@@ -480,24 +579,27 @@ export function createGlobalAlertAdapter(
         ...base,
         status: 'available',
         alerts: alerts.slice(0, 30),
-        // Internal merge metadata: a second source must not revive a superseded CAP bulletin.
+        // Internal merge metadata: a second source must not revive a superseded CAP bulletin, and
+        // an Update not yet in effect must not withdraw the original that is still current.
         revokedCapKeys: [
           ...new Set(
             loaded.flatMap(({ document }) =>
               document.status === 'Actual' &&
               document.scope === 'Public' &&
-              ['Update', 'Cancel'].includes(document.msgType)
+              capReferencesInForce(document, now)
                 ? document.references.map((ref) => `${ref.sender}/${ref.identifier}/`)
                 : [],
             ),
           ),
         ],
+        upcomingDocuments: upcoming.length,
+        ...(upcoming.length ? { upcomingAt: Math.min(...upcoming) } : {}),
         fetchedAt: Math.min(
           query.fetchedAt,
           ...loaded.map((item) => item.fetchedAt),
           ...[...translations.values()].map((item) => item.fetchedAt),
         ),
-        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${failed ? ` Some warning details could not be loaded: ${failed} selected source document(s) could not be verified.` : ''}${next < candidates.length ? ` ${candidates.length - next} selected source document(s) were not checked before the time limit.` : ''}${controller.signal.aborted ? ' The check reached its time limit; verified original bulletins are retained.' : ''} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
+        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${unchecked ? ` ${unchecked} additional indexed warning document(s) for this point were not checked.` : ''}${unread ? ' Further index entries for this point were not read.' : ''}${failed ? ` Some warning details could not be loaded: ${failed} selected source document(s) could not be verified.` : ''}${next < candidates.length ? ` ${candidates.length - next} selected source document(s) were not checked before the time limit.` : ''}${controller.signal.aborted ? ' The check reached its time limit; verified original bulletins are retained.' : ''}${upcomingCapNote(upcoming, 'matched warning document(s)')} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
       };
     } finally {
       clearTimeout(timer);

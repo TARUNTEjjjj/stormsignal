@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCap, parseRss, activeCapRecords } from '../server/cap';
+import {
+  parseCap,
+  parseRss,
+  newestFirst,
+  activeCapRecords,
+  capAreaText,
+  capReferencesInForce,
+  CAP_AREA_TEXT_LIMIT,
+  upcomingCapNote,
+  upcomingCapRecords,
+} from '../server/cap';
 
 const NOW = Date.UTC(2026, 10, 1, 1);
 const info = (extra = '') =>
@@ -209,10 +219,396 @@ test('RSS uses latest item publication over an old channel date and bounds its l
     items: [],
     updatedAt: null,
     truncated: false,
+    unzonedTimes: false,
   });
   assert.throws(() =>
     parseRss(
       '<rss><channel><item><link>url</link><pubDate>bad date</pubDate></item></channel></rss>',
     ),
   );
+});
+
+test('RSS times without a time zone are unknown, never read in the server time zone', () => {
+  const feed = (channel: string, published: string) =>
+    `<rss><channel>${channel}<item><link>https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=1</link><pubDate>${published}</pubDate></item></channel></rss>`;
+  // 05:30 in India is 00:00 UTC; a UTC server read it as 05:30 UTC, 5.5 hours in the future.
+  const local = parseRss(
+    feed(
+      '<lastBuildDate>Sun, 01 Nov 2026 00:10:00 GMT</lastBuildDate>',
+      'Sun, 01 Nov 2026 05:30:00',
+    ),
+  );
+  assert.equal(local.items[0].publishedAt, null);
+  assert.equal(local.updatedAt, Date.UTC(2026, 10, 1, 0, 10));
+  assert.equal(local.unzonedTimes, true);
+  // Its clock reading still places it among the entries of its feed; it is not an instant.
+  assert.equal(local.items[0].order, Date.UTC(2026, 10, 1, 5, 30));
+  const unknown = parseRss(
+    feed('<pubDate>2026-11-01T05:30:00</pubDate>', 'Sun, 01 Nov 2026 05:30'),
+  );
+  assert.deepEqual(
+    [unknown.items[0].publishedAt, unknown.updatedAt, unknown.unzonedTimes],
+    [null, null, true],
+  );
+  for (const zoned of [
+    'Sun, 01 Nov 2026 00:00:00 GMT',
+    'Sun, 01 Nov 2026 00:00:00 UT',
+    'Sun, 01 Nov 2026 05:30:00 +0530',
+    'Sat, 31 Oct 2026 20:00:00 EDT',
+    '2026-11-01T00:00:00Z',
+    '2026-11-01T05:30:00+05:30',
+    // The zone is not the last token: a year, an offset or a comment follows it.
+    'Sun Nov 01 00:00:00 UTC 2026',
+    'Sun Nov 01 05:30:00 GMT+05:30 2026',
+    'Sun, 01 Nov 2026 05:30:00 +0530 (IST)',
+    'Sun Nov 01 2026 05:30:00 GMT+0530 (India Standard Time)',
+    'Sun, 01 Nov 2026 05:00:00 +05',
+    '2026-11-01 05:30:00 +0530',
+    'Sun, 01 Nov 2026 05:30:00 (IST) +0530',
+    'Sun, 01 Nov 2026 5:30:00 AM+0530',
+  ]) {
+    const parsed = parseRss(feed('', zoned));
+    assert.equal(parsed.items[0].publishedAt, Date.UTC(2026, 10, 1), zoned);
+    assert.equal(parsed.items[0].order, Date.UTC(2026, 10, 1), zoned);
+    assert.equal(parsed.unzonedTimes, false, zoned);
+  }
+  // A zone named only in a comment is skipped by the date parser, so the time has no zone.
+  for (const comment of [
+    'Sun Nov 01 2026 05:30:00 (IST)',
+    'Sun Nov 01 2026 05:30:00 (GMT+0530)',
+    'Sun Nov 01 2026 05:30:00 ((IST) GMT)',
+    'Sun Nov 01 2026 05:30:00 (IST GMT',
+    '(00:00 GMT) Sun Nov 01 2026 05:30:00',
+  ]) {
+    const parsed = parseRss(feed('', comment));
+    assert.deepEqual(
+      [parsed.items[0].publishedAt, parsed.items[0].order, parsed.unzonedTimes],
+      [null, Date.UTC(2026, 10, 1, 5, 30), true],
+      comment,
+    );
+  }
+  // An unreadable time still fails closed.
+  assert.throws(() => parseRss(feed('', 'Sun, 01 Nov 2026 05:30:00 IST')), /publication time/);
+});
+
+test('a feed time is read the same in every server time zone: an instant only when it names its zone', () => {
+  const feed = (published: string) =>
+    `<rss><channel><item><link>https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=1</link><pubDate>${published}</pubDate></item></channel></rss>`;
+  const forms = [
+    'Sat, 07 Nov 2026 15:30:00 GMT',
+    'Sat, 07 Nov 2026 15:30:00 UT',
+    'Sat, 07 Nov 2026 15:30:00 Z',
+    'Sat, 07 Nov 2026 15:30:00 +0530',
+    'Sat, 07 Nov 2026 15:30:00 +05:30',
+    'Sat, 07 Nov 2026 15:30:00 +05',
+    'Sat, 07 Nov 2026 15:30:00 -07',
+    'Sat, 07 Nov 2026 15:30:00+0530',
+    'Sat, 07 Nov 2026 15:30:00 EDT',
+    'Sat, 07 Nov 2026 15:30:00 PST',
+    'Sat, 07 Nov 2026 15:30 GMT',
+    'Sat, 07 Nov 2026 15:30:00 GMT+5:30',
+    'Sat Nov 07 15:30:00 UTC 2026',
+    'Sat Nov 07 15:30:00 GMT+05:30 2026',
+    'Sat Nov 07 15:30:00 GMT+0530 2026',
+    'Sat Nov 07 2026 15:30:00 +0530 (IST)',
+    'Sat Nov 07 2026 15:30:00 GMT+0530 (India Standard Time)',
+    'Sat Nov 07 2026 15:30:00 GMT (comment)',
+    'Sat Nov 07 2026 15:30:00 UTC+5',
+    '15:30:00 Nov 07 2026 -0500',
+    '07 Nov 2026 03:30:00 PM +0530',
+    '11/07/2026 15:30:00 GMT+0530',
+    '2026-11-07T15:30:00Z',
+    '2026-11-07T15:30:00.123+05:30',
+    '2026-11-07T15:30:00+0530',
+    '2026-11-07 15:30:00 UTC',
+    'Sat Nov 07 2026 15:30:00 (IST) +0530',
+    'Sat Nov 07 2026 15:30:00 (a (nested) comment) GMT',
+    '07 Nov 2026 03:30:00 PM+0530',
+    // No zone: the instant is unknown everywhere, and the ordering key is the clock reading.
+    'Sat, 07 Nov 2026 15:30:00',
+    'Sat, 07 Nov 2026 15:30',
+    'Sat, 07 Nov 2026 15:30:00 ',
+    'Sat Nov 07 15:30:00 2026',
+    'Sat Nov 07 2026 15:30:00 (IST)',
+    'Sat Nov 07 2026 15:30:00 (UTC+05:30)',
+    'Sat Nov 07 2026 15:30:00 (+0530)',
+    'Sat Nov 07 2026 15:30:00 (IST GMT',
+    '(12:00 GMT) Sat Nov 07 2026 15:30:00',
+    '15:30:00 07-Nov-2026',
+    '15:30:00 2026-11-07',
+    '07 Nov 2026 03:30:00 PM',
+    '11/07/2026 15:30:00',
+    '15:30:00 Nov 07 2026',
+    '2026-11-07T15:30:00',
+    '2026-11-07 15:30:00',
+  ];
+  const original = process.env.TZ;
+  const read = (zone: string) => {
+    process.env.TZ = zone;
+    return forms.map((form) => parseRss(feed(form)).items[0]);
+  };
+  try {
+    const utc = read('UTC');
+    for (const zone of ['Asia/Kolkata', 'America/New_York', 'Pacific/Auckland'])
+      assert.deepEqual(read(zone), utc, zone);
+    for (const [index, item] of utc.entries()) {
+      const zoned = index < forms.indexOf('Sat, 07 Nov 2026 15:30:00');
+      assert.equal(item.publishedAt !== null, zoned, forms[index]);
+      // In UTC a time without a zone parses to its own clock reading: that is its ordering key.
+      if (!zoned) assert.equal(item.order, Date.UTC(2026, 10, 7, 15, 30), forms[index]);
+      else assert.equal(item.order, item.publishedAt, forms[index]);
+    }
+    // A date alone names no zone either; it orders by its day in every server zone.
+    for (const zone of ['UTC', 'Asia/Kolkata', 'America/New_York']) {
+      process.env.TZ = zone;
+      for (const day of ['2026-11-07', 'Sat, 07 Nov 2026'])
+        assert.deepEqual(
+          parseRss(feed(day)).items[0],
+          {
+            url: parseRss(feed(day)).items[0].url,
+            publishedAt: null,
+            order: Date.UTC(2026, 10, 7),
+          },
+          `${day} in ${zone}`,
+        );
+    }
+  } finally {
+    if (original === undefined) delete process.env.TZ;
+    else process.env.TZ = original;
+  }
+});
+
+test('feed entries are ordered newest first; times without a zone order one feed, mixed or missing times do not', () => {
+  const entry = (id: number, published?: string) =>
+    `<item><link>https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=${id}</link>${published === undefined ? '' : `<pubDate>${published}</pubDate>`}</item>`;
+  const order = (...entries: string[]) => {
+    const { items, certain } = newestFirst(
+      parseRss(`<rss><channel>${entries.join('')}</channel></rss>`).items,
+    );
+    return [items.map((item) => Number(item.url.split('=')[1])), certain];
+  };
+  assert.deepEqual(
+    order(
+      entry(1, 'Sun, 01 Nov 2026 03:00:00 GMT'),
+      entry(2, 'Sun, 01 Nov 2026 05:00:00 GMT'),
+      entry(3, 'Sun, 01 Nov 2026 04:00:00 GMT'),
+    ),
+    [[2, 3, 1], true],
+  );
+  // Zone-less times of one feed share a zone, so their clock readings order them.
+  assert.deepEqual(
+    order(
+      entry(1, 'Sun, 01 Nov 2026 03:00:00'),
+      entry(2, 'Sun, 01 Nov 2026 05:00:00'),
+      entry(3, 'Sat, 31 Oct 2026 23:00:00'),
+    ),
+    [[2, 1, 3], true],
+  );
+  // An entry without a time follows the dated ones in feed order; the order is then uncertain.
+  assert.deepEqual(order(entry(1), entry(2, 'Sun, 01 Nov 2026 05:00:00 GMT'), entry(3)), [
+    [2, 1, 3],
+    false,
+  ]);
+  // A clock reading cannot be compared with an instant.
+  assert.equal(
+    order(entry(1, 'Sun, 01 Nov 2026 03:00:00'), entry(2, 'Sun, 01 Nov 2026 05:00:00 GMT'))[1],
+    false,
+  );
+  assert.deepEqual(newestFirst([]), { items: [], certain: true });
+});
+
+test('the deprecated CAP 1.0 certainty "Very Likely" is read as Likely, not rejected', () => {
+  const veryLikely = (body: string) =>
+    body.replace('<certainty>Likely</certainty>', '<certainty>Very Likely</certainty>');
+  assert.deepEqual(parseCap(veryLikely(xml()), NOW), parseCap(xml(), NOW));
+  // An escalating Update that uses it still supersedes the original it references.
+  const refs = '<references>test-authority,fixture-1,2026-11-01T00:00:00Z</references>';
+  const update = parseCap(
+    veryLikely(xml(info(), refs))
+      .replace('<identifier>fixture-1</identifier>', '<identifier>fixture-2</identifier>')
+      .replace('<msgType>Alert</msgType>', '<msgType>Update</msgType>'),
+    NOW,
+  );
+  assert.equal(update.infos[0].certainty, 'Likely');
+  assert.deepEqual(
+    activeCapRecords([parseCap(xml(), NOW), update], NOW).map((d) => d.identifier),
+    ['fixture-2'],
+  );
+  for (const value of ['very likely', 'VeryLikely', 'Very  Likely'])
+    assert.throws(() =>
+      parseCap(
+        xml().replace('<certainty>Likely</certainty>', `<certainty>${value}</certainty>`),
+        NOW,
+      ),
+    );
+});
+
+test('a Cancel or Update whose information ends at its issue time still withdraws the original', () => {
+  const original = parseCap(xml(), NOW);
+  const refs = '<references>test-authority,fixture-1,2026-11-01T00:00:00Z</references>';
+  const sent = '2026-11-01T00:30:00Z';
+  const message = (type: string, body: string) =>
+    parseCap(
+      xml(body, refs)
+        .replace('<identifier>fixture-1</identifier>', `<identifier>${type}-1</identifier>`)
+        .replace('<msgType>Alert</msgType>', `<msgType>${type}</msgType>`)
+        .replace('<sent>2026-11-01T00:00:00Z</sent>', `<sent>${sent}</sent>`),
+      NOW,
+    );
+  const endsNow = info().replace('2026-11-01T03:00:00Z', sent);
+  for (const cancel of [
+    message('Cancel', endsNow),
+    // Effective time defaults to the issue time, so this information also ends as it starts.
+    message('Cancel', endsNow.replace('<effective>2026-11-01T00:00:00Z</effective>', '')),
+    message('Cancel', info().replace('2026-11-01T03:00:00Z', '2026-11-01T00:29:30Z')),
+  ])
+    assert.deepEqual(activeCapRecords([original, cancel], NOW), []);
+  // An Update that ends one area now and extends another replaces the original.
+  const update = message(
+    'Update',
+    endsNow + info().replace('2026-11-01T03:00:00Z', '2026-11-01T06:00:00Z'),
+  );
+  const active = activeCapRecords([original, update], NOW);
+  assert.deepEqual(
+    active.map((d) => [d.identifier, d.infos.map((i) => i.expires)]),
+    [['Update-1', [Date.UTC(2026, 10, 1, 6)]]],
+  );
+  // An Update's information that ends before it starts, or by its issue time, is never current.
+  const inverted = message(
+    'Update',
+    info().replace('2026-11-01T03:00:00Z', '2026-10-31T03:00:00Z'),
+  );
+  assert.deepEqual(activeCapRecords([original, inverted], NOW), []);
+  // Still unexpired on this clock, but issued (slightly ahead of it) after its own expiry.
+  const aheadAt = '<sent>2026-11-01T01:04:00Z</sent>';
+  const endsBeforeIssue = info().replace('2026-11-01T03:00:00Z', '2026-11-01T01:02:00Z');
+  const issuedAhead = parseCap(
+    xml(endsBeforeIssue, refs)
+      .replace('<identifier>fixture-1</identifier>', '<identifier>ahead-1</identifier>')
+      .replace('<msgType>Alert</msgType>', '<msgType>Update</msgType>')
+      .replace('<sent>2026-11-01T00:00:00Z</sent>', aheadAt),
+    NOW,
+  );
+  assert.deepEqual(activeCapRecords([issuedAhead], NOW), []);
+  assert.deepEqual(upcomingCapRecords([inverted, issuedAhead], NOW), []);
+});
+
+test('an original Alert whose expiry is not after its issue and effective times is rejected, never read as a warning that is not shown', () => {
+  const ends = (expires: string) => info().replace('2026-11-01T03:00:00Z', expires);
+  for (const source of [
+    // A mistyped date: the warning "expires" the day before it was issued.
+    xml(ends('2026-10-31T03:00:00Z')),
+    xml(ends('2026-11-01T00:00:00Z')),
+    // After the issue time, but not after a later effective time.
+    xml(ends('2026-11-01T02:00:00Z')).replace(
+      '<effective>2026-11-01T00:00:00Z</effective>',
+      '<effective>2026-11-01T02:30:00Z</effective>',
+    ),
+    // Unexpired on this clock, but issued after its own expiry.
+    xml(ends('2026-11-01T01:02:00Z')).replace(
+      '<sent>2026-11-01T00:00:00Z</sent>',
+      '<sent>2026-11-01T01:04:00Z</sent>',
+    ),
+  ])
+    assert.throws(() => parseCap(source, NOW), /validity interval/);
+  // The same information in a Cancel or an Update is valid CAP: it ends the warning it references.
+  const refs = '<references>test-authority,fixture-1,2026-11-01T00:00:00Z</references>';
+  for (const type of ['Cancel', 'Update'])
+    assert.equal(
+      parseCap(
+        xml(ends('2026-10-31T03:00:00Z'), refs).replace(
+          '<msgType>Alert</msgType>',
+          `<msgType>${type}</msgType>`,
+        ),
+        NOW,
+      ).infos[0].expires,
+      Date.UTC(2026, 9, 31, 3),
+    );
+});
+
+test('information that takes effect later is upcoming, never current, and an Update waits for it', () => {
+  const effectiveAt = (body: string, effective: string, expires = '2026-11-01T12:00:00Z') =>
+    body
+      .replace('<effective>2026-11-01T00:00:00Z</effective>', `<effective>${effective}</effective>`)
+      .replace('2026-11-01T03:00:00Z', expires);
+  const advance = parseCap(
+    xml(effectiveAt(info(), '2026-11-01T06:00:00Z')).replace('fixture-1<', 'advance-1<'),
+    NOW,
+  );
+  assert.deepEqual(activeCapRecords([advance], NOW), []);
+  assert.deepEqual(
+    upcomingCapRecords([advance], NOW).map((d) => d.identifier),
+    ['advance-1'],
+  );
+  assert.equal(activeCapRecords([advance], Date.UTC(2026, 10, 1, 6)).length, 1);
+  assert.deepEqual(upcomingCapRecords([advance], Date.UTC(2026, 10, 1, 6)), []);
+  assert.equal(
+    upcomingCapNote([Date.UTC(2026, 10, 1, 9), Date.UTC(2026, 10, 1, 6)], 'matched bulletin(s)'),
+    ' 2 matched bulletin(s) take effect later and are not listed as current warnings yet; the earliest takes effect at 2026-11-01T06:00:00.000Z.',
+  );
+  assert.equal(upcomingCapNote([], 'matched bulletin(s)'), '');
+  // A future-effective Update leaves the original current until the Update takes effect.
+  const original = parseCap(xml(), NOW);
+  const refs = '<references>test-authority,fixture-1,2026-11-01T00:00:00Z</references>';
+  const reissue = (type: string) =>
+    parseCap(
+      xml(effectiveAt(info(), '2026-11-01T02:00:00Z'), refs)
+        .replace('fixture-1<', `${type}-1<`)
+        .replace('<msgType>Alert</msgType>', `<msgType>${type}</msgType>`),
+      NOW,
+    );
+  const update = reissue('Update');
+  assert.equal(capReferencesInForce(update, NOW), false);
+  assert.deepEqual(
+    activeCapRecords([original, update], NOW).map((d) => d.identifier),
+    ['fixture-1'],
+  );
+  assert.deepEqual(
+    upcomingCapRecords([original, update], NOW).map((d) => d.identifier),
+    ['Update-1'],
+  );
+  const effective = Date.UTC(2026, 10, 1, 2);
+  assert.equal(capReferencesInForce(update, effective), true);
+  assert.deepEqual(
+    activeCapRecords([original, update], effective).map((d) => d.identifier),
+    ['Update-1'],
+  );
+  // A Cancel withdraws at once, whatever time its information states.
+  const cancel = reissue('Cancel');
+  assert.equal(capReferencesInForce(cancel, NOW), true);
+  assert.deepEqual(activeCapRecords([original, cancel], NOW), []);
+  assert.deepEqual(upcomingCapRecords([original, cancel], NOW), []);
+});
+
+test('a long area list keeps whole leading names and states how many more the bulletin names', () => {
+  const areas = (names: string[]) =>
+    names.map((description) => ({ description, polygons: [], circles: [], geocodes: [] }));
+  // Up to the 4,000-character bound the names are joined unchanged.
+  const exact = areas(['x'.repeat(1998), 'y'.repeat(2000)]);
+  assert.equal(capAreaText(exact), `${'x'.repeat(1998)}; ${'y'.repeat(2000)}`);
+  assert.equal(
+    capAreaText(areas(['x'.repeat(1999), 'y'.repeat(2000)])),
+    `${'x'.repeat(1999)} … [1 more area(s) named in the official bulletin]`,
+  );
+  // 100 block names (about 4,900 characters) with Howrah last: never cut mid-name or silently.
+  const blocks = Array.from({ length: 100 }, (_, i) =>
+    i === 99
+      ? 'Block 100, Howrah district'
+      : `Block ${i + 1}, Purba Medinipur district, West Bengal`,
+  );
+  const text = capAreaText(areas(blocks));
+  assert.ok(text.length <= CAP_AREA_TEXT_LIMIT, String(text.length));
+  const [shown, note] = text.split(' … ');
+  const kept = shown.split('; ');
+  assert.deepEqual(kept, blocks.slice(0, kept.length));
+  assert.ok(kept.length > 60 && kept.length < 100, String(kept.length));
+  assert.equal(note, `[${100 - kept.length} more area(s) named in the official bulletin]`);
+  // A single name longer than the bound is shortened at a word, and says so.
+  const long = capAreaText(areas([`${'Village '.repeat(700)}end`, 'Howrah']));
+  assert.ok(long.length <= CAP_AREA_TEXT_LIMIT, String(long.length));
+  assert.match(
+    long,
+    /^Village(?: Village)* … \[area text shortened; 1 more area\(s\); see the official bulletin\]$/,
+  );
+  assert.equal(capAreaText([]), '');
 });

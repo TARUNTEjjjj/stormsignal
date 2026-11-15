@@ -1,4 +1,4 @@
-import type { Place, Hour, ModelForecast } from './types';
+import type { Place, Hour, ModelForecast } from './types.ts';
 export const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 export function value(n: number | null | undefined, digits = 0) {
   return finite(n) ? n.toFixed(digits) : '—';
@@ -38,6 +38,72 @@ export function localTime(
   } catch {
     return timeFormatter('UTC', options).format(time);
   }
+}
+const WARNING_TIME: Intl.DateTimeFormatOptions = {
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZoneName: 'short',
+};
+/**
+ * Official warning times always name their zone. They are read beside the viewer's own clock while
+ * another place is selected, and a repeated daylight-saving hour must stay distinct.
+ */
+export function warningTime(time: number, timezone = 'UTC', withYear = false) {
+  return localTime(time, timezone, withYear ? { ...WARNING_TIME, year: 'numeric' } : WARNING_TIME);
+}
+/** Displayed area text keeps to the bound that saved briefings also apply. */
+export const AREA_TEXT_LIMIT = 4000;
+/**
+ * Join the area names of a warning for display. A list longer than the bound keeps whole leading
+ * names and states how many more the official bulletin names, so a later area is never cut off
+ * silently. The warning gateway (CAP areas) and the browser (NWS area lists) both use it.
+ */
+export function areaNamesText(names: string[], limit = AREA_TEXT_LIMIT): string {
+  const all = names.join('; ');
+  if (all.length <= limit) return all;
+  const more = (count: number) => ` … [${count} more area(s) named in the official bulletin]`;
+  let shown = 0,
+    length = -2;
+  while (
+    shown < names.length &&
+    length + 2 + names[shown].length + more(names.length - shown - 1).length <= limit
+  )
+    length += 2 + names[shown++].length;
+  if (shown) return names.slice(0, shown).join('; ') + more(names.length - shown);
+  // The first name alone is longer than the bound: shorten it at a word and say so.
+  const rest = names.length - 1;
+  const note = ` … [area text shortened${rest ? `; ${rest} more area(s)` : ''}; see the official bulletin]`;
+  const head = names[0].slice(0, limit - note.length);
+  return (head.lastIndexOf(' ') > 0 ? head.slice(0, head.lastIndexOf(' ')) : head) + note;
+}
+/**
+ * How far a device clock is from the warning service's, as "about 12 minutes ahead of" or "about
+ * 3 hours behind" (`clockOffset` is the device clock minus the service's, in milliseconds). Empty
+ * when they differ by less than five minutes, which needs no remark.
+ */
+export function clockDifference(clockOffset: number | undefined): string {
+  if (!finite(clockOffset) || Math.abs(clockOffset) < 5 * 60_000) return '';
+  const minutes = Math.round(Math.abs(clockOffset) / 60_000);
+  const amount =
+    minutes < 120
+      ? `${minutes} minutes`
+      : minutes < 48 * 60
+        ? `${Math.round(minutes / 60)} hours`
+        : `${Math.round(minutes / 1440)} days`;
+  return `about ${amount} ${clockOffset > 0 ? 'ahead of' : 'behind'}`;
+}
+/**
+ * What to tell the viewer of a live warning check made with such a clock; otherwise nothing.
+ * Warnings are still listed by the service's clock, but official times will not match what the
+ * device shows as the current time.
+ */
+export function clockNotice(clockOffset: number | undefined): string {
+  const difference = clockDifference(clockOffset);
+  return difference
+    ? `This device’s clock is ${difference} the warning service’s clock. Warnings are listed by the service’s clock, so none is dropped early or kept late. Compare official times with a correct clock, and check this device’s date and time.`
+    : '';
 }
 export function age(time: number, now = Date.now()) {
   if (!finite(time)) return 'Unknown age';

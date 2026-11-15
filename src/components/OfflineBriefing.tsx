@@ -10,8 +10,10 @@ import {
   clearBriefings,
   createBriefing,
   loadBriefings,
+  pastStatedExpiry,
   removeBriefing,
   saveBriefing,
+  savedClockNote,
   type BriefingResult,
   type OfflineBriefingData,
 } from '../offline';
@@ -71,6 +73,7 @@ export default function OfflineBriefing({
     setSelectedId(matching?.id || saved.briefings[0]?.id || '');
   }, [place.latitude, place.longitude, saved.briefings]);
   const selected = saved.briefings.find((item) => item.id === selectedId) || saved.briefings[0];
+  const clockNote = selected ? savedClockNote(selected) : '';
   const fresh =
     !!forecast && now - forecast.fetchedAt <= 3_600_000 && forecast.fetchedAt <= now + 300_000;
   const currentAvailable = canSave && !offline && fresh;
@@ -255,8 +258,11 @@ export default function OfflineBriefing({
               <div>
                 <strong>SAVED COPY · CURRENT STATUS UNKNOWN</strong>
                 <p>
-                  {age(selected.savedAt, now)} · saved {stamp(selected.savedAt)}. Conditions and
-                  warnings may have changed or been cancelled.{' '}
+                  {selected.savedAt > now + 300_000
+                    ? 'Saved later than this device clock now reads (check the device time)'
+                    : age(selected.savedAt, now)}{' '}
+                  · saved {stamp(selected.savedAt)}. Conditions and warnings may have changed or
+                  been cancelled.{' '}
                   {now - selected.savedAt > 24 * 3_600_000
                     ? 'This briefing is over a day old and is for historical reference only.'
                     : 'Do not use this as an all-clear.'}
@@ -363,6 +369,7 @@ export default function OfflineBriefing({
                   ? 'The warning feed was not verified when saved.'
                   : `Feed retrieved ${stamp(selected.warnings.fetchedAt)}. This is not a new check.`}
               </p>
+              {clockNote && <p>{clockNote}</p>}
               {!selected.warnings.alerts.length && (
                 <p className="briefing-warning">
                   No warning text was saved. Missing or unsupported warnings do not mean no danger.
@@ -372,7 +379,9 @@ export default function OfflineBriefing({
                 <details key={alert.id} className="briefing-alert">
                   <summary>
                     {alert.event} · {alert.severity} ·{' '}
-                    {alert.expires <= now ? 'Past stated expiry' : 'Saved; not verified now'}
+                    {pastStatedExpiry(selected, alert, now)
+                      ? 'Past stated expiry'
+                      : 'Saved; not verified now'}
                   </summary>
                   <h5>{alert.title}</h5>
                   <p>{alert.area}</p>

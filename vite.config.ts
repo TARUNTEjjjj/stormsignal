@@ -14,12 +14,27 @@ import { stageResourceExplorer } from './scripts/stage-resource-explorer.mjs';
 const offlineShell = {
   name: 'stormsignal-offline-shell',
   async closeBundle() {
-    const release = await readAppRelease(process.cwd(), {project:'stormsignal',
-      sourcePaths:['src','public','resources','server','index.html','vite.config.ts','package.json','package-lock.json','scripts'],
-      ignorePaths:['public/resources']});
-    await stageResourceExplorer(process.cwd(), 'dist/resources', {release});
+    const release = await readAppRelease(process.cwd(), {
+      project: 'stormsignal',
+      sourcePaths: [
+        'src',
+        'public',
+        'resources',
+        'server',
+        'index.html',
+        'vite.config.ts',
+        'package.json',
+        'package-lock.json',
+        'scripts',
+      ],
+      ignorePaths: ['public/resources'],
+    });
+    await stageResourceExplorer(process.cwd(), 'dist/resources', { release });
     for (const file of ['index.html', 'preparedness.html', 'offline.html'])
-      await writeFile(`dist/${file}`, stampAppVersion(await readFile(`dist/${file}`, 'utf8'), release));
+      await writeFile(
+        `dist/${file}`,
+        stampAppVersion(await readFile(`dist/${file}`, 'utf8'), release),
+      );
     const manifest: Manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
     const critical = new Set<string>();
     const visited = new Set<string>();
@@ -47,10 +62,17 @@ const offlineShell = {
     await writeFile(
       'dist/sw.js',
       worker
-        .replace("const APP_VERSION = 'development';", `const APP_VERSION=${JSON.stringify(release.version)};`)
-        .replace('/* APP_UPDATE_PROTOCOL */', workerUpdateProtocolSource({
-          readyExpression:'(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)',
-        }))
+        .replace(
+          "const APP_VERSION = 'development';",
+          `const APP_VERSION=${JSON.stringify(release.version)};`,
+        )
+        .replace(
+          '/* APP_UPDATE_PROTOCOL */',
+          workerUpdateProtocolSource({
+            readyExpression:
+              '(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)',
+          }),
+        )
         .replace(
           /const VERSION\s*=\s*['"]stormsignal-v1['"];?/,
           `const VERSION='stormsignal-${version}';`,
@@ -61,7 +83,12 @@ const offlineShell = {
           `const OPTIONAL_ASSETS=${JSON.stringify(optional)};`,
         ),
     );
-    await writeAppVersion('dist', release, {workers:[{scope:'/',script:'/sw.js'},{scope:'/resources/',script:'/resources/offline-worker.js'}]});
+    await writeAppVersion('dist', release, {
+      workers: [
+        { scope: '/', script: '/sw.js' },
+        { scope: '/resources/', script: '/resources/offline-worker.js' },
+      ],
+    });
     console.log(
       `Offline shell: ${files.length} critical assets; ${optional.length} optional assets left on demand.`,
     );
@@ -74,14 +101,21 @@ export default defineConfig({
     {
       name: 'official-warning-api',
       configureServer(server) {
-        server.middlewares.use('/api/alerts', async (req, res) => {
-          const result = await handleAlerts(
-            new Request(`http://localhost/api/alerts${req.url === '/' ? '' : req.url}`, {
-              method: req.method,
-            }),
-          );
-          res.writeHead(result.status, Object.fromEntries(result.headers));
-          res.end(Buffer.from(await result.arrayBuffer()));
+        server.middlewares.use('/api/alerts', async (req, res, next) => {
+          // Connect ignores the promise returned here, so a failure must reach the dev server's
+          // error handler through next(). Left as an unhandled rejection it ends `npm run dev`:
+          // the Request constructor throws for TRACE, which Node's HTTP parser accepts.
+          try {
+            const result = await handleAlerts(
+              new Request(`http://localhost/api/alerts${req.url === '/' ? '' : req.url}`, {
+                method: req.method,
+              }),
+            );
+            res.writeHead(result.status, Object.fromEntries(result.headers));
+            res.end(Buffer.from(await result.arrayBuffer()));
+          } catch (error) {
+            next(error);
+          }
         });
       },
     },

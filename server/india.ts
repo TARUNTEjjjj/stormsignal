@@ -9,7 +9,7 @@ import {
   upcomingCapRecords,
   type CapDocument,
 } from './cap.ts';
-import { requestText } from './http.ts';
+import { LIVE_TTL_MS, requestText } from './http.ts';
 
 const BASE = 'https://sachet.ndma.gov.in/cap_public_website/';
 const OFFICIAL = 'https://sachet.ndma.gov.in/';
@@ -139,7 +139,7 @@ export async function fetchIndiaAlerts(
         remove = () => controller.signal.removeEventListener('abort', stop);
       });
       return await Promise.race([
-        get(url, { maxBytes: 256_000, ttlMs: 60_000, signal: controller.signal }),
+        get(url, { maxBytes: 256_000, ttlMs: LIVE_TTL_MS, signal: controller.signal }),
         interrupted,
       ]);
     } finally {
@@ -257,7 +257,7 @@ export async function fetchIndiaAlerts(
       feedUpdatedAt: feed.updatedAt,
       upcomingDocuments: upcoming.length,
       ...(upcoming.length ? { upcomingAt: Math.min(...upcoming) } : {}),
-      coverage: `Regional ${region.name} feed; each warning applies only to its stated area, not automatically to ${place.name}. Up to 10 recent source entries are checked; this rolling feed is incomplete and does not establish local coverage or an all-clear.${oldFeed ? ` ${publication} Current regional coverage is unverified; check the authority directly.` : ''}${feed.unzonedTimes && feed.updatedAt !== null ? ' Some feed publication times have no time zone; they only set the order in which entries are read.' : ''}${unordered ? ' Some feed entries have no usable publication time, so the entries checked may not be the most recent.' : ''}${failures ? ` ${failures} warning detail request(s) could not be verified.` : ''}${missingExpiry ? ` ${missingExpiry} record(s) have no stated expiry and were not treated as current warnings.` : ''}${upcomingCapNote(upcoming, 'regional bulletin(s)')}${feed.truncated || feed.items.length > 10 ? ' Additional feed entries were not checked.' : ''}${omittedAlerts ? ` ${omittedAlerts} additional warning text(s) were not included in this response.` : ''}`,
+      coverage: `Regional ${region.name} feed; each warning applies only to its stated area, not automatically to ${place.name}. Up to 10 recent source entries are checked; this rolling feed is incomplete and does not establish local coverage or an all-clear.${oldFeed ? ` ${publication} Current regional coverage is unverified; check the authority directly.` : ''}${feed.unzonedTimes && feed.updatedAt !== null ? ' Some feed publication times have no time zone; they only set the order in which entries are read.' : ''}${unordered ? ' Some feed entries have no usable publication time, so the entries checked may not be the most recent.' : ''}${failures ? ` ${failures} warning detail request(s) could not be verified.` : ''}${missingExpiry ? ` ${missingExpiry} record(s) have no stated expiry and were not treated as current warnings.` : ''}${upcomingCapNote(upcoming, 'regional bulletin(s)')}${feed.items.length > 10 ? ' Additional feed entries were not checked.' : ''}${omittedAlerts ? ` ${omittedAlerts} additional warning text(s) were not included in this response.` : ''}`,
     };
   } finally {
     clearTimeout(timeout);

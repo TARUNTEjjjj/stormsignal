@@ -42,12 +42,14 @@ const DisasterWatch = lazy(() => import('./components/DisasterWatch'));
 import OfflineBriefing from './components/OfflineBriefing';
 import AtmosphereScene from './components/AtmosphereScene';
 import ForecastExplorer from './components/ForecastExplorer';
+import { forecastWindow } from './forecast-chart';
 import OptionalPanel from './components/OptionalPanel';
 import {
   CONNECTION_KEY,
   readConnectionMode,
   networkPolicy,
   alertCheckIsRecent,
+  alertToggleDisabled,
   startClock,
   unexpiredAlerts,
   type ConnectionMode,
@@ -74,10 +76,13 @@ import {
   warningTime,
   clockNotice,
 } from './presentation';
+import { MAX_SAVED_PLACES, toggleSavedPlace, outlookDayLabel, isDaylight } from './presentation';
+import { handOverUpdatePlace } from './app-update-guard';
 import type { Place, Forecast, ModelForecast, AirQuality, AlertResult, Hour } from './types';
-import { placeResourceKey, nextSearchIndex } from './place-navigation';
+import { placeResourceKey, nextSearchIndex, drawerAfterResize } from './place-navigation';
 import { focusableControls } from './focus-trap';
 import { canApplyAppUpdate, restoreUpdatePlace } from './app-update-guard';
+import { modeChoiceEndsPageAlerts, setBackgroundWork } from './background-work';
 import {
   currentResource,
   loadResource,
@@ -220,19 +225,31 @@ function useResource<T>(
   );
   return currentResource(state, key, loader, enabled);
 }
-function WeatherIcon({ code, size = 24 }: { code: number | null | undefined; size?: number }) {
+function WeatherIcon({
+  code,
+  size = 24,
+  night = false,
+}: {
+  code: number | null | undefined;
+  size?: number;
+  night?: boolean;
+}) {
+  // The icon is the only statement of the condition where it is used, so it is named.
+  const label = { role: 'img', 'aria-label': weatherLabel(code) };
   return code == null ? (
-    <CircleHelp size={size} />
+    <CircleHelp size={size} {...label} />
   ) : [71, 73, 75, 77, 85, 86].includes(code) ? (
-    <CloudSnow size={size} />
+    <CloudSnow size={size} {...label} />
   ) : code >= 95 ? (
-    <CloudLightning size={size} />
+    <CloudLightning size={size} {...label} />
   ) : code != null && code >= 51 ? (
-    <CloudRain size={size} />
+    <CloudRain size={size} {...label} />
   ) : code != null && code > 1 ? (
-    <Cloud size={size} />
+    <Cloud size={size} {...label} />
+  ) : night ? (
+    <Moon size={size} {...label} />
   ) : (
-    <Sun size={size} />
+    <Sun size={size} {...label} />
   );
 }
 function ErrorNote({ error }: { error: string | null }) {
@@ -265,8 +282,11 @@ function PanelHeader({
 
 export default function App() {
   const [place, setPlace] = useState<Place>(() => {
-    try { return restoreUpdatePlace(sessionStorage, PRESETS[0]); }
-    catch { return PRESETS[0]; }
+    try {
+      return restoreUpdatePlace(sessionStorage, PRESETS[0]);
+    } catch {
+      return PRESETS[0];
+    }
   });
   const [revision, setRevision] = useState(0);
   const [alertRevision, setAlertRevision] = useState(0);
@@ -334,18 +354,82 @@ export default function App() {
       return [];
     }
   });
+  useEffect(() => {
+    // Another window saved, removed or cleared places: list what is stored, not this copy.
+    const sync = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== 'stormsignal:places') return;
+      try {
+        setSaved(readPlaces(localStorage.getItem('stormsignal:places')));
+      } catch {
+        // Storage is blocked: keep the list this window already shows.
+      }
+    };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+  // The status message stays until it is dismissed or replaced: a timer could remove it before
+  // it is read, and its Dismiss button comes last in the Tab order.
   const [toast, setToast] = useState('');
+  const toastBox = useRef<HTMLDivElement>(null);
+  const toastShown = toast !== '';
+  useEffect(() => {
+    // While a message is shown, the page keeps room for the height it covers, and Tab scrolls a
+    // focused control above it (html:has(.toast) in styles.css). A longer message wraps onto
+    // more lines, so its height is measured.
+    const box = toastBox.current;
+    if (!box) return;
+    const root = document.documentElement.style;
+    const observer = new ResizeObserver(() =>
+      root.setProperty('--toast-height', `${box.offsetHeight}px`),
+    );
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      root.removeProperty('--toast-height');
+    };
+  }, [toastShown]);
   const [geoBusy, setGeoBusy] = useState(false);
+  // Numbers device-location requests; choosing a place supersedes the one still pending.
+  const locationRequest = useRef(0);
   const [now, setNow] = useState(Date.now());
   const [notifications, setNotifications] = useState(false);
   const [offlineStatus, setOfflineStatus] = useState('Checking offline availability');
   useEffect(() => {
-    window.appUpdateCanReload = () => {
-      try { return canApplyAppUpdate({query, searching, geoBusy, drawerOpen, notifications, place}, sessionStorage); }
-      catch { return false; }
+    // Only the updater's own reload reopens this place; any other reload opens the default.
+    const handOver = () => {
+      try {
+        handOverUpdatePlace(window.__appUpdateState, place, sessionStorage);
+      } catch {
+        // Storage is blocked: the updated page opens the default place.
+      }
     };
-    return () => { window.appUpdateCanReload = () => false; };
-  }, [query, searching, geoBusy, drawerOpen, notifications, place]);
+    window.addEventListener('pagehide', handOver);
+    return () => window.removeEventListener('pagehide', handOver);
+  }, [place]);
+  useEffect(() => {
+    window.appUpdateCanReload = () => {
+      // Without update checks (Data saver, Offline only) this window never reloads into a new
+      // release, so it must not let one take over early either: it waits for the window to close.
+      if (!policy.polling) return false;
+      try {
+        return canApplyAppUpdate(
+          { query, searching, geoBusy, drawerOpen, notifications, place },
+          sessionStorage,
+        );
+      } catch {
+        return false;
+      }
+    };
+    return () => {
+      window.appUpdateCanReload = () => false;
+    };
+  }, [query, searching, geoBusy, drawerOpen, notifications, place, policy.polling]);
+  useEffect(() => {
+    // Release checks, the resource library's GitHub check and its offline copy run only where
+    // polling is allowed: Full workspace with a connection. A mode change applies at once.
+    setBackgroundWork(policy.polling);
+    return () => setBackgroundWork(false);
+  }, [policy.polling]);
   useEffect(() => {
     if (!import.meta.env.PROD || !('serviceWorker' in navigator)) {
       setOfflineStatus('Download the kit for offline use');
@@ -379,7 +463,7 @@ export default function App() {
     navigator.serviceWorker.addEventListener('controllerchange', controllerChanged);
     timeout = setTimeout(unconfirmed, 10000);
     navigator.serviceWorker
-      .register('/sw.js', {updateViaCache: 'none'})
+      .register('/sw.js', { updateViaCache: 'none' })
       .then(() => navigator.serviceWorker.ready)
       .then((registration) => {
         if (active) confirmCache(registration.active);
@@ -421,7 +505,8 @@ export default function App() {
   const isStale = !!f && (now - f.fetchedAt > FORECAST_STALE_MS || f.fetchedAt > now + 300000);
   const outlook = getOutlook(isStale ? [] : hours, now);
   const alertsRecent = alertCheckIsRecent(alerts.data?.fetchedAt, now, policy.essentials);
-  // Expiry is judged on the clock of the source that answered, not on this device's clock.
+  // Expiry is judged on the clock of the source that answered when it states one (clockOffset),
+  // otherwise on this device's clock.
   const activeAlerts = alertsRecent ? unexpiredAlerts(alerts.data, now) : [];
   const clockWarning = clockNotice(alerts.data?.clockOffset);
   const spread = modelSpread(models.data || [], hours.slice(0, 24));
@@ -432,7 +517,11 @@ export default function App() {
   );
   const currentStale = f ? isStale || now - f.current.time > 2 * 3600000 : false;
   useEffect(() => {
-    const resize = () => setNarrow(window.innerWidth <= 800);
+    const resize = () => {
+      const isNarrow = window.innerWidth <= 800;
+      setNarrow(isNarrow);
+      setMobileNav((open) => drawerAfterResize(open, isNarrow));
+    };
     window.addEventListener('resize', resize);
     const update = () => {
       setOnline(navigator.onLine);
@@ -468,11 +557,6 @@ export default function App() {
     };
   }, [connectionMode]);
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(''), 6000);
-    return () => clearTimeout(t);
-  }, [toast]);
-  useEffect(() => {
     setSearchIndex(-1);
     setSearchError('');
     if (!policy.essentials || query.trim().length < 2) {
@@ -505,14 +589,22 @@ export default function App() {
     };
   }, [query, policy.essentials]);
   useEffect(() => {
-    const close = (e: PointerEvent) => {
+    // A press or focus outside the search area closes its results, which would cover what was
+    // pressed or focused. Focus that leaves the window lands nowhere, so they stay for its return
+    // to the search box; focus that returns anywhere else closes them. An empty list is kept:
+    // setting a new one would re-render the dashboard on every focus change.
+    const close = (e: Event) => {
       if (searchArea.current && !searchArea.current.contains(e.target as Node)) {
         setQuery('');
-        setResults([]);
+        setResults((current) => (current.length ? [] : current));
       }
     };
     document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
+    document.addEventListener('focusin', close);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('focusin', close);
+    };
   }, []);
   useEffect(() => {
     if (
@@ -552,34 +644,50 @@ export default function App() {
     alertsRecent,
   ]);
   function changeConnectionMode(mode: ConnectionMode) {
+    // Choosing the mode already in use leaves page alerts on. A real change ends them, and says so.
+    const alertsEnd = modeChoiceEndsPageAlerts(connectionMode, mode, notifications);
     setConnectionMode(mode);
     setQuery('');
-    setNotifications(false);
+    if (alertsEnd) setNotifications(false);
+    let notice = alertsEnd ? 'Page alerts turned off. Enable them again in Full workspace.' : '';
     try {
       localStorage.setItem(CONNECTION_KEY, mode);
     } catch {
-      setToast('This setting applies now, but browser storage could not remember it.');
+      const unsaved = 'This setting applies now, but browser storage could not remember it.';
+      notice = notice ? `${notice} ${unsaved}` : unsaved;
     }
+    // Messages stay until replaced, so a saved choice must also clear an earlier storage warning.
+    setToast(notice);
   }
   function selectPlace(p: Place) {
     setPlace(p);
+    // A message about the previous place ("Place saved", a location failure) no longer applies.
+    setToast('');
+    // A late answer to "Use my location" must not replace this choice.
+    locationRequest.current += 1;
+    setGeoBusy(false);
     setQuery('');
     setResults([]);
     setSearchError('');
     setMobileNav(false);
   }
   function savePlace() {
-    const next = selectedSaved
-      ? saved.filter(
-          (p) =>
-            Math.abs(p.latitude - place.latitude) >= 0.01 ||
-            Math.abs(p.longitude - place.longitude) >= 0.01,
-        )
-      : [place, ...saved].slice(0, 8);
     try {
-      localStorage.setItem('stormsignal:places', JSON.stringify(next));
-      setSaved(next);
-      setToast(selectedSaved ? 'Place removed.' : 'Place saved on this device.');
+      // Merge with what is stored now: another window may have changed the list.
+      const { places, dropped } = toggleSavedPlace(
+        localStorage.getItem('stormsignal:places'),
+        place,
+        selectedSaved,
+      );
+      localStorage.setItem('stormsignal:places', JSON.stringify(places));
+      setSaved(places);
+      setToast(
+        selectedSaved
+          ? 'Place removed.'
+          : dropped
+            ? `Place saved on this device. Up to ${MAX_SAVED_PLACES} places are kept, so the oldest (${dropped.name}) was removed.`
+            : 'Place saved on this device.',
+      );
     } catch {
       setToast('Device storage is unavailable. The place was not saved.');
     }
@@ -589,9 +697,13 @@ export default function App() {
       setToast('Location is unavailable. Search for your city instead.');
       return;
     }
+    const request = ++locationRequest.current;
     setGeoBusy(true);
+    // A new request supersedes the message about an earlier one that failed.
+    setToast('');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        if (request !== locationRequest.current) return;
         selectPlace({
           id: `geo-${pos.coords.latitude}-${pos.coords.longitude}`,
           name: 'My location',
@@ -603,6 +715,7 @@ export default function App() {
         setGeoBusy(false);
       },
       () => {
+        if (request !== locationRequest.current) return;
         setGeoBusy(false);
         setToast('Location access failed. Search for a city instead.');
       },
@@ -612,6 +725,8 @@ export default function App() {
   async function enableNotifications() {
     if (notifications) {
       setNotifications(false);
+      // Messages stay until replaced: an earlier "Alerts enabled" must not outlive the alerts.
+      setToast('Page alerts turned off.');
       return;
     }
     if (!('Notification' in window)) {
@@ -836,7 +951,9 @@ export default function App() {
               <kbd>↵</kbd>
             </form>
             {query.trim().length >= 2 && (
-              <div className="search-results" aria-live="polite">
+              // Not a Tab stop (Chrome would make this scrolling box one): arrow keys in the search
+              // box reach the options.
+              <div className="search-results" aria-live="polite" tabIndex={-1}>
                 {searching && <p>Searching places…</p>}
                 {searchError && <p>{searchError}</p>}
                 <div id="city-search-results" role="listbox" aria-label="Matching cities">
@@ -896,11 +1013,14 @@ export default function App() {
               <button
                 className="primary-button"
                 onClick={() => {
+                  if (forecast.loading) return;
                   clearRequestCache();
                   setRevision((x) => x + 1);
                   setNow(Date.now());
                 }}
-                disabled={forecast.loading || !policy.essentials}
+                // Busy, not disabled: a disabled button would drop keyboard focus to the page.
+                disabled={!policy.essentials}
+                aria-disabled={forecast.loading || undefined}
               >
                 <RefreshCw size={15} className={forecast.loading ? 'spin' : ''} />
                 {forecast.loading ? 'Updating' : 'Refresh data'}
@@ -1039,8 +1159,9 @@ export default function App() {
                       <CloudRain size={17} />
                       <span>
                         Precipitation
+                        {/* Open-Meteo sums current precipitation over the preceding 15 minutes. */}
                         <strong>
-                          {value(f?.current.precipitation, 1)} <small>mm</small>
+                          {value(f?.current.precipitation, 1)} <small>mm · last 15 min</small>
                         </strong>
                       </span>
                     </div>
@@ -1078,15 +1199,19 @@ export default function App() {
                                 {localTime(hour.time, tz, { day: '2-digit', month: 'short' })}
                               </small>
                             </time>
-                            <WeatherIcon code={hour.code} size={24} />
+                            <WeatherIcon
+                              code={hour.code}
+                              size={24}
+                              night={!isDaylight(hour.time, place.latitude, place.longitude)}
+                            />
                             <strong>
                               {value(hour.temperature)}
                               <small>°C</small>
                             </strong>
                             <span>
                               {finite(hour.probability)
-                                ? `${value(hour.probability)}% rain`
-                                : 'Rain chance —'}
+                                ? `${value(hour.probability)}% precip.`
+                                : 'Precip. chance —'}
                             </span>
                           </div>
                         ))}
@@ -1130,7 +1255,12 @@ export default function App() {
                       </PanelHeader>
                       <p className="forecast-context">Model estimates · {tz}</p>
                       {hours.length ? (
-                        <ForecastExplorer key={place.id} hours={hours} models={[]} timezone={tz} />
+                        <ForecastExplorer
+                          key={place.id}
+                          hours={forecastWindow(hours, 24)}
+                          models={[]}
+                          timezone={tz}
+                        />
                       ) : (
                         <div className="empty-state">
                           <Activity size={30} />
@@ -1217,20 +1347,7 @@ export default function App() {
                     <div className="daily-list">
                       {f?.days.map((day, i) => (
                         <div className="day-row" key={day.time}>
-                          <span>
-                            {localTime(day.time, tz, {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                            }) ===
-                            localTime(now, tz, {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                            })
-                              ? 'Today'
-                              : localTime(day.time, tz, { weekday: 'short' })}
-                          </span>
+                          <span>{outlookDayLabel(day.time, tz, now)}</span>
                           <WeatherIcon code={day.code} size={20} />
                           <span className="day-rain">
                             <Droplets size={11} />
@@ -1422,12 +1539,7 @@ export default function App() {
                     <button
                       className="quiet-button"
                       onClick={enableNotifications}
-                      disabled={
-                        alerts.data?.status !== 'available' ||
-                        alerts.data.partial ||
-                        alerts.data.scope !== 'point' ||
-                        !policy.polling
-                      }
+                      disabled={alertToggleDisabled(notifications, alerts.data, policy.polling)}
                     >
                       <Bell size={14} />
                       {notifications ? 'Disable alerts' : 'Enable page alerts'}
@@ -1473,11 +1585,13 @@ export default function App() {
                   </p>
                   {hazards.length ? (
                     <div className="hazard-list">
-                      {hazards.slice(0, 4).map((h) => (
+                      {hazards.map((h) => (
                         <div className={`hazard-item ${h.level}`} key={h.kind}>
                           <span className="hazard-symbol">
                             {h.kind === 'rain' ? (
                               <CloudRain size={18} />
+                            ) : h.kind === 'snow' ? (
+                              <CloudSnow size={18} />
                             ) : h.kind === 'wind' ? (
                               <Wind size={18} />
                             ) : h.kind === 'thunder' ? (
@@ -1637,18 +1751,22 @@ export default function App() {
                   Model disagreement is not a probability of danger.
                 </p>
                 <p>
-                  Elevated / high screening thresholds: hourly rain 5 / 15 mm; wind gusts 50 / 75
-                  km/h; feels-like temperature 35 / 40 °C; air temperature −5 / −15 °C; UV index 6 /
-                  8. Thunderstorm forecast code 95 is elevated; codes 96, 97 and 99 are high. These are
-                  application indicators, not official warning levels or safe limits.
+                  Elevated / high screening thresholds: hourly precipitation 5 / 15 mm (rain,
+                  showers and snow as liquid water; a separate snow signal when the hour's forecast
+                  code is snow); wind gusts 50 / 75 km/h; feels-like temperature 35 / 40 °C; air
+                  temperature −5 / −15 °C; UV index 6 / 8. Thunderstorm forecast code 95 is
+                  elevated; codes 96, 97 and 99 are high. These are application indicators, not
+                  official warning levels or safe limits.
                 </p>
                 <p>
                   City search uses GeoNames via Open-Meteo. Searches, selected coordinates, and your
                   IP address are sent to the relevant weather, imagery, geocoding, and map
-                  providers. Device location is requested only when you choose it. Saved places and
-                  checklist progress stay in this browser. No accounts, ads, or analytics. Interface
-                  uses system fonts without font downloads. Offline briefings and emergency plans
-                  stay on your device until you download or share them.{' '}
+                  providers. In Full workspace, the dashboard also reads the resource library's
+                  collection from GitHub every 15 minutes. Device location is requested only when
+                  you choose it. Saved places and checklist progress stay in this browser. No
+                  accounts, ads, or analytics. Interface uses system fonts without font downloads.
+                  Offline briefings and emergency plans stay on your device until you download or
+                  share them.{' '}
                   <button
                     className="text-button"
                     onClick={() => {
@@ -1686,7 +1804,7 @@ export default function App() {
         </main>
       </div>
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast" role="status" ref={toastBox}>
           <Check size={16} />
           {toast}
           <button className="icon-button" onClick={() => setToast('')} aria-label="Dismiss message">

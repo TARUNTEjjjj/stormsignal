@@ -24,6 +24,11 @@ self.addEventListener('install', (event) => {
       // addAll commits as one batch. An incomplete install cannot replace the
       // active worker or report a new offline kit as ready.
       await cache.addAll([...DOCUMENTS, ...STATIC_FILES, ...BUILD_ASSETS]);
+      // An older build activating during this download keeps the newest cache, which this one is
+      // not after a rollback to an earlier release. If it was deleted, fail: the browser's next
+      // update check installs this release again, rather than activating it without its shell.
+      if (!(await caches.has(VERSION)))
+        throw new Error('Offline shell cache was deleted during installation');
       // A waiting update activates only after every open client confirms idle.
     }),
   );
@@ -31,12 +36,38 @@ self.addEventListener('install', (event) => {
 
 /* APP_UPDATE_PROTOCOL */
 
+// Marks the cache of a build whose worker became active. The fetch handler never serves it.
+const ACTIVATED_MARK = '/__stormsignal-activated__';
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then(async (keys) => {
-      // Keep one previous shell while already-open tabs finish their old build.
+      // Keep one previous shell while already-open tabs finish their old build: the newest cache
+      // marked at activation. A release that installed but never activated (superseded while it
+      // waited, or a failed download) can have a newer cache. Without a mark, keep the newest.
       const older = keys.filter((key) => key.startsWith('stormsignal-') && key !== VERSION);
-      await Promise.all(older.slice(0, -1).map((key) => caches.delete(key)));
+      let previous = older.at(-1);
+      try {
+        for (const key of [...older].reverse()) {
+          if (await (await caches.open(key)).match(ACTIVATED_MARK)) {
+            previous = key;
+            break;
+          }
+        }
+      } catch {
+        /* Unreadable storage: keep the newest. */
+      }
+      // A newer release can be downloading, or have just finished, while this one activates: the
+      // last tab closed during that download. Its cache is the newest and has no mark yet. Keep it.
+      const next =
+        self.registration.installing || self.registration.waiting ? older.at(-1) : undefined;
+      await Promise.all(
+        older.filter((key) => key !== previous && key !== next).map((key) => caches.delete(key)),
+      );
+      await caches
+        .open(VERSION)
+        .then((cache) => cache.put(ACTIVATED_MARK, new Response('')))
+        .catch(() => {});
       await self.clients.claim();
     }),
   );

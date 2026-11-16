@@ -4,11 +4,11 @@ StormSignal requests NASA EOSDIS GIBS imagery directly from the browser. No NASA
 
 ## Layers and coverage
 
-| Layer | Native grid | Time and coverage |
-| --- | --- | --- |
-| GOES-East ABI band 13 clean infrared | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Americas/adjacent Atlantic |
-| GOES-West ABI band 13 clean infrared | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Pacific/western Americas |
-| Himawari AHI band 13 clean infrared | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Asia–Pacific |
+| Layer                                        | Native grid                   | Time and coverage                                                     |
+| -------------------------------------------- | ----------------------------- | --------------------------------------------------------------------- |
+| GOES-East ABI band 13 clean infrared         | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Americas/adjacent Atlantic         |
+| GOES-West ABI band 13 clean infrared         | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Pacific/western Americas           |
+| Himawari AHI band 13 clean infrared          | `GoogleMapsCompatible_Level6` | Advertised 10-minute observations, Asia–Pacific                       |
 | Terra MODIS corrected reflectance true color | `GoogleMapsCompatible_Level9` | Daily daytime swath composite; global except Web Mercator pole limits |
 
 Infrared source resolution is about 2 km at nadir and becomes coarser toward the disk edge. Leaflet overzoom enlarges pixels; it does not create more detail. The geostationary selector chooses the satellite with the smallest angular distance to the selected coordinates, limits latitude to ±65°, and conservatively excludes angular distance greater than 72° from the satellite subpoint. Those bounds are an application display choice, not an official instrument footprint. India is near Himawari's western disk edge. Europe, much of Africa and high latitudes fall back to the daily MODIS option. Selected coordinates above ±85° are explicitly flagged because the map cannot display their exact latitude.

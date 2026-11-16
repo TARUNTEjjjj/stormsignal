@@ -507,6 +507,71 @@ test('memory caching also evicts large texts before the count bound is reached',
   assert.equal(calls.length, 5);
 });
 
+const DAY = 24 * 60 * 60_000;
+
+test('a memory entry is a revalidation base only within 24-hour retention, then the feed is read afresh', async () => {
+  mockFetch(async () => new Response('day-0 text', { headers: { ETag: '"day0"' } }));
+  await requestText(SOURCE);
+  // The provider confirms a validator it is sent; a read without one gets the current document.
+  mockFetch(async (_target, init) =>
+    new Headers(init?.headers).has('if-none-match')
+      ? new Response(null, { status: 304 })
+      : new Response('current text', { headers: { ETag: '"current"' } }),
+  );
+  now += DAY - 1;
+  assert.deepEqual(await requestText(SOURCE), {
+    text: 'day-0 text',
+    fetchedAt: now,
+    etag: '"day0"',
+  });
+  assert.equal(new Headers(calls[1].init?.headers).get('if-none-match'), '"day0"');
+  // Retention runs from that confirmation. Once it has passed, the entry's validator is not sent.
+  now += DAY;
+  assert.deepEqual(await requestText(SOURCE), {
+    text: 'current text',
+    fetchedAt: now,
+    etag: '"current"',
+  });
+  assert.equal(new Headers(calls[2].init?.headers).has('if-none-match'), false);
+  assert.equal(calls.length, 3);
+});
+
+test('past 24-hour retention, a 304 cannot revive an entry kept in memory or in the shared cache', async () => {
+  const edge = optionalEdgeCache();
+  mockFetch(async () => new Response('day-0 text', { headers: { ETag: '"day0"' } }));
+  await requestText(SOURCE);
+  assert.equal(edge.size, 1);
+  now += 3 * DAY;
+  mockFetch(async () => new Response(null, { status: 304 }));
+  await assert.rejects(requestText(SOURCE), /could not be revalidated/);
+  assert.equal(new Headers(calls[1].init?.headers).has('if-none-match'), false);
+  mockFetch(async () => new Response('current text'));
+  assert.equal((await requestText(SOURCE)).text, 'current text');
+  assert.equal(calls.length, 3);
+});
+
+test('memory caching drops entries past retention at the next read, before they can crowd out a current one', async () => {
+  const edge = optionalEdgeCache();
+  const target = (i: number) => `https://severeweather.wmo.int/f/ows/aged_${i}.json`;
+  mockFetch(async () => new Response('small feed'));
+  for (let i = 0; i < 95; i++) await requestText(target(i));
+  clearWarningCache();
+  // An hour later SOURCE is read and kept in memory only. The 95 older documents then return from
+  // the shared cache with their original times, which fills memory to its count bound. A day-long
+  // TTL lets each cached copy be served without an upstream read.
+  now += 60 * 60_000;
+  await requestText(SOURCE);
+  edge.delete([...edge.keys()].at(-1)!);
+  for (let i = 0; i < 95; i++) await requestText(target(i), { ttlMs: DAY });
+  assert.equal(calls.length, 96);
+  // At 24 hours the 95 are past retention and SOURCE is not. The next read drops them, so the new
+  // document fits beside SOURCE instead of evicting it as the oldest entry.
+  now = START + DAY;
+  await requestText(target(95));
+  await requestText(SOURCE, { ttlMs: DAY });
+  assert.equal(calls.length, 97);
+});
+
 test('an optional shared cache retains original times and uses validators after memory eviction', async () => {
   const edge = optionalEdgeCache();
   mockFetch(async () => new Response('shared cache text', { headers: { ETag: '"shared"' } }));
@@ -524,6 +589,29 @@ test('an optional shared cache retains original times and uses validators after 
   assert.equal(checked.text, 'shared cache text');
   assert.equal(checked.fetchedAt, now);
   assert.equal(new Headers(calls[1].init?.headers).get('if-none-match'), '"shared"');
+});
+
+test('a body that fails its caller check is never kept, so the last good copy is revalidated', async () => {
+  optionalEdgeCache();
+  const validate = (text: string) => {
+    if (!text.startsWith('{')) throw Error('Not the expected document');
+  };
+  const page = () => new Response('<html>Maintenance</html>', { headers: { ETag: '"page"' } });
+  // A copy that was kept without the check, as by an earlier release, is a shared-cache miss.
+  mockFetch(async () => page());
+  await requestText(SOURCE);
+  clearWarningCache();
+  mockFetch(async () => new Response('{"version":1}', { headers: { ETag: '"good"' } }));
+  assert.equal((await requestText(SOURCE, { validate })).text, '{"version":1}');
+  assert.equal(new Headers(calls[1].init?.headers).has('if-none-match'), false);
+  // A revalidation answered with an unusable body fails, and does not replace the good copy.
+  now += 60_000;
+  mockFetch(async () => page());
+  await assert.rejects(requestText(SOURCE, { validate }), /Not the expected document/);
+  mockFetch(async () => new Response(null, { status: 304 }));
+  assert.equal((await requestText(SOURCE, { validate })).text, '{"version":1}');
+  assert.equal(new Headers(calls[3].init?.headers).get('if-none-match'), '"good"');
+  assert.equal(calls.length, 4);
 });
 
 test('optional cache failures do not discard a successful upstream response', async () => {

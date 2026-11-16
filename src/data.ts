@@ -19,9 +19,12 @@ const AIR = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 const NWS = 'https://api.weather.gov/alerts/active';
 const MAX_BYTES = 2_000_000;
 const MAX_CACHE_ENTRIES = 80;
-const cache = new Map<string, { value: unknown; fetchedAt: number; expires: number }>();
 type RecordValue = Record<string, unknown>;
-type Received = { value: unknown; fetchedAt: number };
+/** `servedAt` is when the provider made the answer on its own clock, if it says (answeredAt). */
+type Received = { value: unknown; fetchedAt: number; servedAt: number | null };
+// `expires` is on the device clock and `until` on the monotonic clock (performance.now()).
+type CacheEntry = Received & { expires: number; until: number };
+const cache = new Map<string, CacheEntry>();
 
 export class WeatherDataError extends Error {
   constructor(
@@ -77,6 +80,16 @@ function stamp(value: unknown): number | null {
   if (typeof value !== 'string') return null;
   const result = Date.parse(value);
   return Number.isFinite(result) ? result : null;
+}
+/**
+ * When a provider made its answer, on its own clock, as its cache headers state it: the time the
+ * answer expires less its lifetime. A page may read `Expires` and `Cache-Control` across origins,
+ * unlike `Date`. Null when either is missing.
+ */
+function answeredAt(headers: Headers): number | null {
+  const expires = stamp(headers.get('expires')),
+    lifetime = /(?:^|,)\s*max-age=(\d{1,9})\s*(?:,|$)/i.exec(headers.get('cache-control') ?? '');
+  return expires === null || !lifetime ? null : expires - Number(lifetime[1]) * 1000;
 }
 function timezone(value: unknown): string {
   const zone = str(value);
@@ -141,10 +154,20 @@ async function boundedJson(response: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Whether a cached response may answer a request made at `now` on the device clock. That clock can
+ * be set back while the page is open, so an entry stamped later than the present, or past its
+ * lifetime on the monotonic clock, is never reused: it would keep checks from reaching the network
+ * for the size of the correction and then pass old data off as new.
+ */
+function reusable(entry: CacheEntry, now: number): boolean {
+  return entry.fetchedAt <= now && entry.expires > now && performance.now() < entry.until;
+}
+
 async function requestJson(target: string, ttl: number, signal?: AbortSignal): Promise<Received> {
   signal?.throwIfAborted();
   const existing = cache.get(target);
-  if (existing && existing.expires > Date.now()) return existing;
+  if (existing && reusable(existing, Date.now())) return existing;
   const controller = new AbortController();
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', onAbort, { once: true });
@@ -186,12 +209,19 @@ async function requestJson(target: string, ttl: number, signal?: AbortSignal): P
       throw new WeatherDataError(
         `The provider could not supply this data: ${str(record(value).reason, 200)}`,
       );
-    const fetchedAt = Date.now();
+    const fetchedAt = Date.now(),
+      servedAt = answeredAt(response.headers);
     // Bound the browser session cache; it contains only public weather data.
-    for (const [key, entry] of cache) if (entry.expires <= fetchedAt) cache.delete(key);
+    for (const [key, entry] of cache) if (!reusable(entry, fetchedAt)) cache.delete(key);
     while (cache.size >= MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-    cache.set(target, { value, fetchedAt, expires: fetchedAt + ttl });
-    return { value, fetchedAt };
+    cache.set(target, {
+      value,
+      fetchedAt,
+      servedAt,
+      expires: fetchedAt + ttl,
+      until: performance.now() + ttl,
+    });
+    return { value, fetchedAt, servedAt };
   } catch (error) {
     if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
     if (timedOut)
@@ -277,11 +307,20 @@ function makeHour(data: RecordValue, time: number, index?: number): Hour {
   };
 }
 
+/**
+ * Hourly steps requested on top of the hours a `forecast_hours` window has to cover. Open-Meteo
+ * starts the window at the UTC hour of the request, moved onto the place's local-hour grid, so its
+ * first step is up to 90 minutes old in India (UTC+5:30) and 105 in Nepal (UTC+5:45): two steps
+ * can already be past. A response then stays in use for up to an hour while the hours that are
+ * screened and plotted move on with the clock, which takes one more.
+ */
+const EXTRA_FORECAST_HOURS = 3;
+
 export async function fetchForecast(place: Place, signal?: AbortSignal): Promise<Forecast> {
   return forecastRequest(place, signal, false);
 }
 
-/** Only the next 24 hourly steps; no weekly/daily payload or comparison models. */
+/** Only the hourly steps of the next 24 hours; no weekly/daily payload or comparison models. */
 export async function fetchCompactForecast(place: Place, signal?: AbortSignal): Promise<Forecast> {
   return forecastRequest(place, signal, true);
 }
@@ -297,7 +336,7 @@ async function forecastRequest(
       hourly: Object.values(hourFields).join(','),
       current: Object.values(hourFields).join(','),
       ...(compact
-        ? { forecast_hours: '24' }
+        ? { forecast_hours: String(24 + EXTRA_FORECAST_HOURS) }
         : {
             daily:
               'temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,weather_code,sunrise,sunset',
@@ -367,7 +406,7 @@ export async function fetchModels(place: Place, signal?: AbortSignal): Promise<M
           ...location,
           models: model.id,
           hourly: 'temperature_2m,precipitation,wind_speed_10m',
-          forecast_hours: '72',
+          forecast_hours: String(72 + EXTRA_FORECAST_HOURS),
           timeformat: 'unixtime',
           timezone: 'auto',
           wind_speed_unit: 'kmh',
@@ -547,7 +586,21 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       'The warning feed is unavailable. Check weather.gov for current warnings.',
     );
   const partial = features.length > 100 || !!record(response.pagination).next;
-  const now = Date.now(),
+  // NWS states its clock only in its cache headers (answeredAt). That reading is used when it is no
+  // earlier than a minute before the feed's own update time and within an hour of it. NWS times are
+  // then judged on NWS's clock, as gateway times are on the gateway's, and the offset is returned
+  // with the result (clockOffset), so a device clock running fast or slow hides no current warning.
+  // Otherwise the two clocks are taken to agree.
+  const updated = stamp(response.updated),
+    served =
+      result.servedAt !== null &&
+      updated !== null &&
+      result.servedAt >= updated - 60_000 &&
+      result.servedAt - updated <= 3_600_000
+        ? result.servedAt
+        : null,
+    offset = served === null ? 0 : Math.round(result.fetchedAt - served),
+    now = Date.now() - offset, // NWS's clock now
     seen = new Set<string>();
   const fallback = `https://forecast.weather.gov/MapClick.php?lat=${location.latitude}&lon=${location.longitude}`;
   const alerts: WeatherAlert[] = [];
@@ -559,9 +612,9 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
       ends = stamp(p.ends),
       effective = stamp(p.effective),
       sent = stamp(p.sent);
-    // NWS times are compared with this device's clock. A warning normally takes effect when it is
-    // issued, so its effective time gets the same allowance for a slow device clock as its issue
-    // time; otherwise a just-issued warning would be dropped while its issue time is accepted.
+    // A warning normally takes effect when it is issued, so its effective time gets the same
+    // allowance for a slow clock as its issue time; otherwise a just-issued warning would be
+    // dropped while its issue time is accepted.
     if (
       expires === null ||
       expires <= now ||
@@ -615,6 +668,7 @@ export async function fetchAlerts(place: Place, signal?: AbortSignal): Promise<A
     coverage: partial
       ? 'Incomplete NWS point warning response: additional records or pages were not loaded. Check the official source for all current warnings.'
       : 'NWS point warnings in the United States and supported territories. An empty response is not a safety guarantee.',
+    ...(served === null ? {} : { clockOffset: offset }),
   };
 }
 

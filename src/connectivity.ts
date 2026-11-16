@@ -69,3 +69,17 @@ export function unexpiredAlerts(
   const current = sourceClock(now, check.clockOffset);
   return check.alerts.filter((alert) => alert.expires > current);
 }
+
+/**
+ * Whether the page-alert button is unavailable. Alerts can be switched on only for a complete point
+ * feed that is being polled. They stay on when another place is chosen, so switching them off never
+ * depends on the check now on screen: it may be loading, failed, partial or regional.
+ */
+export function alertToggleDisabled(
+  notifications: boolean,
+  check: Pick<AlertResult, 'status' | 'partial' | 'scope'> | null | undefined,
+  polling: boolean,
+): boolean {
+  if (notifications) return false;
+  return check?.status !== 'available' || !!check.partial || check.scope !== 'point' || !polling;
+}

@@ -9,6 +9,7 @@
       content="A printable, local-only household preparedness checklist from StormSignal, with links to official guidance."
     />
     <title>Preparedness field guide · StormSignal</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
       :root {
         color-scheme: dark;
@@ -676,18 +677,34 @@
           progress.style.width = (selected.length / boxes.length) * 100 + '%';
           return selected.map((b) => b.id);
         }
+        // The stored text this page last read or wrote; another open copy can save after that.
+        let synced = null;
         try {
-          const saved = JSON.parse(localStorage.getItem(key) || '[]');
+          synced = localStorage.getItem(key);
+          const saved = JSON.parse(synced || '[]');
           if (Array.isArray(saved)) boxes.forEach((b) => (b.checked = saved.includes(b.id)));
         } catch {
           note.textContent =
             'Browser storage is unavailable. Your selections will not be saved after this page closes. Print or save a copy.';
         }
         update();
-        document.getElementById('checklist').addEventListener('change', () => {
+        document.getElementById('checklist').addEventListener('change', (event) => {
+          // If another open copy saved ticks since then, keep those and apply only this change.
+          // Ticks this page could not save stay on the page.
+          let stored;
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw !== synced) stored = JSON.parse(raw || '[]');
+          } catch {}
+          if (Array.isArray(stored))
+            boxes.forEach((b) => {
+              if (b !== event.target) b.checked = stored.includes(b.id);
+            });
           const saved = update();
           try {
-            localStorage.setItem(key, JSON.stringify(saved));
+            const text = JSON.stringify(saved);
+            localStorage.setItem(key, text);
+            synced = text;
           } catch {
             note.textContent =
               'Browser storage is unavailable. Your selections are not saved. Print or save a copy.';
@@ -700,8 +717,26 @@
           update();
           try {
             localStorage.removeItem(key);
+            synced = null;
           } catch {}
         });
+        // An app update never reloads this page, so it answers the new version's safety check at
+        // once instead of holding the update back while it is open.
+        try {
+          navigator.serviceWorker.addEventListener('message', (event) => {
+            const data = event.data;
+            if (
+              data?.type === 'APP_UPDATE_CAN_ACTIVATE' &&
+              /^[a-f0-9]{32}$/.test(data.nonce) &&
+              event.ports?.[0]
+            )
+              event.ports[0].postMessage({
+                type: 'APP_UPDATE_SAFETY',
+                nonce: data.nonce,
+                safe: true,
+              });
+          });
+        } catch {}
       })();
     </script>
   </body>

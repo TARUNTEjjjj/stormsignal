@@ -10,7 +10,7 @@ import {
   type CapDocument,
   type CapInfo,
 } from './cap.ts';
-import { requestText, type TextOptions, type TextResult } from './http.ts';
+import { LIVE_TTL_MS, requestText, type TextOptions, type TextResult } from './http.ts';
 
 const ORIGIN = 'https://severeweather.wmo.int';
 const SOURCES = `${ORIGIN}/json/sources.json`;
@@ -23,6 +23,8 @@ type Candidate = {
   path: string;
   englishPath?: string;
   areas: Set<string>;
+  /** The names of each index row that joins several area names with ";". */
+  areaLists: string[][];
   geocodes: Set<string>;
   source: Source;
 };
@@ -32,11 +34,16 @@ const record = (value: unknown): RecordValue =>
 const text = (value: unknown, max = 1000) => (typeof value === 'string' ? value.slice(0, max) : '');
 const clean = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase('en');
 
-function sourcesFor(raw: string, country: string): Source[] {
+/** The registry's source entries; a body that is not the registry throws. */
+function registryList(raw: string): unknown[] {
   const list = record(JSON.parse(raw)).sources;
   if (!Array.isArray(list) || list.length > 1000)
     throw Error('The official warning source registry is unavailable.');
-  return list.flatMap((item) => {
+  return list;
+}
+
+function sourcesFor(raw: string, country: string): Source[] {
+  return registryList(raw).flatMap((item) => {
     const source = record(record(item).source);
     if (
       text(source.authorityCountry).toUpperCase() !== country ||
@@ -122,7 +129,13 @@ function candidatesFor(
     if (!source) continue;
     let candidate = candidates.get(path);
     if (!candidate) {
-      candidate = { path, areas: new Set<string>(), geocodes: new Set<string>(), source };
+      candidate = {
+        path,
+        areas: new Set<string>(),
+        areaLists: [],
+        geocodes: new Set<string>(),
+        source,
+      };
       candidates.set(path, candidate);
     }
     const related = text(p.rlink, 300);
@@ -135,6 +148,13 @@ function candidatesFor(
     )
       candidate.englishPath = related;
     const area = clean(text(p.areadesc, 8000));
+    // SWIC gives each area row of a multi-area information block all of that block's area names,
+    // joined with "; ". The rows of one block repeat the same list, which is kept once.
+    const names = area
+      .split(';')
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (names.length > 1 && !candidate.areas.has(area)) candidate.areaLists.push(names);
     if (area) candidate.areas.add(area);
     for (const code of text(p.gc, 1000).split(/[;,]/))
       if (code.trim()) candidate.geocodes.add(code.trim());
@@ -286,6 +306,37 @@ function areaMatches(area: CapArea, candidate: Candidate, place: Place): boolean
   );
 }
 
+/** Without a polygon or circle, only the index's area names and geocodes can place an area. */
+const withoutBoundary = (area: CapArea) => !area.polygons.length && !area.circles.length;
+
+/**
+ * The areas of one information block that apply at the point. When no area matches on its own, an
+ * index row that joins several area names can still place the block. Such a row stands for one
+ * block that names all of them, so it matches only a block that does: another block of the
+ * document that names just some of those areas may not cover the point.
+ */
+function matchingAreas(info: CapInfo, candidate: Candidate, place: Place): CapArea[] {
+  const matched = info.areas.filter((area) => areaMatches(area, candidate, place));
+  if (matched.length || !candidate.areaLists.length) return matched;
+  const names = new Set(info.areas.map((area) => clean(area.description)));
+  const listed = new Set(
+    candidate.areaLists.filter((list) => list.every((name) => names.has(name))).flat(),
+  );
+  return info.areas.filter((area) => withoutBoundary(area) && listed.has(clean(area.description)));
+}
+
+/**
+ * How a document applies at the point, for comparing two copies of it: the number of matching
+ * areas of each information block that matches.
+ */
+function placement(document: CapDocument, candidate: Candidate, place: Place): string {
+  return document.infos
+    .map((info) => matchingAreas(info, candidate, place).length)
+    .filter(Boolean)
+    .sort((a, b) => a - b)
+    .join();
+}
+
 /** Translation must describe the same CAP identity, validity and original boundaries. */
 function equivalentEnglish(original: CapDocument, translated: CapDocument): CapDocument | null {
   if (
@@ -337,14 +388,15 @@ function equivalentEnglish(original: CapDocument, translated: CapDocument): CapD
 function toAlert(
   document: CapDocument,
   info: CapInfo,
-  index: number,
   candidate: Candidate,
   place: Place,
 ): WeatherAlert {
-  const matching = info.areas.filter((area) => areaMatches(area, candidate, place));
+  const matching = matchingAreas(info, candidate, place);
   const capUrl = `${ORIGIN}/v2/cap-alerts/${candidate.path}`;
   return {
-    id: `${document.sender}/${document.identifier}/${index}`.slice(0, 2000),
+    // The block's place in the document, as in the direct national check: the two match different
+    // blocks, and one id must name the same block in both.
+    id: `${document.sender}/${document.identifier}/${info.position}`.slice(0, 2000),
     title: info.headline || info.event,
     event: info.event,
     severity: info.severity,
@@ -400,6 +452,8 @@ export function createGlobalAlertAdapter(
         ...options,
         ttlMs: 6 * 60 * 60_000,
         maxBytes: 500_000,
+        // Otherwise one error page sent with HTTP 200 would fail every check for six hours.
+        validate: (raw) => void registryList(raw),
       });
       const sources = sourcesFor(registry.text, code);
       const base = {
@@ -423,7 +477,7 @@ export function createGlobalAlertAdapter(
           coverage:
             'No operating official CAP source for this country is listed in the connected WMO registry. Check the official authority. Missing warnings never mean safe conditions.',
         };
-      const query = await read(queryUrl, { ...options, ttlMs: 60_000, maxBytes: 250_000 });
+      const query = await read(queryUrl, { ...options, ttlMs: LIVE_TTL_MS, maxBytes: 250_000 });
       const { candidates, unchecked, unread } = candidatesFor(query.text, sources);
       const loaded: { document: CapDocument; candidate: Candidate; fetchedAt: number }[] = [];
       let failed = 0,
@@ -437,7 +491,7 @@ export function createGlobalAlertAdapter(
             try {
               const result = await read(`${ORIGIN}/v2/cap-alerts/${candidate.path}`, {
                 ...options,
-                ttlMs: 60_000,
+                ttlMs: LIVE_TTL_MS,
                 maxBytes: 256_000,
               });
               loaded.push({
@@ -478,8 +532,8 @@ export function createGlobalAlertAdapter(
         const candidate = loaded.find(
           (item) => identity(item.document) === identity(document),
         )!.candidate;
-        const matched = document.infos.filter((info) =>
-          info.areas.some((area) => areaMatches(area, candidate, place)),
+        const matched = document.infos.filter(
+          (info) => matchingAreas(info, candidate, place).length,
         );
         return matched.length ? [Math.min(...matched.map((info) => info.effective))] : [];
       });
@@ -490,9 +544,7 @@ export function createGlobalAlertAdapter(
         if (
           !candidate?.englishPath ||
           document.infos.some((info) => /^en(?:-|$)/i.test(info.language)) ||
-          !document.infos.some((info) =>
-            info.areas.some((area) => areaMatches(area, candidate, place)),
-          ) ||
+          !document.infos.some((info) => matchingAreas(info, candidate, place).length) ||
           Date.now() - startedAt > 14_000 ||
           controller.signal.aborted
         )
@@ -514,13 +566,19 @@ export function createGlobalAlertAdapter(
           const result = await Promise.race([
             request(`${ORIGIN}/v2/cap-alerts/${candidate.englishPath}`, {
               signal: optional.signal,
-              ttlMs: 60_000,
+              ttlMs: LIVE_TTL_MS,
               maxBytes: 256_000,
             }),
             interrupted,
           ]);
           const translated = equivalentEnglish(document, parseCap(result.text));
-          if (translated)
+          // An area that the index matches only by its original-language name is not matched
+          // under a translated one. The copy is used only when it applies at this point through
+          // the same areas as the original; otherwise the original warning stays.
+          if (
+            translated &&
+            placement(translated, candidate, place) === placement(document, candidate, place)
+          )
             translations.set(identity(document), {
               document: translated,
               path: candidate.englishPath,
@@ -537,31 +595,41 @@ export function createGlobalAlertAdapter(
       for (let i = 0; i < active.length; i += 3)
         await Promise.all(active.slice(i, i + 3).map(translate));
       signal?.throwIfAborted();
+      let unmatched = 0;
       for (const original of active) {
         const translation = translations.get(identity(original));
         const document = translation?.document ?? original;
-        const candidate = loaded.find(
+        const checked = loaded.find(
           (item) =>
             item.document.identifier === document.identifier &&
             item.document.sender === document.sender &&
             item.document.sent === document.sent,
-        )?.candidate;
-        if (!candidate) continue;
+        );
+        if (!checked) continue;
+        const { candidate } = checked;
         const matching = document.infos.filter(
           (info) =>
             info.expires !== null &&
             info.expires > Date.now() &&
-            info.areas.some((area) => areaMatches(area, candidate, place)),
+            matchingAreas(info, candidate, place).length > 0,
         );
+        // The index returned this document for the point. When none of its information can be
+        // matched here, and current information has an area without a boundary or no area at all,
+        // the document could not be placed, rather than found not to apply: that is disclosed.
+        if (
+          !matching.length &&
+          original.infos.some((info) => !info.areas.length || info.areas.some(withoutBoundary)) &&
+          !checked.document.infos.some((info) => matchingAreas(info, candidate, place).length)
+        )
+          unmatched++;
         const preferred = matching.some((info) => /^en(?:-|$)/i.test(info.language))
           ? matching.filter((info) => /^en(?:-|$)/i.test(info.language))
           : matching.filter((info) => info.language === matching[0]?.language);
-        for (const [index, info] of preferred.entries())
+        for (const info of preferred)
           alerts.push(
             toAlert(
               document,
               info,
-              index,
               translation ? { ...candidate, path: translation.path } : candidate,
               place,
             ),
@@ -599,7 +667,7 @@ export function createGlobalAlertAdapter(
           ...loaded.map((item) => item.fetchedAt),
           ...[...translations.values()].map((item) => item.fetchedAt),
         ),
-        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${unchecked ? ` ${unchecked} additional indexed warning document(s) for this point were not checked.` : ''}${unread ? ' Further index entries for this point were not read.' : ''}${failed ? ` Some warning details could not be loaded: ${failed} selected source document(s) could not be verified.` : ''}${next < candidates.length ? ` ${candidates.length - next} selected source document(s) were not checked before the time limit.` : ''}${controller.signal.aborted ? ' The check reached its time limit; verified original bulletins are retained.' : ''}${upcomingCapNote(upcoming, 'matched warning document(s)')} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
+        coverage: `Partial official CAP coverage at this point via WMO SWIC. At most ${MAX_DOCUMENTS} current source documents are checked; missing feeds, unmapped areas and alerts without a verifiable expiry may be omitted.${unchecked ? ` ${unchecked} additional indexed warning document(s) for this point were not checked.` : ''}${unread ? ' Further index entries for this point were not read.' : ''}${failed ? ` Some warning details could not be loaded: ${failed} selected source document(s) could not be verified.` : ''}${next < candidates.length ? ` ${candidates.length - next} selected source document(s) were not checked before the time limit.` : ''}${controller.signal.aborted ? ' The check reached its time limit; verified original bulletins are retained.' : ''}${unmatched ? ` ${unmatched} current indexed warning document(s) for this point could not be matched to it by area name or code and are not listed.` : ''}${upcomingCapNote(upcoming, 'matched warning document(s)')} Each issue time comes from the issuing authority. Official English text is used only when verified against the original bulletin. An empty list is not an all-clear; check local official instructions.`,
       };
     } finally {
       clearTimeout(timer);

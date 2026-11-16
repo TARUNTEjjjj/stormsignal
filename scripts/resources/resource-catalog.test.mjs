@@ -50,6 +50,38 @@ test('ranking favors topical relevance, deduplicates renamed IDs, and is determi
   assert.deepEqual(items, rankResources([newerName, relevant, unrelated], config.categories[0], { now: NOW }));
 });
 
+test('common words in a category title are not relevance', () => {
+  const weather = { id: 'weather', title: 'Weather and climate data tools', seeds: [] };
+  const item = (overrides) => ({ id: 1, fullName: 'example/app', url: 'https://github.com/example/app', description: '', topics: [], stars: 0, forks: null, pushedAt: null, license: null, category: 'weather', sourceQuery: 'topic:weather', fetchedAt: NOW, provenance: 'github', stale: false, ...overrides });
+  for (const overrides of [{ topics: ['android'] }, { topics: ['pandas'] }, { description: 'A command line tool' }]) {
+    assert.equal(rankResources([item(overrides)], weather, { now: NOW })[0].score, 0, JSON.stringify(overrides));
+  }
+  assert.equal(rankResources([item({ topics: ['climate'] })], weather, { now: NOW })[0].score, 15, 'one of the four meaningful title words');
+});
+
+test('verified curated seeds keep a place when discovery alone would fill the category', async (t) => {
+  const { snapshotPath } = await fixture(t);
+  const maps = { schemaVersion: 1, project: 'example/maps-app', title: 'Map resources', minStars: 100, maxPerCategory: 3, categories: [{ id: 'maps', title: 'Geospatial visualization', queries: ['topic:geospatial'], seeds: ['Leaflet/Leaflet'] }] };
+  const discovered = [1, 2, 3].map((n) => raw({ id: 100 + n, full_name: `geo/viz${n}`, html_url: `https://github.com/geo/viz${n}`, description: 'Geospatial visualization', topics: ['geospatial', 'maps', 'visualization'], stargazers_count: 1000 }));
+  const leaflet = raw({ id: 7, full_name: 'Leaflet/Leaflet', html_url: 'https://github.com/Leaflet/Leaflet', description: 'JavaScript library for mobile-friendly interactive maps', topics: ['javascript', 'leaflet', 'maps'], stargazers_count: 45930 });
+  const snapshot = await refreshCatalog(maps, options({ snapshotPath, fetchImpl: async (url) => url.includes('/search/') ? searchResponse(discovered) : jsonResponse(leaflet) }));
+  assert.deepEqual(snapshot.errors, []);
+  assert.deepEqual(snapshot.excludedSeeds, []);
+  assert.deepEqual(snapshot.items.map((item) => item.fullName), ['geo/viz1', 'geo/viz2', 'Leaflet/Leaflet'], 'the seed is published, at most 3 entries, ordered by score');
+  assert.deepEqual((await readCatalog(maps, { snapshotPath, now: NOW })).items.map((item) => item.fullName), ['geo/viz1', 'geo/viz2', 'Leaflet/Leaflet'], 'the local API keeps it too');
+});
+
+test('a curated seed keeps its place after a rename and when its discovery copy is the newer record', () => {
+  const category = { id: 'mathematics', title: 'Mathematics', seeds: ['sympy/sympy'] };
+  const popular = [1, 2].map((n) => normalizeRepository(raw({ id: 200 + n, full_name: `org/math${n}`, html_url: `https://github.com/org/math${n}`, stargazers_count: 900000 }), { category: 'mathematics', sourceQuery: 'topic:mathematics', fetchedAt: NOW }));
+  const renamed = normalizeRepository(raw({ full_name: 'symbolic/sympy', html_url: 'https://github.com/symbolic/sympy', description: 'Symbols', topics: [], stargazers_count: 10 }), { category: 'mathematics', sourceQuery: 'repo:sympy/sympy', fetchedAt: NOW });
+  const discoveryCopy = { ...renamed, sourceQuery: 'topic:mathematics', fetchedAt: LATER };
+  for (const items of [[...popular, renamed], [...popular, renamed, discoveryCopy]]) {
+    const ranked = rankResources(items, category, { now: NOW, limit: 2 });
+    assert.deepEqual(ranked.map((item) => item.fullName), ['org/math1', 'symbolic/sympy']);
+  }
+});
+
 test('offline seeds are useful links with unknown statistics and no fabricated dates', () => {
   const snapshot = createSeedSnapshot(config, { now: NOW });
   assert.equal(snapshot.status, 'seed');

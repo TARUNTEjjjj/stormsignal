@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNationalAlertAdapter } from '../server/national';
-import type { TextOptions } from '../server/http';
+import { LIVE_TTL_MS, type TextOptions } from '../server/http';
 import type { Place } from '../src/types';
 
 const now = Date.parse('2026-11-01T00:00:00Z');
@@ -326,8 +326,44 @@ test('national work is bounded at 20 unique documents and 4 simultaneous request
   assert.equal(r.alerts.length, 20);
   assert.match(r.coverage, /5 additional feed entries were not checked/);
   assert.ok(
-    h.calls.every((call) => call.options?.maxBytes === 256_000 && call.options.ttlMs === 60_000),
+    h.calls.every(
+      (call) => call.options?.maxBytes === 256_000 && call.options.ttlMs === LIVE_TTL_MS,
+    ),
   );
+});
+
+test('the newest bulletins of a feed longer than 100 entries are read, and every unread entry is counted', async () => {
+  // 101 PAGASA entries published a minute apart. Only the newest bulletin is still in effect.
+  const earlier = new Date(now - 7_200_000).toISOString();
+  const expired = (i: number) => cap(i).replaceAll(sent, earlier).replaceAll(future, old);
+  const docs = new Map(
+    Array.from({ length: 101 }, (_, i) => [ph(i + 1), i === 100 ? cap(101) : expired(i + 1)]),
+  );
+  const entries = Array.from(
+    { length: 101 },
+    (_, i) =>
+      `<entry><updated>${new Date(now - (101 - i) * 60_000).toISOString()}</updated><link type="application/cap+xml" href="${ph(i + 1)}"/></entry>`,
+  );
+  const feed = (listed: string[]) =>
+    `<feed xmlns="http://www.w3.org/2005/Atom"><updated>${sent}</updated>${listed.join('')}</feed>`;
+  for (const listed of [entries, [...entries].reverse()]) {
+    const h = harness(feed(listed), docs);
+    const r = await h.fetch(manila);
+    assert.deepEqual(
+      h.calls
+        .slice(1)
+        .map((call) => Number(/-(\d{12})\.cap$/.exec(call.url)![1]))
+        .sort((a, b) => a - b),
+      Array.from({ length: 20 }, (_, i) => i + 82),
+    );
+    assert.deepEqual(
+      r.alerts.map((alert) => alert.id),
+      ['agency@example.gov/alert-101/0'],
+    );
+    assert.match(r.coverage, /20 of 20 selected recent bulletins verified/);
+    assert.match(r.coverage, / 81 additional feed entries were not checked\./);
+    assert.doesNotMatch(r.coverage, /may not be the most recent/);
+  }
 });
 
 test('a BMKG feed is read newest first, also when its times name no zone; an unknown order is disclosed', async () => {
@@ -512,6 +548,11 @@ test('English preference preserves all English warning text blocks', async () =>
   assert.deepEqual(
     r.alerts.map((a) => a.title),
     ['English flood', 'English storm'],
+  );
+  // Ids number the blocks by their place in the document, not among the blocks shown.
+  assert.deepEqual(
+    r.alerts.map((a) => a.id),
+    ['agency@example.gov/alert-1/1', 'agency@example.gov/alert-1/2'],
   );
 });
 

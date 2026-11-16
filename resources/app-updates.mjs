@@ -47,11 +47,17 @@ export function requestWorker(worker, message, {timeoutMs = 2500, channelFactory
   });
 }
 const nonce = () => [...crypto.getRandomValues(new Uint8Array(16))].map(byte=>byte.toString(16).padStart(2,'0')).join('');
+// Install attempts per service-worker container and scope, kept until one yields a ready worker. Each
+// attempt downloads the whole release again, so a lasting failure (a very slow link, a full quota)
+// is retried after 1, 2, 4 and 8 minutes, then at the normal check interval, not on every idle retry.
+const failedInstalls=new WeakMap();
+const INSTALL_RETRY_MS=60000;
 
 export async function prepareAppWorkers(release, {serviceWorker = globalThis.navigator?.serviceWorker, origin = globalThis.location?.origin, canReload = () => true,
-  request = requestWorker, timeoutMs = 15000, signal} = {}) {
+  request = requestWorker, timeoutMs = 15000, signal, now = Date.now} = {}) {
   if (!serviceWorker || !canReload() || signal?.aborted) return false;
   const bounded=async promise=>{let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Worker preparation timed out')),timeoutMs);})]);}finally{clearTimeout(timer);}};
+  let failures=failedInstalls.get(serviceWorker);if(!failures)failedInstalls.set(serviceWorker,failures=new Map());
   for (const expected of release.workers) {
     const scope=new URL(expected.scope,origin).href,script=new URL(expected.script,origin).href;
     const registration=await bounded(serviceWorker.getRegistration(scope));
@@ -61,16 +67,24 @@ export async function prepareAppWorkers(release, {serviceWorker = globalThis.nav
       if(!worker)return false;
       try{const state=await request(worker,{type:'GET_APP_UPDATE_STATUS'});return state?.type==='APP_UPDATE_STATUS'&&state.scope===scope&&state.version===expected.version&&state.ready===true;}catch{return false;}
     }
-    if(await status(registration.active))continue;
+    if(await status(registration.active)){failures.delete(scope);continue;}
     // A staged waiting worker is reused during idle retries, avoiding repeated
     // update downloads while another app window has unsaved work.
-    if(!registration.waiting&&!registration.installing){try{await bounded(registration.update());}catch{return false;}}
+    const failed=failures.get(scope),attempt=!registration.waiting&&!registration.installing;
+    if(attempt){
+      if(failed?.version===expected.version&&now()<failed.retryAt)return false;
+      try{await bounded(registration.update());}catch{return false;}
+      // Counted once the install has started: one that outlasts the wait below and fails later is backed off too.
+      const count=failed?.version===expected.version?failed.count+1:1;
+      failures.set(scope,{version:expected.version,count,retryAt:now()+Math.min(APP_UPDATE_INTERVAL_MS,INSTALL_RETRY_MS*2**(count-1))});
+    }
     const deadline=Date.now()+timeoutMs;
     while(registration.installing&&Date.now()<deadline&&!signal?.aborted)await sleep(50);
     if(signal?.aborted)return false;
-    if(await status(registration.active))continue;
-    const waiting=registration.waiting;
-    if(!waiting||!await status(waiting)||!canReload()||signal?.aborted)return false;
+    if(await status(registration.active)){failures.delete(scope);continue;}
+    const waiting=registration.waiting,staged=!!waiting&&await status(waiting);
+    if(staged)failures.delete(scope);
+    if(!staged||!canReload()||signal?.aborted)return false;
     const token=nonce();let answer;
     try{answer=await request(waiting,{type:'ACTIVATE_APP_UPDATE',version:expected.version,nonce:token},{timeoutMs:6000});}catch{return false;}
     if(answer?.type!=='APP_UPDATE_ACTIVATION'||answer.version!==expected.version||answer.scope!==scope||answer.nonce!==token||answer.accepted!==true)return false;
@@ -80,9 +94,15 @@ export async function prepareAppWorkers(release, {serviceWorker = globalThis.nav
   return canReload()&&!signal?.aborted;
 }
 
+// Scrolling, wheel zoom and pointer hover are interaction too. The listeners only record the time.
+const ACTIVITY=['pointerdown','keydown','pointermove','wheel','touchmove','scroll'];
+// Controls whose value is only view state (an inspected hour, a map layer) are marked by the app,
+// on the control or an ancestor; a moved or focused view control never holds back an update.
+const VIEW_STATE='[data-update-safe]:not([data-update-safe="false"])';
+
 export function createReloadGuard({documentObject = globalThis.document, windowObject = globalThis.window, now = Date.now, idleMs = 10000} = {}) {
   let lastActivity=now();const initial=new WeakMap(),dirty=new Set();
-  const editable=element=>!!element&&(element.isContentEditable||/^(TEXTAREA|INPUT|SELECT)$/.test(element.tagName));
+  const editable=element=>!!element&&(element.isContentEditable||/^(TEXTAREA|INPUT|SELECT)$/.test(element.tagName))&&!element.closest?.(VIEW_STATE);
   const value=element=>element.isContentEditable?element.textContent:/^(checkbox|radio)$/.test(element.type)?`${element.checked}:${element.value}`:
     element.type==='file'?[...element.files??[]].map(file=>`${file.name}:${file.size}:${file.lastModified}`).join('|'):
     element.multiple&&element.selectedOptions?[...element.selectedOptions].map(option=>option.value).join('\0'):element.value;
@@ -91,16 +111,16 @@ export function createReloadGuard({documentObject = globalThis.document, windowO
   const input=event=>{activity();const element=event.target;if(!editable(element))return;if(!initial.has(element))initial.set(element,/^(checkbox|radio)$/.test(element.type)?`${element.defaultChecked}:${element.value}`:element.defaultValue??'');
     if(value(element)===initial.get(element))dirty.delete(element);else dirty.add(element);};
   documentObject?.addEventListener('focusin',focused,true);
-  for(const event of ['pointerdown','keydown'])documentObject?.addEventListener(event,activity,true);
+  for(const event of ACTIVITY)documentObject?.addEventListener(event,activity,{capture:true,passive:true});
   documentObject?.addEventListener('input',input,true);documentObject?.addEventListener('change',input,true);
   const canReload=()=>{
     if(now()-lastActivity<idleMs||editable(documentObject?.activeElement))return false;
-    for(const element of dirty){if(!element.isConnected||value(element)===initial.get(element))dirty.delete(element);else return false;}
+    for(const element of dirty){if(!element.isConnected||!editable(element)||value(element)===initial.get(element))dirty.delete(element);else return false;}
     if([...documentObject?.querySelectorAll?.('dialog[open], [role="dialog"][aria-modal="true"]')??[]].some(element=>!element.hidden&&element.getClientRects().length))return false;
     try{if(typeof windowObject?.appUpdateCanReload==='function'&&windowObject.appUpdateCanReload()!==true)return false;}catch{return false;}
     return true;
   };
-  return {canReload,dispose(){documentObject?.removeEventListener('focusin',focused,true);for(const event of ['pointerdown','keydown'])documentObject?.removeEventListener(event,activity,true);documentObject?.removeEventListener('input',input,true);documentObject?.removeEventListener('change',input,true);}};
+  return {canReload,dispose(){documentObject?.removeEventListener('focusin',focused,true);for(const event of ACTIVITY)documentObject?.removeEventListener(event,activity,true);documentObject?.removeEventListener('input',input,true);documentObject?.removeEventListener('change',input,true);}};
 }
 
 export function createAppUpdater({baseline, loadVersion, prepareWorkers, verifyPage, canReload, reload, now = Date.now,

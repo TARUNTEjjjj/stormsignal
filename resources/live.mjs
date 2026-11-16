@@ -6,7 +6,7 @@ const sameCatalog = (a, b) => !!a && !!b && JSON.stringify(a) === JSON.stringify
 
 export function createCatalogController({store = createCatalogStore(), fetchRemote = loadRemoteCatalog,
   fetchBundled = loadBundledCatalog, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
-  intervalMs = REFRESH_INTERVAL_MS, onChange = () => {}} = {}) {
+  intervalMs = REFRESH_INTERVAL_MS, onChange = () => {}, countInterruptedChecks = false} = {}) {
   if (!Number.isFinite(intervalMs) || intervalMs < 1 || intervalMs > 24 * 60 * 60 * 1000) throw new Error('Invalid refresh interval');
   let state = {catalog: null, source: null, refreshing: false, lastSuccessfulCheck: null,
     lastAttemptCompleted: null, nextCheckAt: null, savedOffline: false, storageError: false, error: null, retainedNewer: false};
@@ -128,13 +128,19 @@ export function createCatalogController({store = createCatalogStore(), fetchRemo
     return startup;
   }
   function stop() {
+    // With countInterruptedChecks, a check stopped while it runs has already reached GitHub, so it
+    // counts towards the interval: a page that stops and starts often (the dashboard's mode
+    // switches) must not ask again at once. The library page resumes with a fresh check instead.
+    const interrupted = countInterruptedChecks && active !== undefined;
     running = false; generation++;
     clearTimer(timer); timer = undefined;
     startupAbort?.abort(); startupAbort = undefined;
     active?.abort.abort(); active = undefined;
     initializing = undefined;
     unsubscribe?.(); unsubscribe = undefined;
-    emit({refreshing: false});
+    if (!interrupted) { emit({refreshing: false}); return; }
+    const attempted = now();
+    emit({refreshing: false, lastAttemptCompleted: attempted, nextCheckAt: attempted + intervalMs});
   }
   return {start, refresh, checkIfDue, reconcileSaved, stop, getState};
 }

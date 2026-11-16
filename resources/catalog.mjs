@@ -23,7 +23,9 @@ export function normalizeCatalog(value) {
   const items = value.items.map(item => ({
     id: Number.isSafeInteger(item.id) ? item.id : text(item.id, 200) || item.fullName, fullName: item.fullName, url: safeRepositoryUrl(item), category: item.category,
     description: text(item.description), reason: text(item.reason, 240),
-    topics: Array.isArray(item.topics) ? item.topics.filter(t => typeof t === 'string').slice(0, 6).map(t => text(t, 60)) : [],
+    // Search and the saved copy keep every published topic (the collector's bound is 30);
+    // cards show only the first few.
+    topics: Array.isArray(item.topics) ? item.topics.filter(t => typeof t === 'string').slice(0, 30).map(t => text(t, 60)) : [],
     stars: Number.isSafeInteger(item.stars) && item.stars >= 0 ? item.stars : null,
     forks: Number.isSafeInteger(item.forks) && item.forks >= 0 ? item.forks : null,
     score: Number.isFinite(item.score) ? item.score : 0,

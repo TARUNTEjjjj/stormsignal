@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createKolkataAlertAdapter, supportsKolkata } from '../server/kolkata';
 import { createLocalAlertAdapter } from '../server/local-alerts';
-import type { TextOptions } from '../server/http';
+import { LIVE_TTL_MS, type TextOptions } from '../server/http';
 import type { Place } from '../src/types';
 
 const now = Date.now();
@@ -70,7 +70,7 @@ test('Kolkata support requires exact named city and state, not arbitrary points 
     assert.equal(supportsKolkata({ ...place, ...changed }), false);
 });
 
-test('direct IMD RSS read is bounded, caches for one minute, and keeps explicit IST validity', async () => {
+test('direct IMD RSS read is bounded, caches as briefly as other live feeds, and keeps explicit IST validity', async () => {
   const h = harness();
   const result = await h.fetch(place);
   assert.equal(h.calls.length, 1);
@@ -79,7 +79,7 @@ test('direct IMD RSS read is bounded, caches for one minute, and keeps explicit 
     'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php',
   );
   assert.equal(h.calls[0].options?.maxBytes, 1_000_000);
-  assert.equal(h.calls[0].options?.ttlMs, 60_000);
+  assert.equal(h.calls[0].options?.ttlMs, LIVE_TTL_MS);
   assert.equal(result.source, 'IMD Kolkata district nowcasts (direct)');
   assert.equal(result.scope, 'region');
   assert.equal(result.scopeLabel, 'Kolkata district');

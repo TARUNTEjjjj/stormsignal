@@ -13,6 +13,9 @@ import {
   weatherLabel,
 } from '../src/data';
 import { alertCheckIsRecent, unexpiredAlerts } from '../src/connectivity';
+import { briefingText, createBriefing } from '../src/offline';
+import { clockNotice } from '../src/presentation';
+import { deriveHazards, getOutlook, FORECAST_STALE_MS } from '../src/risk';
 import { capAreaGeometry } from '../server/global';
 import type { Place } from '../src/types';
 
@@ -119,10 +122,11 @@ test('cache keeps original retrieval time instead of making cached data appear f
   assert.equal(a.fetchedAt, b.fetchedAt);
 });
 
-test('data saver requests only 24 hours and current conditions without daily payload', async () => {
+test('data saver requests only the next 24 hours and current conditions without daily payload', async () => {
   globalThis.fetch = async (target) => {
     const params = new URL(String(target)).searchParams;
-    assert.equal(params.get('forecast_hours'), '24');
+    // 24 hours, and three steps for a window that starts early and is used for up to an hour.
+    assert.equal(params.get('forecast_hours'), '27');
     assert.equal(params.has('forecast_days'), false);
     assert.equal(params.has('daily'), false);
     assert.ok(params.get('current')?.includes('wind_gusts_10m'));
@@ -145,6 +149,104 @@ test('compact and full forecasts do not share a truncated cached response', asyn
   await fetchForecast(place);
   assert.equal(calls.length, 2);
   assert.notEqual(calls[0], calls[1]);
+});
+
+// Open-Meteo starts a `forecast_hours` window at the UTC hour of the request, shifted by the part
+// of an hour in the place's UTC offset, so the first steps can already be past. Seen live on 15 and
+// 16 November 2026: Chennai (UTC+5:30) at 19:55Z from 18:30Z, Jakarta (UTC+7) at 02:34Z from
+// 02:00Z, Kathmandu (UTC+5:45) at 02:45Z from 01:15Z, and St. John's (UTC-3:30) at 02:45Z from
+// 02:30Z and at 03:00Z from 03:30Z.
+const HOUR = 3_600_000;
+const windowStart = (requested: number, offsetMinutes: number) =>
+  Math.floor(requested / HOUR) * HOUR - (offsetMinutes % 60) * 60_000;
+/** Answer a `forecast_hours` request as the provider does for a place at this UTC offset. */
+function hourlyWindow(target: unknown, offsetMinutes: number, rainAt?: number) {
+  const start = windowStart(Date.now(), offsetMinutes) / 1000;
+  const time = Array.from(
+    { length: Number(new URL(String(target)).searchParams.get('forecast_hours')) },
+    (_, i) => start + i * 3600,
+  );
+  return json({
+    timezone: 'UTC',
+    current: { time: sec(), temperature_2m: 28 },
+    hourly: {
+      time,
+      temperature_2m: time.map(() => 28),
+      precipitation: time.map((t) => (t * 1000 === rainAt ? 20 : 0)),
+      wind_speed_10m: time.map(() => 9),
+    },
+  });
+}
+const UTC_OFFSET_MINUTES = [330, 420, 345, -210];
+const requestTimes = Array.from(
+  { length: 60 },
+  (_, minute) => Date.parse('2026-11-16T02:00:00Z') + minute * 60_000,
+);
+
+test('data saver forecast holds every hourly step of the next 24 hours while it is current', async () => {
+  for (const [requested, offset, start] of [
+    ['2026-11-15T19:55:00Z', 330, '2026-11-15T18:30:00Z'],
+    ['2026-11-16T02:34:47Z', 420, '2026-11-16T02:00:00Z'],
+    ['2026-11-16T02:45:03Z', 345, '2026-11-16T01:15:00Z'],
+    ['2026-11-16T02:45:04Z', -210, '2026-11-16T02:30:00Z'],
+    ['2026-11-16T03:00:00Z', -210, '2026-11-16T03:30:00Z'],
+  ] as const)
+    assert.equal(windowStart(Date.parse(requested), offset), Date.parse(start));
+  for (const offset of UTC_OFFSET_MINUTES) {
+    for (const fetched of requestTimes) {
+      clearRequestCache();
+      Date.now = () => fetched;
+      globalThis.fetch = async (target) => hourlyWindow(target, offset);
+      const times = new Set((await fetchCompactForecast(place)).hours.map((h) => h.time));
+      // Signals screen [now, now + 24 h) every minute, until the forecast is an hour old.
+      for (let now = fetched; now <= fetched + FORECAST_STALE_MS; now += 60_000)
+        for (let step = windowStart(fetched, offset); step < now + 24 * HOUR; step += HOUR)
+          if (step >= now && !times.has(step))
+            assert.fail(
+              `UTC offset ${offset} min, fetched ${new Date(fetched).toISOString()}, ` +
+                `${(now - fetched) / 60_000} min old: no step at ${new Date(step).toISOString()}`,
+            );
+    }
+  }
+  // The live Chennai case: heavy rain in the last hour of the window is a signal in Data saver too.
+  const fetched = Date.parse('2026-11-15T19:55:00Z');
+  const lastStep = Date.parse('2026-11-16T19:30:00Z');
+  clearRequestCache();
+  Date.now = () => fetched;
+  globalThis.fetch = async (target) => hourlyWindow(target, 330, lastStep);
+  const forecast = await fetchCompactForecast(place);
+  assert.deepEqual(
+    deriveHazards(forecast, fetched).map((h) => [h.kind, h.level, h.time]),
+    [['rain', 'high', lastStep]],
+  );
+  assert.equal(getOutlook(forecast.hours, fetched).level, 'high');
+});
+
+test('comparison models reach the final hour of the 72-hour explorer', async () => {
+  for (const offset of UTC_OFFSET_MINUTES) {
+    for (const fetched of requestTimes) {
+      clearRequestCache();
+      Date.now = () => fetched;
+      globalThis.fetch = async (target) => hourlyWindow(target, offset);
+      const models = await fetchModels(place);
+      assert.equal(models.length, 2);
+      for (const model of models) {
+        const times = new Set(model.hours.map((h) => h.time));
+        // The explorer plots 72 hourly steps from the first forecast step at most 30 minutes old. A
+        // model response is used for about 45 minutes (30-minute cache, 15-minute refresh); an hour
+        // is checked, as for the forecast.
+        for (let now = fetched; now <= fetched + HOUR; now += 60_000) {
+          let first = windowStart(fetched, offset) - HOUR;
+          while (first < now - 30 * 60_000) first += HOUR;
+          if (!times.has(first + 71 * HOUR))
+            assert.fail(
+              `${model.name}, UTC offset ${offset} min, fetched ${new Date(fetched).toISOString()}, ` +
+                `${(now - fetched) / 60_000} min old: no reading at ${new Date(first + 71 * HOUR).toISOString()}`,
+            );
+        }
+      }
+    }
+  }
 });
 
 test('unknown weather code and absent code are not displayed as clear weather', () => {
@@ -192,6 +294,26 @@ test('malformed forecast and invalid coordinate are rejected', async () => {
   globalThis.fetch = async () => json({ hourly: { time: [] } });
   await assert.rejects(fetchForecast(place), /incomplete/);
   await assert.rejects(fetchForecast({ ...place, latitude: NaN }), /invalid coordinates/);
+  // A coordinate off the globe is refused on its own, before any provider is asked.
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return json(forecastPayload());
+  };
+  for (const coordinates of [
+    { latitude: 91 },
+    { latitude: -91 },
+    { longitude: 181 },
+    { longitude: -181 },
+  ]) {
+    const note = JSON.stringify(coordinates);
+    await assert.rejects(fetchForecast({ ...place, ...coordinates }), /invalid coordinates/, note);
+    await assert.rejects(fetchAlerts({ ...place, ...coordinates }), /invalid coordinates/, note);
+  }
+  assert.equal(requests, 0);
+  // The poles and the antimeridian are on it.
+  await fetchForecast({ ...place, latitude: 90, longitude: -180 });
+  assert.equal(requests, 1);
 });
 
 test('upstream rate limit is explicit rather than replaced with demo data', async () => {
@@ -217,7 +339,7 @@ test('aborted callers do not use cached responses', async () => {
 test('model comparison retains successful model when another fails', async () => {
   globalThis.fetch = async (target) => {
     const params = new URL(String(target)).searchParams;
-    assert.equal(params.get('forecast_hours'), '72');
+    assert.equal(params.get('forecast_hours'), '75');
     assert.equal(params.has('forecast_days'), false);
     if (params.get('models') === 'gfs_seamless') return json({}, 503);
     const time = sec();
@@ -324,6 +446,77 @@ test('alert checks one minute apart reach the network again after a slow respons
     now = start + 60_000;
     await fetchAlerts(target);
     assert.equal(calls, 2, target.countryCode);
+  }
+});
+
+test('a device clock set back does not keep answering from the request cache', async () => {
+  const real = Date.now();
+  let t = real; // true time; the providers answer on it
+  let calls = 0;
+  globalThis.fetch = async (input) => {
+    calls++;
+    const target = String(input);
+    if (target.startsWith('/api/alerts'))
+      return json({
+        status: 'available',
+        alerts: [],
+        fetchedAt: t,
+        servedAt: t,
+        source: 'NDMA SACHET',
+        officialUrl: 'https://sachet.ndma.gov.in/',
+        scope: 'region',
+        scopeLabel: 'Tamil Nadu',
+        partial: true,
+        coverage: 'Regional feed is incomplete.',
+      });
+    if (target.includes('api.weather.gov')) return json({ features: [] });
+    return json(forecastPayload());
+  };
+  const loaders: [string, () => Promise<{ fetchedAt: number }>][] = [
+    ['NWS', () => fetchAlerts({ ...place, countryCode: 'US' })],
+    ['gateway', () => fetchAlerts(place)],
+    ['forecast', () => fetchForecast(place)],
+  ];
+  for (const [label, load] of loaders) {
+    clearRequestCache();
+    calls = 0;
+    t = real;
+    Date.now = () => t + 3_600_000; // the device clock runs one hour fast
+    await load();
+    t = real + 60_000;
+    Date.now = () => t; // corrected; the next check comes one minute after the first
+    const result = await load();
+    assert.equal(calls, 2, `${label}: the request reaches the network`);
+    assert.equal(result.fetchedAt, t, `${label}: the fetch time is on the corrected clock`);
+  }
+});
+
+test('a cached response is not reused past its lifetime after the device clock is set back', async () => {
+  const real = Date.now();
+  const monotonic = performance.now;
+  let t = real;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return json(forecastPayload());
+  };
+  try {
+    performance.now = () => t - real; // the monotonic clock follows true time
+    Date.now = () => t + 3_600_000; // one hour fast
+    await fetchForecast(place);
+    // 62 minutes later, on a corrected clock, the entry's stamp is two minutes in the past.
+    t = real + 62 * 60_000;
+    Date.now = () => t;
+    const result = await fetchForecast(place);
+    assert.equal(calls, 2);
+    assert.equal(result.fetchedAt, t);
+    // A steady clock still answers from memory within the entry's lifetime.
+    t += 9 * 60_000;
+    Date.now = () => t;
+    await fetchForecast(place);
+    assert.equal(calls, 2);
+  } finally {
+    performance.now = monotonic;
   }
 });
 
@@ -525,7 +718,7 @@ test('a warning with less time left than the device clock runs fast stays listed
     assert.equal(unexpiredAlerts(result, Date.now() + left - 1).length, 1, note);
     assert.equal(unexpiredAlerts(result, Date.now() + left).length, 0, note);
   }
-  // NWS answers carry no gateway clock: their warnings are judged on the device clock as before.
+  // An NWS answer that states no clock is judged on the device clock as before.
   clearRequestCache();
   Date.now = () => real;
   globalThis.fetch = async () => json({ features: [alert()] });
@@ -533,6 +726,75 @@ test('a warning with less time left than the device clock runs fast stays listed
   assert.equal(miami.clockOffset, undefined);
   assert.equal(unexpiredAlerts(miami, real + 3_600_000 - 1).length, 1);
   assert.equal(unexpiredAlerts(miami, real + 3_600_000).length, 0);
+});
+
+test('a device clock running fast or slow does not hide a current NWS warning', async () => {
+  // NWS states its clock in its cache headers, as its live answers do: `Expires` is `max-age`
+  // after the answer and, unlike `Date`, a page may read it across origins.
+  const real = Math.floor(Date.now() / 1000) * 1000; // HTTP dates carry whole seconds
+  const MINUTE = 60_000;
+  const iso = (time: number) => new Date(time).toISOString();
+  const stated = {
+    'Cache-Control': 'public, max-age=5, s-maxage=5',
+    Expires: new Date(real + 5_000).toUTCString(),
+  };
+  // A Tornado Warning issued 4 minutes ago with 41 minutes left, in an answer NWS made at `real`.
+  const answer = (headers: Record<string, string>, updated?: string) =>
+    new Response(
+      JSON.stringify({
+        type: 'FeatureCollection',
+        updated,
+        features: [
+          alert({
+            id: 'tornado',
+            event: 'Tornado Warning',
+            severity: 'Extreme',
+            sent: iso(real - 4 * MINUTE),
+            effective: iso(real - 4 * MINUTE),
+            expires: iso(real + 41 * MINUTE),
+          }),
+        ],
+      }),
+      { headers: { 'Content-Type': 'application/geo+json', ...headers } },
+    );
+  const oklahomaCity = { ...place, name: 'Oklahoma City', countryCode: 'US' };
+  for (const skew of [45 * MINUTE, 60 * MINUTE, -10 * MINUTE, -60 * MINUTE, 0]) {
+    clearRequestCache();
+    Date.now = () => real + skew;
+    globalThis.fetch = async () => answer(stated, iso(real - 2 * MINUTE));
+    const result = await fetchAlerts(oklahomaCity);
+    const note = `device ${skew / MINUTE} min`;
+    // The measured difference travels with the check: device clock minus NWS's clock.
+    assert.equal(result.clockOffset, skew, note);
+    assert.equal(alertCheckIsRecent(result.fetchedAt, Date.now(), true), true, note);
+    assert.deepEqual(
+      unexpiredAlerts(result, Date.now()).map((item) => item.id),
+      ['tornado'],
+      note,
+    );
+    // It stays listed until its stated expiry on NWS's clock, and not after it.
+    assert.equal(unexpiredAlerts(result, Date.now() + 41 * MINUTE - 1).length, 1, note);
+    assert.equal(unexpiredAlerts(result, Date.now() + 41 * MINUTE).length, 0, note);
+    // The warning panel says when the two clocks differ.
+    assert.equal(clockNotice(result.clockOffset) !== '', skew !== 0, note);
+  }
+  // A stated time is used only with a lifetime, and only when it is no earlier than the feed's own
+  // update time and within an hour of it; otherwise the two clocks are taken to agree.
+  Date.now = () => real + 45 * MINUTE;
+  for (const [headers, updated] of [
+    [{}, iso(real - 2 * MINUTE)],
+    [{ 'Cache-Control': 'no-cache', Expires: stated.Expires }, iso(real - 2 * MINUTE)],
+    [{ ...stated, Expires: '0' }, iso(real - 2 * MINUTE)],
+    [{ ...stated, Expires: 'Thu, 01 Jan 1970 00:00:00 GMT' }, iso(real - 2 * MINUTE)],
+    [stated, undefined],
+    [stated, iso(real + 2 * MINUTE)],
+    [stated, iso(real - 2 * 60 * MINUTE)],
+  ] as const) {
+    clearRequestCache();
+    globalThis.fetch = async () => answer(headers, updated);
+    const result = await fetchAlerts(oklahomaCity);
+    assert.equal(result.clockOffset, undefined, JSON.stringify([headers, updated]));
+  }
 });
 
 test('stale international checks and incomplete response shapes fail closed', async () => {
@@ -777,6 +1039,35 @@ test('San Francisco warnings use the NWS latitude-longitude point and retain the
   assert.equal(official.searchParams.get('lon'), '-122.4194');
 });
 
+test('U.S. territories are checked with NWS point warnings, not the international gateway', async () => {
+  for (const [countryCode, name, latitude, longitude] of [
+    ['PR', 'San Juan', 18.4655, -66.1057],
+    ['VI', 'Charlotte Amalie', 18.3419, -64.9307],
+    ['GU', 'Hagåtña', 13.4757, 144.7489],
+    ['AS', 'Pago Pago', -14.2756, -170.702],
+    ['MP', 'Saipan', 15.185, 145.7467],
+  ] as const) {
+    clearRequestCache();
+    const requested: string[] = [];
+    globalThis.fetch = async (target) => {
+      requested.push(String(target));
+      return json({ features: [alert()] });
+    };
+    const result = await fetchAlerts({ ...place, name, countryCode, latitude, longitude });
+    assert.equal(requested.length, 1, name);
+    const url = new URL(requested[0]);
+    assert.equal(`${url.origin}${url.pathname}`, 'https://api.weather.gov/alerts/active', name);
+    assert.equal(
+      url.searchParams.get('point'),
+      `${latitude.toFixed(4)},${longitude.toFixed(4)}`,
+      name,
+    );
+    assert.equal(result.source, 'US National Weather Service', name);
+    assert.equal(result.scope, 'point', name);
+    assert.equal(result.alerts.length, 1, name);
+  }
+});
+
 test('a long NWS area list keeps whole zone names and states how many more there are', async () => {
   // About 6,000 characters of zone names: more than the 4,000 shown and kept in saved briefings.
   const zones = Array.from({ length: 250 }, (_, i) =>
@@ -867,6 +1158,119 @@ test('NWS valid hazard end shortens expiry and missing validity never becomes a 
   assert.equal(result.alerts.length, 1);
   assert.equal(result.alerts[0].id, 'ends-first');
   assert.equal(result.alerts[0].expires, Date.parse(ends));
+});
+
+test('NWS warnings are listed most severe first, so a saved briefing keeps the most severe', async () => {
+  const now = Date.now();
+  Date.now = () => now;
+  // Six current advisories come first in the feed, the warning that matters most near the end.
+  const advisories = Array.from({ length: 6 }, (_, i) => `advisory-${i}`);
+  globalThis.fetch = async () =>
+    json({
+      features: [
+        ...advisories.map((id) =>
+          alert({ id, event: 'Coastal Flood Advisory', severity: 'Minor' }),
+        ),
+        alert({ id: 'unknown', event: 'Special Weather Statement', severity: 'Unknown' }),
+        alert({ id: 'moderate', event: 'Flood Watch', severity: 'Moderate' }),
+        alert({ id: 'tornado', event: 'Tornado Warning', severity: 'Extreme' }),
+        alert({ id: 'severe', event: 'Severe Thunderstorm Warning', severity: 'Severe' }),
+      ],
+    });
+  const miami = { ...place, name: 'Miami', countryCode: 'US', latitude: 25.77, longitude: -80.19 };
+  const result = await fetchAlerts(miami);
+  assert.deepEqual(
+    result.alerts.map((item) => item.id),
+    ['tornado', 'severe', 'moderate', ...advisories, 'unknown'],
+  );
+  // A saved briefing keeps the first five warnings and only counts the others.
+  const hour = {
+    time: now,
+    temperature: 25,
+    apparent: 27,
+    precipitation: 0,
+    probability: 20,
+    wind: 10,
+    gust: 25,
+    humidity: 60,
+    code: 3,
+    uv: 2,
+  };
+  const forecast = {
+    fetchedAt: now,
+    timezone: 'America/New_York',
+    current: hour,
+    hours: [hour],
+    days: [],
+    source: 'Open-Meteo',
+  };
+  const briefing = createBriefing(miami, forecast, result, now);
+  assert.deepEqual(
+    briefing.warnings.alerts.map((item) => item.id),
+    ['tornado', 'severe', 'moderate', 'advisory-0', 'advisory-1'],
+  );
+  assert.equal(briefing.warnings.omitted, 5);
+  assert.match(briefingText(briefing, now), /Tornado Warning — Extreme/);
+});
+
+test('an issue time too far ahead, or an expiry not after issue and effect, is never listed', async () => {
+  const now = Date.now();
+  Date.now = () => now;
+  const iso = (time: number) => new Date(time).toISOString();
+  // An issue time up to five minutes ahead of the source clock is accepted, a later one is not.
+  globalThis.fetch = async () =>
+    json({
+      features: [
+        alert({ id: 'sent-ahead', sent: iso(now + 300_000) }),
+        alert({ id: 'sent-later', sent: iso(now + 300_001) }),
+        alert({ id: 'expires-at-sent', sent: iso(now + 120_000), expires: iso(now + 120_000) }),
+        alert({
+          id: 'expires-before-effective',
+          sent: iso(now - 120_000),
+          effective: iso(now + 120_000),
+          expires: iso(now + 60_000),
+        }),
+      ],
+    });
+  assert.deepEqual(
+    (await fetchAlerts({ ...place, countryCode: 'US' })).alerts.map((item) => item.id),
+    ['sent-ahead'],
+  );
+  // The gateway's bulletins are judged the same way, on the gateway's clock.
+  const bulletin = {
+    title: 'Official title',
+    event: 'Rain',
+    severity: 'Severe',
+    area: 'Named district',
+    effective: now - 60_000,
+    expires: now + 3_600_000,
+    description: 'Source text',
+    instruction: 'Source instruction',
+    source: 'IMD',
+    url: 'https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=123',
+    geometry: null,
+  };
+  globalThis.fetch = async () =>
+    json({
+      status: 'available',
+      alerts: [
+        { ...bulletin, id: 'sent-ahead', sent: now + 300_000 },
+        { ...bulletin, id: 'sent-later', sent: now + 300_001 },
+        { ...bulletin, id: 'expires-at-sent', sent: now + 120_000, expires: now + 120_000 },
+      ],
+      fetchedAt: now,
+      servedAt: now,
+      source: 'NDMA SACHET',
+      officialUrl: 'https://sachet.ndma.gov.in/',
+      scope: 'region',
+      scopeLabel: 'Tamil Nadu',
+      partial: true,
+      coverage: 'Limited regional feed.',
+    });
+  assert.deepEqual(
+    (await fetchAlerts(place)).alerts.map((item) => item.id),
+    ['sent-ahead'],
+  );
 });
 
 test('Kolkata client carries West Bengal metadata without converting regional coverage into point coverage', async () => {
@@ -1157,6 +1561,8 @@ test('NWS outgoing links reject credentials, nonstandard ports and lookalike hos
     'https://example-user:example-password@weather.gov/alert',
     'https://weather.gov:8443/alert',
     'https://weather.gov.example.com/alert',
+    'https://evilweather.gov/alert',
+    'https://notnoaa.gov/alert',
     'http://weather.gov/alert',
   ]) {
     clearRequestCache();

@@ -1,6 +1,6 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { AlertResult, Place, WeatherAlert } from '../src/types.ts';
-import { requestText, type TextOptions, type TextResult } from './http.ts';
+import { LIVE_TTL_MS, requestText, type TextOptions, type TextResult } from './http.ts';
 
 // Public RSS endpoint documented by IMD's API list. The authenticated JSON API is not used.
 const FEED = 'https://mausam.imd.gov.in/imd_latest/contents/dist_nowcast_rss.php';
@@ -163,7 +163,7 @@ export function createKolkataAlertAdapter(request: RequestText) {
     if (!supportsKolkata(place))
       throw new Error('Choose Kolkata in West Bengal for this district feed.');
     signal?.throwIfAborted();
-    const received = await request(FEED, { maxBytes: MAX_BYTES, ttlMs: 60_000, signal });
+    const received = await request(FEED, { maxBytes: MAX_BYTES, ttlMs: LIVE_TTL_MS, signal });
     signal?.throwIfAborted();
     const now = Date.now();
     const feed = parseFeed(received.text, now);

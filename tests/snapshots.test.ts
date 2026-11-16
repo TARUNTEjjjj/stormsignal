@@ -4,6 +4,7 @@ import {
   OFFLINE_PACK_KEY,
   MAX_BRIEFING_BYTES,
   createBriefing,
+  briefingId,
   validateBriefing,
   loadBriefings,
   saveBriefing,
@@ -234,19 +235,19 @@ test('explicit unknown feed times and complete point metadata are preserved with
 });
 
 test('optional coverage metadata rejects malformed scope and falsely future source timestamps', () => {
-  for (const [key, value] of [
-    ['partial', 'false'],
-    ['scope', 'world'],
-    ['scope', null],
-    ['scopeLabel', ''],
-    ['scopeLabel', 'x'.repeat(401)],
-    ['feedUpdatedAt', NOW + 300001],
-    ['feedUpdatedAt', 'today'],
-    ['feedUpdatedAt', NaN],
+  for (const [key, value, reason] of [
+    ['partial', 'false', /Invalid partial coverage/],
+    ['scope', 'world', /Invalid warning scope/],
+    ['scope', null, /Invalid warning scope/],
+    ['scopeLabel', '', /Invalid text/],
+    ['scopeLabel', 'x'.repeat(401), /Invalid text/],
+    ['feedUpdatedAt', NOW + 300001, /Invalid feed update time/],
+    ['feedUpdatedAt', 'today', /Invalid timestamp/],
+    ['feedUpdatedAt', NaN, /Invalid timestamp/],
   ] as const) {
     const item = pack();
     Object.assign(item.warnings, { [key]: value });
-    assert.throws(() => validateBriefing(item, NOW), key);
+    assert.throws(() => validateBriefing(item, NOW), reason, key);
   }
 });
 
@@ -403,7 +404,7 @@ test('a briefing saved on a device whose clock runs slow or fast keeps a just-is
     () => createBriefing(manila, local(slow), late, NOW + slow),
     /Invalid warning timing/,
   );
-  // Without a stated gateway clock (NWS) the device clock is the reference, as before.
+  // Without a stated service clock the device clock is the reference, as before.
   const direct = { ...check(slow, MINUTE), clockOffset: undefined };
   assert.throws(() => createBriefing(manila, local(slow), direct, NOW + slow));
   // A stored offset is bounded metadata; anything else is unreadable.
@@ -427,64 +428,120 @@ test('a briefing saved on a device whose clock runs slow or fast keeps a just-is
   assert.equal(past(NOW + 30 * MINUTE), false);
   assert.equal(pastStatedExpiry(saved, saved.warnings.alerts[0], NOW + fast - 1), false);
   assert.equal(pastStatedExpiry(saved, saved.warnings.alerts[0], NOW + fast + 30 * MINUTE), true);
-  // Without a measured offset (NWS, older briefings) the device clock decides, as before.
+  // Without a measured offset (older briefings, checks that state no clock) the device clock
+  // decides, as before.
   const plain = pack();
   assert.equal(pastStatedExpiry(plain, plain.warnings.alerts[0], NOW + HOUR - 1), false);
   assert.equal(pastStatedExpiry(plain, plain.warnings.alerts[0], NOW + HOUR), true);
 });
 
 test('invalid coordinates, dates, timezones, arrays, and nonfinite weather are rejected', () => {
-  const mutate = [
-    (p: any) => {
-      p.place.latitude = 100;
-    },
-    (p: any) => {
-      p.place.countryCode = 'USA';
-    },
-    (p: any) => {
-      p.place.timezone = 'not/a-zone';
-    },
-    (p: any) => {
-      p.id = 'different-place';
-    },
-    (p: any) => {
-      p.forecast.current.gust = Infinity;
-    },
-    (p: any) => {
-      p.forecast.current.temperature = undefined;
-    },
-    (p: any) => {
-      p.forecast.hours = [];
-    },
-    (p: any) => {
-      p.forecast.hours.reverse();
-    },
-    (p: any) => {
-      p.forecast.hours[0].time = NOW - 2 * HOUR;
-    },
-    (p: any) => {
-      p.forecast.hours[1].probability = 101;
-    },
-    (p: any) => {
-      p.warnings.status = 'safe';
-    },
-    (p: any) => {
-      p.warnings.alerts[0].expires = p.warnings.alerts[0].effective;
-    },
-    (p: any) => {
-      p.warnings.alerts[0].sent = NOW + 6 * 60000;
-    },
-    (p: any) => {
-      p.warnings.fetchedAt = NOW + 6 * 60000;
-    },
-    (p: any) => {
-      p.warnings.alerts.push(p.warnings.alerts[0]);
-    },
+  // Each change breaks one thing, and the reason is checked. A changed coordinate keeps an identity
+  // that matches it, so only the coordinate range can reject it.
+  const mutate: [(p: any) => void, RegExp][] = [
+    [
+      (p) => {
+        p.place.latitude = 100;
+        p.id = briefingId(p.place);
+      },
+      /Invalid weather value/,
+    ],
+    [
+      (p) => {
+        p.place.longitude = 181;
+        p.id = briefingId(p.place);
+      },
+      /Invalid weather value/,
+    ],
+    [
+      (p) => {
+        p.place.countryCode = 'USA';
+      },
+      /Invalid text/,
+    ],
+    [
+      (p) => {
+        p.place.timezone = 'not/a-zone';
+      },
+      /Invalid time zone/,
+    ],
+    [
+      (p) => {
+        p.id = 'different-place';
+      },
+      /Invalid briefing identity/,
+    ],
+    [
+      (p) => {
+        p.forecast.current.gust = Infinity;
+      },
+      /Invalid weather value/,
+    ],
+    [
+      (p) => {
+        p.forecast.current.temperature = undefined;
+      },
+      /Invalid weather value/,
+    ],
+    [
+      (p) => {
+        p.forecast.hours = [];
+      },
+      /Invalid hourly sample/,
+    ],
+    [
+      (p) => {
+        p.forecast.hours.reverse();
+      },
+      /Invalid forecast sequence/,
+    ],
+    [
+      (p) => {
+        p.forecast.hours[0].time = NOW - 2 * HOUR;
+      },
+      /Invalid forecast sequence/,
+    ],
+    [
+      (p) => {
+        p.forecast.hours[1].probability = 101;
+      },
+      /Invalid weather value/,
+    ],
+    [
+      (p) => {
+        p.warnings.status = 'safe';
+      },
+      /Invalid warning coverage/,
+    ],
+    [
+      (p) => {
+        p.warnings.alerts[0].expires = p.warnings.alerts[0].effective;
+      },
+      /Invalid warning timing/,
+    ],
+    [
+      (p) => {
+        p.warnings.alerts[0].sent = NOW + 6 * 60000;
+      },
+      /Invalid warning timing/,
+    ],
+    [
+      (p) => {
+        p.warnings.fetchedAt = NOW + 6 * 60000;
+      },
+      /Invalid warning retrieval time/,
+    ],
+    [
+      (p) => {
+        p.warnings.alerts.push(p.warnings.alerts[0]);
+      },
+      /Duplicate warning/,
+    ],
   ];
-  for (const change of mutate) {
+  for (const [change, reason] of mutate) {
     const item = pack();
     change(item);
-    assert.throws(() => validateBriefing(item, NOW));
+    assert.throws(() => validateBriefing(item, NOW), reason, String(change));
   }
 });
 
@@ -516,13 +573,15 @@ test('source links cannot execute script or lead to arbitrary sites', () => {
     'https://subdomain.sachet.ndma.gov.in/',
     'https://severeweather.wmo.int.evil.example/',
     'https://evil.noaa.gov.evil.example/',
+    'https://evilweather.gov/alert',
+    'https://notnoaa.gov/',
   ]) {
     const item = pack();
     item.warnings.alerts[0].url = bad;
-    assert.throws(() => validateBriefing(item, NOW), bad);
+    assert.throws(() => validateBriefing(item, NOW), /Invalid source URL/, bad);
     const other = pack();
     other.warnings.officialUrl = bad;
-    assert.throws(() => validateBriefing(other, NOW), bad);
+    assert.throws(() => validateBriefing(other, NOW), /Invalid source URL/, bad);
   }
   const item = pack();
   item.warnings.alerts[0].url = 'https://forecast.weather.gov/MapClick.php?lat=25&lon=-80';
@@ -595,7 +654,7 @@ test('direct-authority snapshot URLs reject lookalikes, credentials and unapprov
   ]) {
     const item = pack();
     item.warnings.alerts[0].url = url;
-    assert.throws(() => validateBriefing(item, NOW), url);
+    assert.throws(() => validateBriefing(item, NOW), /Invalid source URL/, url);
   }
 });
 
@@ -714,6 +773,17 @@ test('text export includes original source times, location, warning instructions
   assert.match(text, /Stated expiry/);
   assert.match(text, /internet required/);
   assert.doesNotMatch(text, /ACTIVE ALERT|ALL CLEAR/);
+});
+
+test('text export calls each hourly amount precipitation, since it includes snow', () => {
+  // Open-Meteo's precipitation and its probability cover rain, showers and snow as liquid water.
+  const text = briefingText(pack(), NOW + 1000);
+  assert.match(text, /^Saved hourly forecast \(each precipitation value is for one hour\):$/m);
+  assert.match(
+    text,
+    /^2026-11-01 03:00:00 UTC: 25 °C; feels like 27 °C; precipitation 0 mm; chance 20%; gust 25 km\/h$/m,
+  );
+  assert.doesNotMatch(text, /\brain/i);
 });
 
 test('text export prints whole-second UTC times when real clocks carry milliseconds', () => {

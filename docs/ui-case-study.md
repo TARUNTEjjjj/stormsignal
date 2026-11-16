@@ -29,7 +29,7 @@ The updated direction uses a clearer conditions summary, consistent surface and 
 ### Interaction choices
 
 - **Inspect an hour:** pointer and keyboard controls expose an individual forecast time and its values. The text/table alternative remains useful when the graph is difficult to read or operate.
-- **Switch the question:** temperature, rainfall and wind share a consistent interaction model, with units changing alongside the metric. A requested range cannot create hours absent from the retrieved forecast.
+- **Switch the question:** temperature, precipitation and wind share a consistent interaction model, with units changing alongside the metric. A requested range cannot create hours absent from the retrieved forecast.
 - **Preserve uncertainty:** missing readings remain missing. Paths break across gaps; unavailable values are not silently plotted as zero. Two-model disagreement is not a probability or confidence interval.
 - **Keep the compact path useful:** Data saver presents the local forecast already fetched. It does not need a map, satellite tiles or comparison-model requests to show the chart.
 - **Retain the broader workflow:** Full workspace enables optional evidence tools. Offline only keeps saved, dated briefings distinct from current conditions.
@@ -45,7 +45,7 @@ Run `npm ci` and `npm run check`, then use `npm run preview` for a production-ar
 | Flow              | Action                                                                | Observable success criterion                                                                                           |
 | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | First view        | Open a fresh session in Data saver                                    | Current/forecast loading is explicit; the forecast explorer appears when data arrives without requiring Full workspace |
-| Metric selection  | Switch temperature → rainfall → wind                                  | Selected control, displayed values, graph scale and units agree with the selected metric                               |
+| Metric selection  | Switch temperature → precipitation → wind                             | Selected control, displayed values, graph scale and units agree with the selected metric                               |
 | Hour inspection   | Inspect the same hour using pointer and keyboard                      | Both paths expose the same timestamp and numbers; the exact-value table agrees                                         |
 | Range selection   | Change the offered duration                                           | The chart uses the available subset for that range; it does not invent points beyond the retrieved data                |
 | Missing data      | Supply a forecast with a missing interior reading                     | A visible gap replaces the missing segment; the corresponding value remains unavailable, not zero                      |

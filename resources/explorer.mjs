@@ -53,7 +53,7 @@ function card(item, categories) {
   article.append(top, heading, element('p', 'card-description', item.description || 'Explore this repository’s documentation and examples on GitHub.'));
   const topics = element('ul', 'topics');
   topics.setAttribute('aria-label', 'Topics');
-  for (const topic of item.topics) topics.append(element('li', '', topic));
+  for (const topic of item.topics.slice(0, 6)) topics.append(element('li', '', topic));
   if (topics.childElementCount) article.append(topics);
   const bottom = element('div', 'card-bottom');
   if (item.reason) bottom.append(element('p', 'card-reason', item.reason));
@@ -86,8 +86,11 @@ export async function startExplorer() {
     const saved = state.savedOffline ? 'Saved offline snapshot' : state.storageError ? 'Offline saving unavailable in this browser' : 'This collection has not been saved in this browser';
     const page = shell.pending ? 'preparing the offline library…' : shell.available ? 'offline library ready' : 'offline page unavailable';
     byId('offline-status').textContent = `${saved} · ${page}.`;
-    byId('load-error').hidden = !!state.catalog || state.refreshing;
-    if (!state.catalog) byId('freshness').textContent = state.refreshing ? 'Loading the published collection…' : 'Collection unavailable. Reconnect and use Refresh now.';
+    // Startup ends with the first published-collection check. Until it completes, a missing
+    // collection is still loading (for example while blocked storage is reported), not unavailable.
+    const loading = state.refreshing || state.lastAttemptCompleted === null;
+    byId('load-error').hidden = !!state.catalog || loading;
+    if (!state.catalog) byId('freshness').textContent = loading ? 'Loading the published collection…' : 'Collection unavailable. Reconnect and use Refresh now.';
   }
   function update(state) {
     latestState = state;

@@ -1,7 +1,10 @@
 import type { Place, Hour, ModelForecast } from './types.ts';
 export const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 export function value(n: number | null | undefined, digits = 0) {
-  return finite(n) ? n.toFixed(digits) : '—';
+  if (!finite(n)) return '—';
+  const text = n.toFixed(digits);
+  // toFixed keeps the sign of a negative value that rounds to zero: -0.3 °C would read "-0".
+  return Number(text) === 0 ? text.replace('-', '') : text;
 }
 const MAX_TIME_FORMATTERS = 64;
 const timeFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -52,6 +55,47 @@ const WARNING_TIME: Intl.DateTimeFormatOptions = {
  */
 export function warningTime(time: number, timezone = 'UTC', withYear = false) {
   return localTime(time, timezone, withYear ? { ...WARNING_TIME, year: 'numeric' } : WARNING_TIME);
+}
+const CALENDAR_DATE: Intl.DateTimeFormatOptions = {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+};
+/**
+ * The name of a 7-day outlook row: "Today" or a short weekday. Open-Meteo starts every daily step
+ * at local midnight by the one UTC offset in force when the forecast was requested, so after a
+ * clock change a step starts an hour before or after midnight. The middle of the step always
+ * falls on the provider's date.
+ */
+export function outlookDayLabel(dayTime: number, timezone: string, now: number) {
+  const midday = dayTime + 12 * 3_600_000;
+  return localTime(midday, timezone, CALENDAR_DATE) === localTime(now, timezone, CALENDAR_DATE)
+    ? 'Today'
+    : localTime(midday, timezone, { weekday: 'short' });
+}
+const RADIAN = Math.PI / 180;
+/**
+ * Whether the sun is up at a point (its upper edge above the horizon, allowing for refraction),
+ * from the U.S. Naval Observatory's approximate solar coordinates. The forecast carries no
+ * day/night flag; this only chooses between the sun and moon icons for a clear sky.
+ */
+export function isDaylight(time: number, latitude: number, longitude: number): boolean {
+  const days = time / 86_400_000 - 10_957.5; // since 2000-01-01 12:00 UTC (J2000.0)
+  const anomaly = (357.529 + 0.98560028 * days) * RADIAN;
+  const ecliptic =
+    (280.459 + 0.98564736 * days + 1.915 * Math.sin(anomaly) + 0.02 * Math.sin(2 * anomaly)) *
+    RADIAN;
+  const obliquity = (23.439 - 0.00000036 * days) * RADIAN;
+  const declination = Math.asin(Math.sin(obliquity) * Math.sin(ecliptic));
+  const rightAscension = Math.atan2(Math.cos(obliquity) * Math.sin(ecliptic), Math.cos(ecliptic));
+  // Greenwich mean sidereal time plus east longitude, less right ascension.
+  const hourAngle = (280.46061837 + 360.98564736629 * days + longitude) * RADIAN - rightAscension;
+  const lat = latitude * RADIAN;
+  return (
+    Math.sin(lat) * Math.sin(declination) +
+      Math.cos(lat) * Math.cos(declination) * Math.cos(hourAngle) >
+    Math.sin(-0.833 * RADIAN)
+  );
 }
 /** Displayed area text keeps to the bound that saved briefings also apply. */
 export const AREA_TEXT_LIMIT = 4000;
@@ -116,6 +160,8 @@ export function age(time: number, now = Date.now()) {
         ? `${Math.floor(m / 60)}h ${m % 60}m ago`
         : `${Math.floor(m / 1440)}d ago`;
 }
+/** Saved places are a short list, the most recently saved first. */
+export const MAX_SAVED_PLACES = 8;
 export function readPlaces(raw: string | null): Place[] {
   // Storage is untrusted and may outlive an older application version.
   if (raw && raw.length > 65_536) return [];
@@ -160,12 +206,33 @@ export function readPlaces(raw: string | null): Place[] {
         ...(p.admin == null ? {} : { admin: p.admin }),
         ...(p.timezone == null ? {} : { timezone: p.timezone }),
       });
-      if (places.length === 8) break;
+      if (places.length === MAX_SAVED_PLACES) break;
     }
     return places;
   } catch {
     return [];
   }
+}
+/**
+ * The saved-place list after saving or removing `place`, built from what storage holds now: another
+ * window may have saved, removed or cleared places since this one read the list. A full list keeps
+ * the most recent places and reports the one it had to remove.
+ */
+export function toggleSavedPlace(
+  raw: string | null,
+  place: Place,
+  remove: boolean,
+): { places: Place[]; dropped: Place | null } {
+  const others = readPlaces(raw).filter(
+    (saved) =>
+      Math.abs(saved.latitude - place.latitude) >= 0.01 ||
+      Math.abs(saved.longitude - place.longitude) >= 0.01,
+  );
+  const places = remove ? others : [place, ...others];
+  return {
+    places: places.slice(0, MAX_SAVED_PLACES),
+    dropped: places[MAX_SAVED_PLACES] ?? null,
+  };
 }
 export function chartPaths(
   values: (number | null)[],

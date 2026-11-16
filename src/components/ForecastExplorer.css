@@ -20,6 +20,11 @@
   border-radius: 9px;
   background: #0c171f;
 }
+.fe-range-options {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
 .fe-metrics button,
 .fe-ranges button {
   display: inline-flex;

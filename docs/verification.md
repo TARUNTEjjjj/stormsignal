@@ -1,5 +1,64 @@
 # Release verification
 
+## Submission audit — 16 November 2026
+
+A multi-agent audit reviewed the repository by area (warning feeds, gateway, client
+data, application shell, forecast explorer, offline and update machinery, resource
+library, build and documentation, tests) and by concern (security, time and units,
+failure handling, accessibility). Each finding was reproduced before it was fixed,
+each fix arrived with a regression test, and each patch was reviewed by an
+independent reviewer. Four reported findings were refuted and left unchanged. The
+main behaviour changes:
+
+- WMO matching no longer drops current warnings whose index row joins several area
+  names; direct and WMO copies of one CAP information block now share an identifier,
+  so a merge neither loses nor duplicates warnings; feeds longer than 100 entries are
+  ordered as a whole before their detail caps apply.
+- A cancelled Pages request can no longer leave a shared upstream read or an admission
+  slot held for the life of the isolate. Live feeds use a 45-second cache, so a
+  once-a-minute poll always reads a fresh copy.
+- Data saver and Offline only no longer contact GitHub, poll `/app-version.json`,
+  pre-download the resource library or register its service worker. Full workspace
+  keeps that background work, now disclosed in [privacy](privacy.md). A dashboard
+  launched offline no longer requests an uncached module.
+- Snow is reported as snow, with its own hazard kind and precipitation wording; the
+  7-day outlook keeps the right weekday across clock changes; saved places merge with
+  other windows instead of overwriting them; a manual reload no longer reopens a stale
+  place.
+- Keyboard and screen-reader fixes: search results close when focus leaves them;
+  refresh buttons stay focusable while busy; status messages stay until dismissed or
+  replaced; pressed toggles have a 3:1 ring; map buttons show their focus ring; and
+  the map marker, warning outlines and every standalone page carry names or icons.
+- `npm run check` now also runs the resource-library suites, `npm run format:check`
+  runs in CI, and `tsx` 4.23.15 removes Node 26 deprecation warnings.
+
+`npm run check` passed **615 tests** (513 application, 72 resource-library interface
+and 30 catalog tests; 461 before this review), TypeScript, the production browser
+build, embedded Worker checks and Pages artifact checks on macOS with Node
+**26.13.0** and npm 11.20.0. The 513 application tests also passed with `TZ` set to
+UTC, America/Los_Angeles, Asia/Kolkata and Pacific/Kiritimati, and with a German
+locale. Prettier reports every checked file formatted. A clean install reported zero
+known dependency vulnerabilities. Repository CI separately targets Node 22.
+
+The real local production-artifact check at **09:46 UTC** returned:
+
+| City          | Elapsed | Observed provider result                           |
+| ------------- | ------: | -------------------------------------------------- |
+| San Francisco |  0.45 s | NWS passed; one active record at that instant.     |
+| Manila        |  2.01 s | PAGASA direct and WMO supplementary checks passed. |
+| Kolkata       |  0.75 s | IMD district and SACHET regional checks passed.    |
+| Jakarta       |  7.41 s | BMKG direct and WMO supplementary checks passed.   |
+
+In the local production browser, Data saver loaded only the application bundle, one
+forecast request and one warning request; Offline only made no request; Full
+workspace started the background work and the `/resources/` worker; switching modes
+took effect without a reload. Search, saved places, saved briefings, the forecast
+explorer, CSV export, the mobile drawer, the emergency kit, the preparedness guide,
+the resource library and the 404 page showed no console errors. During this review
+GDACS did not respond (the panel reported the timeout), and no active NWS warning
+carried a polygon, so warning-outline names are covered by tests rather than a live
+observation. This review did not redeploy the hosted site.
+
 ## Provider timeout recovery — 13 November 2026
 
 This review fixes application-side stalls without treating a failed provider as
@@ -35,12 +94,12 @@ Repository CI separately targets Node 22.
 
 The real local production-artifact check at **03:57 UTC** returned:
 
-| City | Elapsed | Observed provider result |
-| --- | ---: | --- |
-| San Francisco | 1.04 s | NWS passed; four active records at that instant. |
-| Kolkata | 1.06 s | IMD district and SACHET regional checks passed. |
-| Jakarta | 2.39 s | BMKG direct and WMO supplementary checks passed. |
-| Manila | 8.00 s | WMO passed; direct PAGASA timed out. Partial response retained. |
+| City          | Elapsed | Observed provider result                                        |
+| ------------- | ------: | --------------------------------------------------------------- |
+| San Francisco |  1.04 s | NWS passed; four active records at that instant.                |
+| Kolkata       |  1.06 s | IMD district and SACHET regional checks passed.                 |
+| Jakarta       |  2.39 s | BMKG direct and WMO supplementary checks passed.                |
+| Manila        |  8.00 s | WMO passed; direct PAGASA timed out. Partial response retained. |
 
 The strict live command therefore **exited 1**. PAGASA's direct CAP origin also
 failed standalone connection probes and the existing hosted check; this is an

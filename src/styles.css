@@ -42,7 +42,8 @@ summary:focus-visible {
 button {
   cursor: pointer;
 }
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1359,7 +1360,7 @@ th {
 .footer small {
   font-size: 9px;
   margin-left: 12px;
-  color: #687e8c;
+  color: #6e8492;
 }
 .footer > a {
   font-size: 10px;
@@ -1430,6 +1431,22 @@ th {
 }
 .toast > svg {
   flex-shrink: 0;
+}
+/* A message stays until it is dismissed. While it is shown, Tab scrolls a focused control above
+   it: its height (App measures it as --toast-height), its offset of up to 24px and a 6px focus
+   ring, with 10px to spare. The page keeps as much room below the footer, so its last controls
+   can scroll that far too. */
+html:has(.toast) {
+  --toast-clearance: calc(var(--toast-height, 70px) + 40px);
+  scroll-padding-bottom: var(--toast-clearance);
+}
+html:has(.toast) .workspace {
+  padding-bottom: var(--toast-clearance);
+}
+/* The open drawer is a modal dialog that keeps Tab inside it, so a message waits under it rather
+   than covering its controls. */
+.sidebar.open ~ .toast {
+  z-index: 1050;
 }
 .skip-link {
   position: fixed;

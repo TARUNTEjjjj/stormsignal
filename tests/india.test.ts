@@ -455,6 +455,41 @@ test('feed entries are read newest first whatever their feed order; unknown orde
   );
 });
 
+test('the newest entries of a feed longer than 100 entries are read, wherever the feed lists them', async () => {
+  // 101 entries, oldest first. The first hundred were published three days ago and have expired;
+  // only the last one, published five minutes ago, is a current warning.
+  const published = (id: number) =>
+    id === 101 ? NOW - 5 * 60_000 : NOW - 3 * 86_400_000 + id * 60_000;
+  const rss = `<rss><channel>${Array.from(
+    { length: 101 },
+    (_, i) =>
+      `<item><link>${link(i + 1)}</link><pubDate>${new Date(published(i + 1)).toUTCString()}</pubDate></item>`,
+  ).join('')}</channel></rss>`;
+  const requested: number[] = [];
+  const result = await fetchIndiaAlerts(place, {
+    now: NOW,
+    request: async (url) => {
+      if (url.includes('/rss/')) return { text: rss, fetchedAt: NOW };
+      const id = Number(new URL(url).searchParams.get('identifier'));
+      requested.push(id);
+      return {
+        text: id === 101 ? cap(id) : cap(id).replaceAll('2026-11-01', '2026-10-29'),
+        fetchedAt: NOW,
+      };
+    },
+  });
+  assert.deepEqual(requested, [101, 100, 99, 98, 97, 96, 95, 94, 93, 92]);
+  assert.deepEqual(
+    result.alerts.map((alert) => alert.id),
+    ['sachet:fixture-101:0'],
+  );
+  // The feed's latest bulletin time comes from every entry, so a current feed is not called old.
+  assert.equal(result.feedUpdatedAt, published(101));
+  assert.doesNotMatch(result.coverage, /Current regional coverage is unverified/);
+  assert.match(result.coverage, /Additional feed entries were not checked/);
+  assert.doesNotMatch(result.coverage, /may not be the most recent/);
+});
+
 test('an oldest-first feed whose times have no zone is still read newest first', async () => {
   // Twelve entries, oldest first, with Indian clock times that name no zone (NOW is 06:30 there).
   const local = (minutesAgo: number) =>

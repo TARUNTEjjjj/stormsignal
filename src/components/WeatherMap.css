@@ -316,6 +316,10 @@
   outline: 3px solid #85f0e0;
   outline-offset: 3px;
 }
+/* The tools column clips anything outside it, so their ring is drawn inside each button. */
+.storm-map-tools button:focus-visible {
+  outline-offset: -3px;
+}
 .storm-visually-hidden {
   position: absolute;
   height: 1px;

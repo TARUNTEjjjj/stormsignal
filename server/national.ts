@@ -13,7 +13,7 @@ import {
   type CapDocument,
 } from './cap.ts';
 import { capAreaGeometry, capPolygonContains } from './global.ts';
-import { requestText, type TextOptions, type TextResult } from './http.ts';
+import { LIVE_TTL_MS, requestText, type TextOptions, type TextResult } from './http.ts';
 
 type RequestText = (url: string, options?: TextOptions) => Promise<TextResult>;
 export interface NationalAlertResult extends AlertResult {
@@ -115,7 +115,6 @@ function detailUrl(raw: string, country: 'PH' | 'ID'): string {
 }
 interface Feed {
   items: Array<{ url: string; publishedAt: number | null; order: number | null }>;
-  truncated: boolean;
   /** RSS only: some publication times name no time zone, so they order entries but are no instants. */
   unzonedTimes?: boolean;
 }
@@ -133,8 +132,8 @@ function feedItems(raw: string, country: 'PH' | 'ID', now: number): Feed {
   timestamp(feed.updated, now);
   if (Object.keys(feed).some((name) => name.endsWith(':entry')))
     throw new Error('Unexpected namespaced official feed entry.');
-  const entries = list(feed.entry, 1000);
-  const items = entries.slice(0, 100).map((value) => {
+  // Every entry is kept, as in parseRss: the newest are chosen once the entries are ordered.
+  const items = list(feed.entry, 1000).map((value) => {
     const entry = record(value);
     if (
       (entry['@_xmlns'] !== undefined && entry['@_xmlns'] !== 'http://www.w3.org/2005/Atom') ||
@@ -154,7 +153,7 @@ function feedItems(raw: string, country: 'PH' | 'ID', now: number): Feed {
     const publishedAt = timestamp(entry.updated ?? entry.published, now);
     return { url: text(cap['@_href'], 4000), publishedAt, order: publishedAt };
   });
-  return { items, truncated: entries.length > items.length };
+  return { items };
 }
 function contains(area: CapArea, place: Place): boolean {
   return (
@@ -211,7 +210,7 @@ export function createNationalAlertAdapter(
           remove = () => controller.signal.removeEventListener('abort', stop);
         });
         return await Promise.race([
-          request(url, { maxBytes: MAX_FEED_BYTES, ttlMs: 60_000, signal: controller.signal }),
+          request(url, { maxBytes: MAX_FEED_BYTES, ttlMs: LIVE_TTL_MS, signal: controller.signal }),
           interrupted,
         ]);
       } finally {
@@ -301,10 +300,12 @@ export function createNationalAlertAdapter(
         const url = loaded.find(
           (item) => key(item.document) === key(document) && item.document.sent === document.sent,
         )!.url;
-        for (const [index, info] of preferred.entries()) {
+        for (const info of preferred) {
           const areas = info.areas.filter((area) => contains(area, place));
           alerts.push({
-            id: `${key(document)}${index}`.slice(0, 2000),
+            // WMO matches blocks this check cannot evaluate, so both number a block by its place
+            // in the document: one id then names the same block in each source.
+            id: `${key(document)}${info.position}`.slice(0, 2000),
             title: info.headline || info.event,
             event: info.event,
             severity: info.severity,
@@ -353,9 +354,7 @@ export function createNationalAlertAdapter(
         coverage:
           `Direct ${source.name} check: ${loaded.length} of ${candidates.length} selected recent bulletins verified. Only unexpired original warning polygons or circles containing this point are included. ${source.limitation} Coverage is incomplete; an empty result is not an all-clear.` +
           (failed ? ` ${failed} selected bulletin(s) could not be verified.` : '') +
-          (omitted || feed.truncated
-            ? ` ${omitted ? `${omitted} additional` : 'Additional'} feed entries were not checked.`
-            : '') +
+          (omitted ? ` ${omitted} additional feed entries were not checked.` : '') +
           (unordered
             ? ' Some feed entries have no usable publication time, so the bulletins checked may not be the most recent.'
             : '') +

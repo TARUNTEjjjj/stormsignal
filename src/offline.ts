@@ -24,8 +24,8 @@ interface WarningCoverageMetadata {
   scopeLabel?: string;
   feedUpdatedAt?: number | null;
   /**
-   * The device clock minus the warning gateway's clock when the check arrived, in milliseconds
-   * (AlertResult.clockOffset). Issue and feed times are instants on the gateway's clock, so they
+   * The device clock minus the warning service's clock when the check arrived, in milliseconds
+   * (AlertResult.clockOffset). Issue and feed times are instants on the service's clock, so they
    * are checked against the save time on that clock, whatever the device clock read.
    */
   clockOffset?: number;
@@ -490,10 +490,11 @@ export function briefingText(briefing: OfflineBriefingData, now = Date.now()): s
     `Forecast retrieved: ${utc(b.forecast.fetchedAt)} | ${b.forecast.source}`,
     'The values below are the model forecast saved at that time, not current observations.',
     '',
-    'Saved hourly forecast (each rainfall value is for one hour):',
+    // The saved precipitation and its probability include snow as liquid water.
+    'Saved hourly forecast (each precipitation value is for one hour):',
     ...b.forecast.hours.map(
       (h) =>
-        `${utc(h.time)}: ${numberText(h.temperature, ' °C')}; feels like ${numberText(h.apparent, ' °C')}; rain ${numberText(h.precipitation, ' mm')}; chance ${numberText(h.probability, '%')}; gust ${numberText(h.gust, ' km/h')}`,
+        `${utc(h.time)}: ${numberText(h.temperature, ' °C')}; feels like ${numberText(h.apparent, ' °C')}; precipitation ${numberText(h.precipitation, ' mm')}; chance ${numberText(h.probability, '%')}; gust ${numberText(h.gust, ' km/h')}`,
     ),
     '',
     `Warning coverage at save: ${b.warnings.status.toUpperCase()}`,

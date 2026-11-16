@@ -76,9 +76,18 @@ export function normalizeRepository(repository, { category, sourceQuery, fetched
   };
 }
 
+// Title words that say nothing about a repository; "and" would match android, command or pandas.
+const STOP_WORDS = new Set(['and', 'the', 'for', 'with', 'from', 'into', 'are', 'its', 'our', 'your']);
+
 export function rankResources(items, category, { now = Date.now(), limit = 12 } = {}) {
   const time = Date.parse(instant(now));
-  const tokens = [...new Set(`${category.id} ${category.title}`.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2))];
+  const tokens = [...new Set(`${category.id} ${category.title}`.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 2 && !STOP_WORDS.has(token)))];
+  // Curated seeds are recognized by name, or by the repo: request that fetched them, which also
+  // identifies a renamed seed and a seed whose discovery copy wins the deduplication below.
+  const seedNames = new Set((category.seeds ?? []).map((name) => name.toLowerCase()));
+  const seedIds = new Set(items.filter((item) => typeof item.sourceQuery === 'string' && item.sourceQuery.startsWith('repo:') && seedNames.has(item.sourceQuery.slice(5).toLowerCase())).map((item) => String(item.id)));
+  const isSeed = (item) => item.provenance === 'seed' || seedIds.has(String(item.id)) || seedNames.has(item.fullName.toLowerCase());
+  const order = (a, b) => b.score - a.score || (b.stars ?? -1) - (a.stars ?? -1) || a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase(), 'en');
   const unique = new Map();
   for (const item of items) {
     const key = String(item.id).startsWith('seed:') ? item.fullName.toLowerCase() : String(item.id);
@@ -86,7 +95,7 @@ export function rankResources(items, category, { now = Date.now(), limit = 12 } 
     if (!prior || (prior.stale && !item.stale) || ((Date.parse(item.fetchedAt) || 0) > (Date.parse(prior.fetchedAt) || 0))) unique.set(key, item);
   }
   const verifiedNames = new Set([...unique.values()].filter((item) => item.provenance === 'github').map((item) => item.fullName.toLowerCase()));
-  return [...unique.values()].filter((item) => item.provenance !== 'seed' || !verifiedNames.has(item.fullName.toLowerCase())).map((item) => {
+  const scored = [...unique.values()].filter((item) => item.provenance !== 'seed' || !verifiedNames.has(item.fullName.toLowerCase())).map((item) => {
     const searchable = `${item.fullName} ${item.description} ${item.topics.join(' ')}`.toLowerCase();
     const relevance = tokens.length ? tokens.filter((token) => searchable.includes(token)).length / tokens.length : 0;
     const popularity = Math.min(Math.log10(1 + (item.stars ?? 0)) / 6, 1);
@@ -95,7 +104,11 @@ export function rankResources(items, category, { now = Date.now(), limit = 12 } 
     const score = Math.round((60 * relevance + 30 * popularity + 10 * recency) * 100) / 100;
     const reason = item.provenance === 'seed' ? `Curated starting point for ${category.title}; GitHub metadata not yet fetched.` : `${category.title} resource; ${item.stars} GitHub stars${item.stale ? '; cached metadata' : ''}.`;
     return { ...item, score, reason };
-  }).sort((a, b) => b.score - a.score || (b.stars ?? -1) - (a.stars ?? -1) || a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase(), 'en')).slice(0, limit);
+  });
+  // Curated seeds are the category's primary references: discovery results fill the remaining
+  // places instead of ranking them out. Excluded seeds were removed before ranking.
+  const seeds = scored.filter(isSeed).sort(order).slice(0, limit);
+  return [...seeds, ...scored.filter((item) => !isSeed(item)).sort(order).slice(0, limit - seeds.length)].sort(order);
 }
 
 function seedItems(config, sourceCache = {}) {

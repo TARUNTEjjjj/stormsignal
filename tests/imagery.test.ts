@@ -10,6 +10,7 @@ import {
   domainUrl,
   isFrameStale,
   fetchImageryFrames,
+  failedTileTracker,
 } from '../src/imagery';
 
 const now = Date.parse('2026-10-30T18:00:00Z');
@@ -65,6 +66,32 @@ test('malformed metadata, unsupported durations and invalid calendar dates canno
     [],
   );
 });
+test('a Domain start tag cannot run across another tag', () => {
+  assert.throws(
+    () => parseDomainTimes('<Domain <b>2026-10-30</Domain>', DAILY_IMAGERY, now),
+    /NASA did not return imagery time metadata/,
+  );
+  // Attributes and namespace prefixes are still read.
+  assert.deepEqual(
+    parseDomainTimes(
+      '<wmts:Domain xmlns:wmts="https://www.opengis.net/wmts/1.0"\n a="1">2026-10-29,2026-10-30</wmts:Domain>',
+      DAILY_IMAGERY,
+      now,
+    ),
+    ['2026-10-29', '2026-10-30'],
+  );
+});
+test('metadata at the size limit made of unterminated Domain tags is rejected quickly', () => {
+  // 200,000 characters, inside the accepted limit. Parsing runs on the page's main thread.
+  const hostile = '<Domain '.repeat(25_000);
+  const started = performance.now();
+  assert.throws(
+    () => parseDomainTimes(hostile, infrared, now),
+    /NASA did not return imagery time metadata/,
+  );
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 500, `parsing took ${Math.round(elapsed)} ms`);
+});
 test('timestamped tile URLs have provider matrix order and never interpolate untrusted dates', () => {
   assert.equal(
     imageryTileUrl(infrared, '2026-10-30T17:40:00Z'),
@@ -90,6 +117,29 @@ test('metadata URL rounds fractional wall-clock seconds to the provider frame ca
   assert.equal(url.searchParams.get('TIME'), '2026-10-29T18:00:00Z/2026-10-30T18:00:00Z');
   const daily = new URL(domainUrl(DAILY_IMAGERY, now + 57_992));
   assert.equal(daily.searchParams.get('TIME'), '2026-10-23/2026-10-30');
+});
+
+test('a map tile notice stays while a failed tile is on the map and clears once none is', () => {
+  // Leaflet's tile events, with the grid coordinates of the tile concerned.
+  let failed = false;
+  const tiles = failedTileTracker((value) => (failed = value));
+  const tile = (x: number, y: number, z = 5) => ({ coords: { x, y, z } });
+  tiles.tileerror(tile(3, 4));
+  assert.equal(failed, true);
+  // A small pan loads and unloads other tiles; the failed tile is still shown.
+  tiles.tileload(tile(5, 4));
+  tiles.tileunload(tile(9, 9));
+  assert.equal(failed, true);
+  // Panning or zooming away unloads it.
+  tiles.tileunload(tile(3, 4));
+  assert.equal(failed, false);
+  // With two failed tiles, the notice stays until both have loaded or left the map.
+  tiles.tileerror(tile(1, 1));
+  tiles.tileerror(tile(1, 1, 6));
+  tiles.tileload(tile(1, 1));
+  assert.equal(failed, true);
+  tiles.tileunload(tile(1, 1, 6));
+  assert.equal(failed, false);
 });
 
 const originalFetch = globalThis.fetch;
@@ -143,6 +193,28 @@ test('an already-cancelled imagery request cannot receive cached frames', async 
     name: 'AbortError',
   });
   assert.equal(requests, 1);
+});
+
+test('satellite metadata is requested again after the device clock is set back', async (t) => {
+  // Frames every 10 minutes from noon to 18:00 UTC, so a clock an hour behind still has recent ones.
+  let clock = now;
+  t.mock.method(Date, 'now', () => clock);
+  let requests = 0;
+  globalThis.fetch = (async () => {
+    requests++;
+    return new Response('<Domain>2026-10-30T12:00:00Z/2026-10-30T18:00:00Z/PT10M</Domain>');
+  }) as typeof fetch;
+  await fetchImageryFrames(infrared, undefined, true);
+  clock = now + 4 * 60_000;
+  assert.equal((await fetchImageryFrames(infrared)).at(-1), '2026-10-30T18:00:00Z');
+  assert.equal(requests, 1, 'metadata four minutes old is answered from memory');
+  // The device clock is corrected back an hour: the saved metadata would read as -56 min old.
+  clock = now - 56 * 60_000;
+  assert.equal((await fetchImageryFrames(infrared)).at(-1), '2026-10-30T17:00:00Z');
+  assert.equal(requests, 2, 'metadata stamped later than the present is not reused');
+  clock += 60_000;
+  await fetchImageryFrames(infrared);
+  assert.equal(requests, 2, 'the new metadata is answered from memory again');
 });
 
 test('imagery metadata enforces the byte limit on chunked UTF-8 and cancels unread data', async () => {

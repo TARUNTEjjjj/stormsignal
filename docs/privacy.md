@@ -14,6 +14,7 @@ Your browser contacts the host to download the application. It also makes HTTPS 
 | GDACS (`www.gdacs.org/gdacsapi/`)   | Recent global cyclone, flood and wildfire reports | Date range, event types, impact levels, pagination and network information; the app does not send the selected coordinates or search radius to GDACS |
 | NASA GIBS                           | Available frames and satellite tiles              | Layer, dates, map tile coordinates and network information                                                                                           |
 | OpenStreetMap tile service          | Base map                                          | Viewed tile coordinates and network information                                                                                                      |
+| GitHub raw-content CDN              | Resource-library collection checks                | The fixed public snapshot address on `raw.githubusercontent.com`, this site's origin and network information; no coordinates, search text or cookies |
 
 Map requests can reveal the area you are viewing. A searched location need not be your current location. Do not enter home addresses or other sensitive information merely to obtain a city-level forecast.
 
@@ -25,7 +26,7 @@ The GDACS panel downloads a bounded global report snapshot and computes nearby r
 
 The application does not automatically request device geolocation. The **Use my location** button requires a deliberate action and the browser's permission. Selected coordinates are then sent to data providers to obtain the requested information. You can refuse permission and use place search. The app does not continuously track device location.
 
-Provider policies apply independently. Review [Open-Meteo's privacy terms](https://open-meteo.com/en/terms), [NASA privacy](https://www.nasa.gov/privacy/), [NWS privacy](https://www.weather.gov/privacy), and [OpenStreetMap privacy](https://osmfoundation.org/wiki/Privacy_Policy). A hosting provider may retain security and access logs under its own policy. The interface uses system fonts and does not request external font files.
+Provider policies apply independently. Review [Open-Meteo's privacy terms](https://open-meteo.com/en/terms), [NASA privacy](https://www.nasa.gov/privacy/), [NWS privacy](https://www.weather.gov/privacy), [OpenStreetMap privacy](https://osmfoundation.org/wiki/Privacy_Policy), and [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). A hosting provider may retain security and access logs under its own policy. The interface uses system fonts and does not request external font files.
 
 **Data saver**, the default mode, requests a compact forecast and supported official warning data. Place search still contacts the geocoding service. It does not load maps, satellite imagery, comparison models, air-quality data or GDACS reports, and it does not poll in the background. **Full workspace** enables those additional features. **Offline only** pauses application data-provider requests and online place search; opening the website itself, browser-managed updates, and links you follow can still contact the host or destination. The downloaded emergency-kit HTML makes no background network requests.
 
@@ -48,6 +49,14 @@ The production application registers a service worker that caches the required s
 ## Refreshes and optional notifications
 
 In **Full workspace**, while the dashboard is visible and the browser reports it is online, it checks supported official alerts every minute and refreshes weather-related panels every 15 minutes. GDACS reports refresh every 10 minutes. Short in-memory provider caches may satisfy a request without another network call. Returning to the visible dashboard also requests a refresh. The satellite panel refreshes availability separately. Provider/network failures can prevent any of these updates. **Data saver** uses deliberate refreshes and new place selection rather than periodic polling. **Offline only** receives no new weather or warnings.
+
+While the dashboard is open in **Full workspace** and the browser reports a connection, including in a background tab, it also runs the resource library's background work:
+
+- **Release check:** a request to this site for `/app-version.json` each time Full workspace starts (opening the dashboard in it, switching to it or reconnecting), every 15 minutes, and when you return to the tab, at most once a minute. When it finds a new release, the browser downloads that release from this site.
+- **Collection check:** the library's public collection snapshot, read once from this site's bundled copy and requested from GitHub's raw-content CDN when Full workspace first starts in an open dashboard, then every 15 minutes. Switching back to Full workspace, returning to the tab or reconnecting checks again only once 15 minutes have passed. GitHub receives what the table above lists.
+- **Offline library:** a second service worker, scoped to `/resources/`, downloads the resource-library page and its files from this site when it is installed and when a release updates it.
+
+**Data saver** and **Offline only** make none of these requests, and switching to either stops further checks at once; a service-worker download the browser has already started still finishes. The resource library page (`/resources/`) has its own entry point and runs the same checks while it is open, in any mode.
 
 Page alerts are optional and require browser notification permission. The app creates local browser notifications from retrieved NWS alerts; it does not register a push-subscription server. Notifications require the page to remain open, with refreshes dependent on visibility and browser behavior. They are not a guaranteed background or emergency-warning channel. Disabling page alerts stops this session's notifications; browser settings control the site-level permission.
 

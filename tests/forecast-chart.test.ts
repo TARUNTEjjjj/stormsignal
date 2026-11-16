@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  axisTicks,
+  comparisonTimeline,
   forecastDomain,
   forecastCsv,
   forecastGeometry,
@@ -8,6 +10,7 @@ import {
   forecastWindow,
   nearestForecastHour,
   pointPosition,
+  selectedHourIndex,
 } from '../src/forecast-chart';
 import type { Hour, ModelForecast } from '../src/types';
 const HOUR = 3_600_000;
@@ -136,4 +139,133 @@ test('pointer selection clamps boundaries and follows timestamps rather than arr
   assert.equal(nearestForecastHour(times, NaN), 0);
   assert.equal(nearestForecastHour([], 0.5), 0);
   assert.equal(nearestForecastHour([7], 1), 0);
+});
+
+test('the inspected hour is found by its time, not by its place in the window', () => {
+  const hourly = Array.from({ length: 30 }, (_, offset) => offset * HOUR);
+  const before = hourly.slice(0, 24);
+  // Half past each hour the app drops the oldest hour, so every later hour moves one place left.
+  const after = hourly.slice(1, 25);
+  assert.equal(after[selectedHourIndex(after, before[6])], before[6]);
+  assert.equal(selectedHourIndex(after, before[6]), 5);
+  // No selection yet, or an inspected hour that has left the window: the first hour.
+  assert.equal(selectedHourIndex(after, null), 0);
+  assert.equal(selectedHourIndex(after, before[0]), 0);
+  // A time beyond the window, or in a gap the provider left: the last, or the next later hour.
+  assert.equal(selectedHourIndex(before, 50 * HOUR), 23);
+  assert.equal(selectedHourIndex([0, HOUR, 4 * HOUR], 2 * HOUR), 2);
+  assert.equal(selectedHourIndex([], 2 * HOUR), 0);
+});
+
+const START = Date.UTC(2026, 10, 15, 14);
+function model(
+  name: string,
+  readings: [offset: number, temperature: number | null, wind?: number][],
+) {
+  return {
+    id: name,
+    name,
+    fetchedAt: 0,
+    hours: readings.map(([offset, temperature, wind = null]) => ({
+      time: START + offset * HOUR,
+      temperature,
+      precipitation: null,
+      wind,
+    })),
+  } satisfies ModelForecast;
+}
+const offsets = (timeline: Hour[]) => timeline.map((hour) => (hour.time - START) / HOUR);
+
+test('comparison hours the local forecast omits join the timeline with local values missing', () => {
+  const local = [3, 0, 1].map((offset) => ({ ...hours[0], time: START + offset * HOUR }));
+  const gfs = model(
+    'GFS',
+    [-1, 0, 1, 2, 3, 24, 30].map((offset) => [offset, 20 + offset]),
+  );
+  // 16:00 is missing locally. Hours before the first local hour or beyond the range stay out.
+  const timeline = comparisonTimeline(local, [gfs], 24);
+  assert.deepEqual(offsets(timeline), [0, 1, 2, 3]);
+  assert.deepEqual(timeline[2], {
+    time: START + 2 * HOUR,
+    temperature: null,
+    apparent: null,
+    precipitation: null,
+    probability: null,
+    wind: null,
+    gust: null,
+    humidity: null,
+    code: null,
+    uv: null,
+  });
+  const [localPoints, gfsPoints] = forecastSeries(timeline, [gfs], 'temperature');
+  assert.deepEqual(
+    gfsPoints.map((point) => point.value),
+    [20, 21, 22, 23],
+  );
+  const domain = forecastDomain([localPoints, gfsPoints], 'temperature');
+  assert.equal((forecastGeometry(gfsPoints, domain).line.match(/M/g) || []).length, 1);
+  assert.equal((forecastGeometry(localPoints, domain).line.match(/M/g) || []).length, 2);
+  assert.ok(
+    forecastCsv(timeline, [gfs], 'temperature').includes('"2026-11-15T16:00:00.000Z",,22\r\n'),
+  );
+  assert.deepEqual(offsets(comparisonTimeline(local, [gfs], 72)), [0, 1, 2, 3, 24, 30]);
+  // Two models reporting the same missing hour add it once. A reading of any metric keeps the
+  // hour, so the timeline does not change with the metric shown; a record without one adds none.
+  assert.deepEqual(
+    offsets(comparisonTimeline(local, [gfs, model('ECMWF', [[2, 21]])], 24)),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(
+    offsets(comparisonTimeline(local, [model('ECMWF', [[2, null, 7]])], 24)),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(
+    offsets(comparisonTimeline(local, [model('ECMWF', [[2, null]])], 24)),
+    [0, 1, 3],
+  );
+  assert.deepEqual(comparisonTimeline(local, [], 24), forecastWindow(local, 24));
+  assert.deepEqual(comparisonTimeline([], [gfs], 24), []);
+});
+
+test('a comparison model on another time grid cannot open gaps in the local forecast', () => {
+  const local = [0, 1, 2].map((offset) => ({ ...hours[0], time: START + offset * HOUR }));
+  const halfHours = model(
+    'Half-hour grid',
+    [0.5, 1.5, 2.5].map((offset) => [offset, 10]),
+  );
+  // Readings between joined local hours stay unmatched; the one after the last local hour is kept.
+  const timeline = comparisonTimeline(local, [halfHours], 24);
+  assert.deepEqual(offsets(timeline), [0, 1, 2, 2.5]);
+  const [localPoints] = forecastSeries(timeline, [halfHours], 'temperature');
+  const line = forecastGeometry(localPoints, { min: 0, max: 30 });
+  assert.equal((line.line.match(/M/g) || []).length, 1);
+  assert.equal(line.isolated.length, 0);
+});
+
+test('axis ticks follow elapsed time and stay a quarter of the axis apart', () => {
+  const ticks = (hourOffsets: number[]) =>
+    axisTicks(hourOffsets.map((offset) => offset * HOUR)).map((index) => hourOffsets[index]);
+  const hourly = (length: number) => Array.from({ length }, (_, offset) => offset);
+  assert.deepEqual(ticks(hourly(24)), [0, 7, 15, 23]);
+  assert.deepEqual(ticks(hourly(72)), [0, 23, 47, 71]);
+  // Evenly spaced hours keep the ticks that array positions used to give them. Six hours are
+  // the exception: their second tick sat a fifth of the axis from the first.
+  for (let length = 2; length <= 96; length++)
+    if (length !== 6)
+      assert.deepEqual(ticks(hourly(length)), [
+        ...new Set([
+          0,
+          Math.floor((length - 1) / 3),
+          Math.floor((2 * (length - 1)) / 3),
+          length - 1,
+        ]),
+      ]);
+  assert.deepEqual(ticks(hourly(6)), [0, 3, 5]);
+  // With hours missing, array positions gave [0, 2, 4, 23], [0, 1, 2, 23] and [0, 2, 41, 71].
+  assert.deepEqual(ticks([0, 1, 2, 3, 4, 5, 22, 23]), [0, 23]);
+  assert.deepEqual(ticks([0, 1, 2, 3, 23]), [0, 23]);
+  assert.deepEqual(ticks([0, 1, 2, 3, 40, 41, 42, 70, 71]), [0, 42, 71]);
+  assert.deepEqual(ticks([0, 6, 7, 20, 23]), [0, 7, 23]);
+  assert.deepEqual(axisTicks([5 * HOUR]), [0]);
+  assert.deepEqual(axisTicks([]), []);
 });

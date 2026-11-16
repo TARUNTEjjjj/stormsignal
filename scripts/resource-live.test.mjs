@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PROJECT, normalizeCatalog, isOlderCatalog, catalogJSON, loadRemoteCatalog} from '../resources/catalog.mjs';
-import {createCatalogStore} from '../resources/storage.mjs';
+import {createCatalogStore, CATALOG_KEY} from '../resources/storage.mjs';
 import {createCatalogController, bindCatalogLifecycle, REFRESH_INTERVAL_MS} from '../resources/live.mjs';
 
 const snapshot = (date = '2026-11-14T00:00:00Z', title = 'Latest collection') => normalizeCatalog({schemaVersion: 1, project: PROJECT,
@@ -240,4 +240,52 @@ test('storage strips unrelated data, bounds snapshots, and catches asynchronous 
   assert.equal(aborted, true); store.close();
   const oversized = snapshot(); oversized.items = Array.from({length: 2000}, (_, id) => ({...oversized.items[0], id, description: 'a'.repeat(500), reason: 'b'.repeat(240)}));
   assert.throws(() => catalogJSON(oversized), /byte limit/);
+});
+
+// A small IndexedDB that keeps what is written: a transaction reads the record, and a put made while
+// handling that read is stored before the transaction completes.
+function savedDatabase(initial = null) {
+  const data = new Map(initial ? [[CATALOG_KEY, structuredClone(initial)]] : []), counts = {puts: 0};
+  const db = {objectStoreNames: {contains: () => true}, createObjectStore() {}, close() {},
+    transaction(_name, mode) {
+      const tx = {abort() { queueMicrotask(() => tx.onabort?.()); }, objectStore: () => ({
+        get(key) { const request = {}; queueMicrotask(() => { request.result = structuredClone(data.get(key)); request.onsuccess(); queueMicrotask(() => tx.oncomplete?.()); }); return request; },
+        put(value, key) { assert.equal(mode, 'readwrite'); counts.puts++; data.set(key, structuredClone(value)); },
+      })};
+      return tx;
+    }};
+  return {data, counts, indexedDB: {open() { const request = {}; queueMicrotask(() => { request.result = db; request.onsuccess(); }); return request; }}};
+}
+
+test('the IndexedDB store never downgrades, skips identical writes, and tells other tabs about accepted saves', async () => {
+  const database = savedDatabase(snapshot('2026-11-15T00:00:00Z', 'Newer')), posted = [];
+  const store = createCatalogStore({indexedDB: database.indexedDB, BroadcastChannel: class { constructor(name) { this.name = name; } postMessage(message) { posted.push({channel: this.name, message}); } close() {} }});
+  const downgrade = await store.save(snapshot('2026-11-14T00:00:00Z', 'Older'));
+  assert.deepEqual([downgrade.accepted, downgrade.saved, downgrade.catalog.title], [false, true, 'Newer'], 'an older collection is refused');
+  assert.equal(database.data.get(CATALOG_KEY).title, 'Newer');
+  const same = await store.save(snapshot('2026-11-15T00:00:00Z', 'Newer'));
+  assert.equal(same.accepted, false);
+  assert.equal(database.counts.puts, 0, 'neither an older nor an identical collection is written');
+  assert.deepEqual(posted, []);
+  const latest = await store.save(snapshot('2026-11-16T00:00:00Z', 'Latest'));
+  assert.deepEqual([latest.accepted, database.counts.puts, database.data.get(CATALOG_KEY).title], [true, 1, 'Latest']);
+  assert.deepEqual(posted, [{channel: 'resource-library-updates-v1', message: {key: CATALOG_KEY}}], 'only an accepted save is announced');
+  assert.equal((await store.load()).title, 'Latest');
+  store.close();
+});
+
+test('with the real store, a newer collection saved by another tab during a check is kept and shown', async () => {
+  const database = savedDatabase();
+  const store = createCatalogStore({indexedDB: database.indexedDB, BroadcastChannel: null});
+  const {controller} = setup({store, fetchRemote: async () => {
+    await createCatalogStore({indexedDB: database.indexedDB, BroadcastChannel: null}).save(snapshot('2026-11-15T00:00:00Z', 'Other tab'));
+    return snapshot('2026-11-14T00:00:00Z', 'Older CDN copy');
+  }});
+  await controller.start();
+  assert.equal(controller.getState().catalog.title, 'Other tab');
+  assert.equal(controller.getState().source, 'saved');
+  assert.equal(controller.getState().savedOffline, true);
+  assert.equal(controller.getState().retainedNewer, true);
+  assert.equal(database.data.get(CATALOG_KEY).title, 'Other tab');
+  controller.stop(); store.close();
 });

@@ -41,6 +41,30 @@ test('CAP parser preserves multilingual details, issuer, geocodes, polygon coord
   });
 });
 
+test('an information block keeps its place in the document when other blocks are filtered out', () => {
+  const document = parseCap(
+    xml(
+      info().replace('2026-11-01T03:00:00Z', '2026-11-01T00:30:00Z') +
+        info().replace('en-IN', 'ta-IN') +
+        info(),
+    ),
+    NOW,
+  );
+  assert.deepEqual(
+    document.infos.map((i) => i.position),
+    [0, 1, 2],
+  );
+  // The first block has expired. The others keep the numbers that alert ids are built from, so a
+  // block has the same id in every source, however each source filters the document.
+  assert.deepEqual(
+    activeCapRecords([document], NOW)[0].infos.map((i) => [i.position, i.language]),
+    [
+      [1, 'ta-IN'],
+      [2, 'en-IN'],
+    ],
+  );
+});
+
 test('CAP namespace guard accepts scoped CAP prefixes and unrelated extension content', () => {
   const expected = parseCap(xml(), NOW);
   const prefixed = xml()
@@ -119,13 +143,32 @@ test('CAP parser decodes XML numeric character references in warning text', () =
 test('CAP parser rejects malformed XML, entities, oversized payloads and invalid clocks', () => {
   for (const source of [
     xml().slice(0, -5),
-    `<!DOCTYPE alert [<!ENTITY x SYSTEM "file:///private">]>${xml()}`,
-    `<!ENTITY x "bad">${xml()}`,
     xml().replace('Fixture description', '漢'.repeat(100_000)),
     xml().replace('2026-11-01T00:00:00Z', '2026-11-01T02:00:00Z'),
   ])
     assert.throws(() => parseCap(source, NOW));
   assert.throws(() => parseCap(xml(), NaN));
+  // Well-formed: without the guard, the parser would put the entity's text in the headline.
+  const entity = `<!DOCTYPE alert [<!ENTITY x "Injected by DTD">]>${xml(info().replace('Test &amp; fixture only', '&x;'))}`;
+  for (const source of [
+    entity,
+    `<?xml version="1.0" encoding="UTF-8"?>${entity}`,
+    `<!DOCTYPE alert [<!ENTITY x SYSTEM "file:///private">]>${xml()}`,
+    `<!ENTITY x "bad">${xml()}`,
+  ])
+    assert.throws(() => parseCap(source, NOW), /entities and document types are not accepted/);
+  assert.throws(
+    () =>
+      parseRss(
+        '<!DOCTYPE rss [<!ENTITY x "Injected">]><rss version="2.0"><channel><title>&x;</title></channel></rss>',
+      ),
+    /entities and document types are not accepted/,
+  );
+  // Every field is within its own limit: only the document as a whole is over 256,000 bytes.
+  const padded = (spaces: number) =>
+    xml().replace('<identifier>', `${' '.repeat(spaces)}<identifier>`);
+  assert.throws(() => parseCap(padded(256_000), NOW), /size limit/);
+  assert.equal(parseCap(padded(255_000), NOW).identifier, 'fixture-1');
 });
 
 test('province bulletins retain 197 district polygons without dropping original boundaries', () => {
@@ -213,12 +256,15 @@ test('RSS uses latest item publication over an old channel date and bounds its l
     `<rss><channel><pubDate>Fri, 16 Oct 2026 00:00:00 GMT</pubDate>${item.repeat(101)}</channel></rss>`,
   );
   assert.equal(feed.updatedAt, NOW - 3_600_000);
-  assert.equal(feed.items.length, 100);
-  assert.equal(feed.truncated, true);
+  // Every entry is read, up to 1,000; a longer list is rejected, never cut short.
+  assert.equal(feed.items.length, 101);
+  assert.throws(
+    () => parseRss(`<rss><channel>${item.repeat(1001)}</channel></rss>`),
+    /exceeds its bound/,
+  );
   assert.deepEqual(parseRss('<rss><channel><title>Empty feed</title></channel></rss>'), {
     items: [],
     updatedAt: null,
-    truncated: false,
     unzonedTimes: false,
   });
   assert.throws(() =>
@@ -226,6 +272,25 @@ test('RSS uses latest item publication over an old channel date and bounds its l
       '<rss><channel><item><link>url</link><pubDate>bad date</pubDate></item></channel></rss>',
     ),
   );
+});
+
+test('a feed of more than 100 entries is ordered as a whole, so its newest entry is read first wherever it is listed', () => {
+  // 101 entries listed oldest first, a minute apart; the last one is the most recent.
+  const published = (id: number) => NOW - (102 - id) * 60_000;
+  const feed = parseRss(
+    `<rss><channel>${Array.from(
+      { length: 101 },
+      (_, i) =>
+        `<item><link>https://sachet.ndma.gov.in/cap_public_website/FetchXMLFile?identifier=${i + 1}</link><pubDate>${new Date(published(i + 1)).toUTCString()}</pubDate></item>`,
+    ).join('')}</channel></rss>`,
+  );
+  const { items, certain } = newestFirst(feed.items);
+  assert.deepEqual(
+    items.slice(0, 3).map((item) => Number(item.url.split('=')[1])),
+    [101, 100, 99],
+  );
+  assert.equal(certain, true);
+  assert.equal(feed.updatedAt, published(101));
 });
 
 test('RSS times without a time zone are unknown, never read in the server time zone', () => {

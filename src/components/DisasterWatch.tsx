@@ -98,8 +98,11 @@ export default function DisasterWatch({ place }: { place: Place }) {
         <button
           type="button"
           className="quiet-button"
-          onClick={() => setRevision((r) => r + 1)}
-          disabled={loading}
+          // Busy, not disabled: a disabled button would drop keyboard focus to the page.
+          onClick={() => {
+            if (!loading) setRevision((r) => r + 1);
+          }}
+          aria-disabled={loading || undefined}
         >
           <RefreshCw size={14} className={loading ? 'spin' : ''} />
           {loading ? 'Loading reports' : 'Refresh reports'}

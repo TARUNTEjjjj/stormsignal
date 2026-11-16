@@ -5,7 +5,7 @@ Help make weather evidence easier to understand. Small, reviewable changes with 
 1. Open an issue describing the user problem or data gap. Never include private coordinates, contact details, tokens or personal emergency information.
 2. Fork the repository and create a topic branch. Use Node.js 22 (`nvm use` if available), then run `npm ci`. The minimum supported version is 22.12.0.
 3. Implement the change with accessible labels, keyboard behavior and clear failure states.
-4. Add tests for the behavior that could regress. Run `npm run check` for unit tests, TypeScript validation, the production build and artifact checks.
+4. Add tests for the behavior that could regress. Run `npm run check` for unit tests, TypeScript validation, the production build and artifact checks, and `npm run format:check` for formatting (`npm run format` fixes it).
 5. For map/provider changes, test real responses within provider limits. `npm run test:live` checks real warning feeds after a successful build; it is deliberately separate from deterministic CI. Record the date, region, source and actual checks in your pull request. Include screenshots for UI changes, without personal data.
 
 ## Data and safety standards

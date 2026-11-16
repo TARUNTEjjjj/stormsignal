@@ -12,7 +12,7 @@ A React + TypeScript dashboard for exploring weather evidence, with custom SVG g
 
 ![StormSignal desktop dashboard with current conditions and the interactive forecast explorer](docs/images/dashboard-desktop.jpg)
 
-- **Explore the forecast:** inspect individual hours with a pointer or keyboard, switch temperature/rainfall/wind, and compare available time ranges. The SVG chart preserves missing-data gaps and has an exact-value table. Data saver uses the forecast already loaded; model comparisons and map downloads remain optional.
+- **Explore the forecast:** inspect individual hours with a pointer or keyboard, switch temperature/precipitation/wind, and compare available time ranges. The SVG chart preserves missing-data gaps and has an exact-value table. Data saver uses the forecast already loaded; model comparisons and map downloads remain optional.
 - **Export a comparison:** download the displayed metric as CSV with UTC timestamps, units, and model columns aligned by timestamp. Missing values stay blank. The 24/72-hour ranges measure elapsed time even when a provider omits observations.
 - **Inspect the visual implementation:** [ForecastExplorer](src/components/ForecastExplorer.tsx), [AtmosphereScene](src/components/AtmosphereScene.tsx) and the [frontend design styles](src/frontend-design.css) separate interactive data graphics, decorative atmosphere artwork and presentation. The artwork is an illustration, not radar or a satellite observation.
 - **Review the engineering:** follow the [UI case study and acceptance checklist](docs/ui-case-study.md), then the [dated verification record](docs/verification.md). The checklist states expected behavior; historical test results apply to their recorded release, not every later commit.
@@ -35,7 +35,7 @@ npm run test:live  # optional real-provider warning checks; run after a build
 npm run test:live -- --base-url=https://stormsignal-weather.pages.dev # hosted API
 ```
 
-`npm test`, `npm run typecheck` and `npm run build` are also available individually. CI installs from the lockfile and runs `npm run check` on Node 22. Tests use fixtures and mocks where appropriate; live-provider checks are separate because network access and upstream data can change.
+`npm test`, `npm run typecheck` and `npm run build` are also available individually. CI installs from the lockfile and runs `npm run format:check` and `npm run check` on Node 22; `npm run format` fixes formatting. Tests use fixtures and mocks where appropriate; live-provider checks are separate because network access and upstream data can change.
 
 ## Reviewer tour
 
@@ -90,4 +90,4 @@ Release builds include `/third-party-licenses.md` for both the browser bundles a
 
 Explore the project-specific [resource catalog](resources/README.md): curated references, star-ranked discovery, dated source metadata, cached failure recovery and an optional read-only server API. The daily refresh workflow updates the public catalog. The resource library reads the latest GitHub snapshot with a bundled offline fallback; application-code updates still follow the existing deployment process.
 
-The web resource library now checks for fresh public metadata every 15 minutes while an app tab is open and saves the latest validated collection for offline visits. It shows successful-check and source-observation dates separately, preserves good data during failures, and keeps its offline storage separate from application progress. See [resource update and offline behavior](resources/README.md#automatic-checks-and-offline-collections-in-the-web-app).
+The web resource library now checks for fresh public metadata every 15 minutes while it is open, or while the dashboard is open in Full workspace with a connection, and saves the latest validated collection for offline visits. It shows successful-check and source-observation dates separately, preserves good data during failures, and keeps its offline storage separate from application progress. See [resource update and offline behavior](resources/README.md#automatic-checks-and-offline-collections-in-the-web-app).

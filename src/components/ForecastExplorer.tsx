@@ -4,6 +4,8 @@ import { finite, localTime, value } from '../presentation';
 import {
   CHART_HEIGHT,
   CHART_WIDTH,
+  axisTicks,
+  comparisonTimeline,
   forecastDomain,
   forecastCsv,
   forecastGeometry,
@@ -11,16 +13,19 @@ import {
   forecastWindow,
   nearestForecastHour,
   pointPosition,
+  selectedHourIndex,
   valuePosition,
   type ForecastMetric,
 } from '../forecast-chart';
 import type { Hour, ModelForecast } from '../types';
 import './ForecastExplorer.css';
 
+// The provider's precipitation and its probability cover rain, showers and snow. `button` is the
+// visible text of the metric's toolbar button; on some narrow screens "Precipitation" overflows it.
 const METRICS = {
-  temperature: { label: 'Temperature', unit: '°C', icon: Thermometer },
-  precipitation: { label: 'Rainfall', unit: 'mm', icon: CloudRain },
-  wind: { label: 'Wind', unit: 'km/h', icon: Wind },
+  temperature: { label: 'Temperature', button: 'Temperature', unit: '°C', icon: Thermometer },
+  precipitation: { label: 'Precipitation', button: 'Precip.', unit: 'mm', icon: CloudRain },
+  wind: { label: 'Wind', button: 'Wind', unit: 'km/h', icon: Wind },
 } as const;
 const COLORS = ['#8be7d3', '#ffbb72', '#a6a3ff', '#82c9ec'];
 const timeOptions: Intl.DateTimeFormatOptions = {
@@ -42,18 +47,23 @@ export default function ForecastExplorer({
 }) {
   const [metric, setMetric] = useState<ForecastMetric>('temperature');
   const [range, setRange] = useState(24);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedTime, setSelectedTime] = useState<number | null>(null);
   const id = useId();
   const orderedHours = useMemo(() => forecastWindow(hours, 72), [hours]);
   const hasLongRange = orderedHours.some(
     (hour) => hour.time >= (orderedHours[0]?.time ?? 0) + 24 * 3_600_000,
   );
   const visibleRange = hasLongRange ? range : 24;
+  // Comparison models can report an hour the local forecast omits; it stays on the timeline.
   const selected = useMemo(
-    () => forecastWindow(orderedHours, visibleRange),
-    [orderedHours, visibleRange],
+    () => comparisonTimeline(orderedHours, models, visibleRange),
+    [orderedHours, models, visibleRange],
   );
-  const index = Math.min(selectedIndex, Math.max(0, selected.length - 1));
+  // App drops the oldest hour at half past each hour; the inspected hour is kept by its time.
+  const index = selectedHourIndex(
+    selected.map((item) => item.time),
+    selectedTime,
+  );
   const hour = selected[index];
   const { label, unit } = METRICS[metric];
   // Moving the inspection cursor changes readings, not the plotted series.
@@ -80,29 +90,27 @@ export default function ForecastExplorer({
         `${name}: ${finite(series[seriesIndex][index]?.value) ? `${value(series[seriesIndex][index].value, 1)} ${unit}` : 'unavailable'}`,
     )
     .join('. ');
-  const axisIndices = [
-    0,
-    Math.floor((selected.length - 1) / 3),
-    Math.floor((2 * (selected.length - 1)) / 3),
-    selected.length - 1,
-  ].filter((item, position, all) => item >= 0 && all.indexOf(item) === position);
+  // Ticks are chosen by time, as they are placed, so labels cannot pile up beside a gap.
+  const axisIndices = useMemo(() => axisTicks(selected.map((item) => item.time)), [selected]);
 
   function inspect(event: PointerEvent<SVGSVGElement>) {
     if (event.type === 'pointermove' && event.pointerType !== 'mouse' && !event.buttons) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const raw = (event.clientX - bounds.left) / Math.max(1, bounds.width);
+    const times = selected.map((item) => item.time);
     // Match the SVG's 10-unit inset, so the cursor lands on the plotted hour.
-    setSelectedIndex(
-      nearestForecastHour(
-        selected.map((item) => item.time),
-        (raw * CHART_WIDTH - 10) / (CHART_WIDTH - 20),
-      ),
+    setSelectedTime(
+      times[nearestForecastHour(times, (raw * CHART_WIDTH - 10) / (CHART_WIDTH - 20))] ?? null,
     );
   }
 
   function downloadCsv() {
+    // The byte-order mark makes spreadsheet programs read the file as UTF-8. Without it they
+    // use a legacy code page and garble non-ASCII text such as the degree sign in a model name.
     const url = URL.createObjectURL(
-      new Blob([forecastCsv(selected, models, metric)], { type: 'text/csv;charset=utf-8' }),
+      new Blob(['\uFEFF', forecastCsv(selected, models, metric)], {
+        type: 'text/csv;charset=utf-8',
+      }),
     );
     const link = document.createElement('a');
     link.href = url;
@@ -122,34 +130,42 @@ export default function ForecastExplorer({
                 key={key}
                 type="button"
                 aria-pressed={metric === key}
+                aria-label={METRICS[key].label}
                 onClick={() => setMetric(key)}
               >
                 <Icon size={15} aria-hidden="true" />
-                <span>{METRICS[key].label}</span>
+                <span>{METRICS[key].button}</span>
               </button>
             );
           })}
         </div>
-        <div className="fe-ranges" role="group" aria-label="Forecast duration">
-          {[24, 72].map((duration) => (
-            <button
-              type="button"
-              key={duration}
-              aria-pressed={visibleRange === duration}
-              disabled={duration === 72 && !hasLongRange}
-              title={
-                duration === 72 && !hasLongRange
-                  ? 'No forecast readings beyond 24 hours are available.'
-                  : undefined
-              }
-              onClick={() => {
-                setRange(duration);
-                setSelectedIndex((current) => Math.min(current, duration - 1));
-              }}
-            >
-              {duration}h
-            </button>
-          ))}
+        <div className="fe-ranges">
+          <div className="fe-range-options" role="group" aria-label="Forecast duration">
+            {[24, 72].map((duration) => (
+              <button
+                type="button"
+                key={duration}
+                aria-pressed={visibleRange === duration}
+                disabled={duration === 72 && !hasLongRange}
+                title={
+                  duration === 72 && !hasLongRange
+                    ? 'No forecast readings beyond 24 hours are available.'
+                    : undefined
+                }
+                onClick={() => {
+                  setRange(duration);
+                  // A shorter range shows its last hour in place of a later inspected hour. That
+                  // hour stays selected, so returning to the longer range does not jump back.
+                  const times = comparisonTimeline(orderedHours, models, duration).map(
+                    (item) => item.time,
+                  );
+                  if (hour) setSelectedTime(times[selectedHourIndex(times, hour.time)] ?? null);
+                }}
+              >
+                {duration}h
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             disabled={!selected.length}
@@ -173,8 +189,8 @@ export default function ForecastExplorer({
           <strong>{timeLabel}</strong>
           <span>
             {finite(hour?.probability)
-              ? `${value(hour.probability)}% rain chance`
-              : 'Rain chance unavailable'}
+              ? `${value(hour.probability)}% precipitation chance`
+              : 'Precipitation chance unavailable'}
           </span>
           <span className="fe-scrub-hint">
             <MoveHorizontal size={13} aria-hidden="true" /> Explore each hour
@@ -299,6 +315,8 @@ export default function ForecastExplorer({
             <input
               id={`${id}-hour`}
               type="range"
+              // View state only, so app updates never wait for it (resources/app-updates.mjs).
+              data-update-safe
               min={0}
               max={Math.max(0, selected.length - 1)}
               step={1}
@@ -306,7 +324,9 @@ export default function ForecastExplorer({
               disabled={selected.length < 2}
               aria-valuetext={`${timeLabel}. ${spokenReading}`}
               aria-describedby={`${id}-instructions`}
-              onChange={(event) => setSelectedIndex(Number(event.target.value))}
+              onChange={(event) =>
+                setSelectedTime(selected[Number(event.target.value)]?.time ?? null)
+              }
             />
             <span aria-hidden="true">
               {index + 1} / {selected.length}
@@ -321,7 +341,7 @@ export default function ForecastExplorer({
         <p className="fe-empty">No forecast hours available. Refresh data to try again.</p>
       )}
 
-      <div className="fe-legend" aria-label="Values at selected hour">
+      <div className="fe-legend" role="group" aria-label="Values at selected hour">
         {names.map((name, seriesIndex) => (
           <div key={name}>
             <i style={{ background: COLORS[seriesIndex % COLORS.length] }} aria-hidden="true" />
@@ -356,7 +376,7 @@ export default function ForecastExplorer({
                     {name}
                   </th>
                 ))}
-                <th scope="col">Rain chance</th>
+                <th scope="col">Precipitation chance</th>
                 <th scope="col">Gust (km/h)</th>
               </tr>
             </thead>

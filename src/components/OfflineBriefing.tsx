@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, Save, Trash2, TriangleAlert } from 'lucide-react';
 import { age, localTime, value } from '../presentation';
 import type { AlertResult, Forecast, Place } from '../types';
@@ -49,6 +49,7 @@ export default function OfflineBriefing({
   const [saved, setSaved] = useState<BriefingResult>({ briefings: [], error: null });
   const [selectedId, setSelectedId] = useState('');
   const [message, setMessage] = useState('');
+  const messageBox = useRef<HTMLParagraphElement>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const refresh = () => {
     try {
@@ -99,6 +100,8 @@ export default function OfflineBriefing({
       const result = removeBriefing(window.localStorage, item.id);
       if (!result.error) setSaved(result);
       setMessage(result.error || `Saved briefing for ${item.place.name} removed.`);
+      // Removing the last briefing removes the focused button with it: keep focus on the result.
+      if (!result.error && !result.briefings.length) messageBox.current?.focus();
     } catch {
       setMessage('Browser storage could not be updated.');
     }
@@ -190,7 +193,7 @@ export default function OfflineBriefing({
         The save button stores the selected place and its coordinates. Saving a fourth place
         replaces the oldest saved briefing. Download a text copy to keep it separately.
       </p>
-      <p role="status" className="briefing-message">
+      <p role="status" className="briefing-message" ref={messageBox} tabIndex={-1}>
         {message}
       </p>
       {saved.error && (
@@ -243,6 +246,8 @@ export default function OfflineBriefing({
           </label>
           <select
             id="saved-briefing"
+            // View state only, so app updates never wait for it (resources/app-updates.mjs).
+            data-update-safe
             value={selected.id}
             onChange={(event) => setSelectedId(event.target.value)}
           >
@@ -298,8 +303,9 @@ export default function OfflineBriefing({
                 Read the saved hourly forecast ({selected.forecast.hours.length} points)
               </summary>
               <p>
-                These are model estimates saved earlier, not new observations. Each rain value is
-                for one hour; missing values are shown as —.
+                These are model estimates saved earlier, not new observations. Each precipitation
+                value is for one hour, with snow counted as liquid water; missing values are shown
+                as —.
               </p>
               <div
                 className="briefing-table-scroll"
@@ -316,7 +322,7 @@ export default function OfflineBriefing({
                       <th scope="col">Time</th>
                       <th scope="col">°C</th>
                       <th scope="col">Feels °C</th>
-                      <th scope="col">Rain mm</th>
+                      <th scope="col">Precip. mm</th>
                       <th scope="col">Chance %</th>
                       <th scope="col">Gust km/h</th>
                     </tr>

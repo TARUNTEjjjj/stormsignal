@@ -3,3 +3,14 @@ dist
 pages-dist
 .wrangler
 package-lock.json
+
+# Resource-library tooling: copied unchanged between repositories, or written by the nightly refresh job.
+resources
+scripts/resources
+scripts/resource-*.test.mjs
+scripts/app-release.mjs
+scripts/app-update-protocol.mjs
+scripts/stage-resource-explorer.mjs
+
+# Self-contained offline kit: kept compact on purpose (tests/kit.test.ts checks its size).
+public/offline.html

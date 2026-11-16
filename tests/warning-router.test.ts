@@ -672,3 +672,140 @@ test('a WMO-indexed warning in a declared non-UTF-8 encoding is shown, not dropp
     clearWarningCache();
   }
 });
+
+test('each one-minute dashboard poll reads the live feeds again, not the copy of the poll before', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 10, 16, 3) });
+  const registry = JSON.stringify({
+    sources: [
+      {
+        source: {
+          authorityCountry: 'jp',
+          sourceIsOfficial: true,
+          capAlertFeedStatus: 'operating',
+          sourceId: 'jp-jma-ja',
+          memID: '100',
+          byLanguage: [{ code: 'en', name: 'JMA' }],
+        },
+      },
+    ],
+  });
+  const start = Date.now();
+  const pointReads: number[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    // Each upstream answer takes two seconds, so a copy is stamped two seconds after its poll.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    if (url.endsWith('/json/sources.json')) return new Response(registry);
+    if (url.includes('/f/ows/')) {
+      pointReads.push(Date.now() - start);
+      return new Response(JSON.stringify({ type: 'FeatureCollection', features: [] }));
+    }
+    throw new Error(`Unexpected upstream request: ${url}`);
+  };
+  clearWarningCache();
+  try {
+    for (let minute = 0; minute < 3; minute++) {
+      t.mock.timers.tick(start + minute * 60_000 - Date.now());
+      let response: Response | undefined;
+      void handleAlerts(
+        new Request(
+          'https://stormsignal.invalid/api/alerts?lat=35.6762&lon=139.6503&country=JP&name=Tokyo',
+        ),
+      ).then((value) => (response = value));
+      while (!response) {
+        for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+        if (!response) t.mock.timers.tick(100);
+      }
+      const body = await response.json();
+      assert.equal(response.status, 200);
+      assert.ok(
+        body.servedAt - body.fetchedAt < 10_000,
+        `minute ${minute}: a copy from a poll before`,
+      );
+    }
+    assert.equal(pointReads.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearWarningCache();
+  }
+});
+
+test('an unusable registry body is never kept, so the next check reads the registry again', async (t) => {
+  t.mock.method(console, 'warn', () => {});
+  const registry = JSON.stringify({
+    sources: [
+      {
+        source: {
+          authorityCountry: 'jp',
+          sourceIsOfficial: true,
+          capAlertFeedStatus: 'operating',
+          sourceId: 'jp-jma-ja',
+          memID: '100',
+          byLanguage: [{ code: 'en', name: 'JMA' }],
+        },
+      },
+    ],
+  });
+  let healthy = false,
+    registryReads = 0;
+  const originalFetch = globalThis.fetch;
+  const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith('/json/sources.json')) {
+      registryReads++;
+      // A maintenance page sent with HTTP 200 instead of the registry.
+      return healthy
+        ? new Response(registry)
+        : new Response('<!doctype html><title>Service temporarily unavailable</title>', {
+            headers: { 'Content-Type': 'text/html' },
+          });
+    }
+    if (url.includes('/f/ows/'))
+      return new Response(JSON.stringify({ type: 'FeatureCollection', features: [] }));
+    throw new Error(`Unexpected upstream request: ${url}`);
+  };
+  // The data centre's shared edge cache, which every isolate there reads.
+  const edge = new Map<string, Response>();
+  Object.defineProperty(globalThis, 'caches', {
+    configurable: true,
+    value: {
+      default: {
+        match: async (key: Request) => edge.get(key.url)?.clone(),
+        put: async (key: Request, response: Response) => void edge.set(key.url, response.clone()),
+      },
+    },
+  });
+  const tokyo = async () =>
+    (
+      await handleAlerts(
+        new Request(
+          'https://stormsignal.invalid/api/alerts?lat=35.6762&lon=139.6503&country=JP&name=Tokyo',
+        ),
+      )
+    ).status;
+  clearWarningCache();
+  try {
+    assert.equal(await tokyo(), 503);
+    // A registry copy is kept for six hours. Once the registry has recovered, the same isolate
+    // reads it again instead of failing on the page it kept.
+    healthy = true;
+    assert.equal(await tokyo(), 200);
+    assert.equal(registryReads, 2);
+    // Nor does a new isolate find the page in the shared edge cache.
+    clearWarningCache();
+    edge.clear();
+    healthy = false;
+    assert.equal(await tokyo(), 503);
+    clearWarningCache();
+    healthy = true;
+    assert.equal(await tokyo(), 200);
+    assert.equal(registryReads, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCaches) Object.defineProperty(globalThis, 'caches', originalCaches);
+    else Reflect.deleteProperty(globalThis, 'caches');
+    clearWarningCache();
+  }
+});

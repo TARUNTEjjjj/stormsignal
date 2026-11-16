@@ -38,6 +38,25 @@ h3,
   letter-spacing: 1.5px;
   font-size: 8px;
 }
+/* The fixed sidebar narrows at these widths (see styles.css); the brand has to narrow with it. */
+@media (min-width: 801px) and (max-width: 1250px) {
+  .brand {
+    font-size: 22px;
+  }
+  .brand small {
+    font-size: 7.5px;
+    letter-spacing: 1.2px;
+  }
+}
+@media (min-width: 801px) and (max-width: 1050px) {
+  .brand {
+    font-size: 20px;
+  }
+  .brand small {
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+}
 nav a {
   border-radius: 9px;
   font-size: 12px;
@@ -203,7 +222,14 @@ h1 {
 .connection-options button[aria-pressed='true'] {
   background: #2c4c45;
   color: #c7f2e4;
-  box-shadow: inset 0 0 0 1px #43645a;
+}
+/* A pressed toggle carries a mint ring (over 6:1 against the group and the fill), so its state
+   does not rest on a fill that differs from the group by less than 2:1. */
+.connection-options button[aria-pressed='true'],
+.fe-metrics button[aria-pressed='true'],
+.fe-ranges button[aria-pressed='true'],
+.segmented button.selected {
+  box-shadow: inset 0 0 0 2px var(--mint);
 }
 .connection-options button:hover {
   background: #263d46;

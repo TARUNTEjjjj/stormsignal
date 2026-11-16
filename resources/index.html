@@ -6,6 +6,7 @@
   <meta name="description" content="A project-specific collection of open-source tools, learning references, and datasets with source and freshness information.">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self' https://raw.githubusercontent.com; img-src 'self'; base-uri 'none'; form-action 'none'">
   <title>Resource library</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="./explorer.css">
   <script type="module" src="./explorer.mjs"></script>
 </head>
@@ -24,7 +25,7 @@
     </section>
     <section id="library" aria-labelledby="library-title">
       <div class="section-heading"><div><p class="eyebrow">FOLLOW YOUR CURIOSITY</p><h2 id="library-title">The collection</h2></div><a class="download-link" href="./catalog.json" download>Download collection <span aria-hidden="true">↓</span></a></div>
-      <form class="toolbar" role="search" id="filters"><div class="search-field"><label for="search">Search the library</label><input id="search" type="search" placeholder="Try a topic, tool, or idea…" maxlength="200" autocomplete="off"></div><div><label for="category">Area</label><select id="category"><option value="">All areas</option></select></div><div><label for="sort">Order by</label><select id="sort"><option value="recommended">Recommended</option><option value="stars">Most starred</option><option value="recent">Recent activity</option></select></div></form>
+      <form class="toolbar" role="search" id="filters"><div class="search-field"><label for="search">Search the library</label><input id="search" type="search" placeholder="Try a topic, tool, or idea…" maxlength="200" autocomplete="off"></div><div><label for="category">Area</label><select id="category" data-update-safe><option value="">All areas</option></select></div><div><label for="sort">Order by</label><select id="sort" data-update-safe><option value="recommended">Recommended</option><option value="stars">Most starred</option><option value="recent">Recent activity</option></select></div></form>
       <p id="result-count" class="result-count" aria-live="polite" aria-atomic="true"></p>
       <div id="resource-grid" class="resource-grid"></div>
       <div id="empty-state" class="empty-state" hidden><h3>No matching resources.</h3><p>Try another topic or choose all areas.</p><button id="reset-filters" type="button">Clear filters</button></div>

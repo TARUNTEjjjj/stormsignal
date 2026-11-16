@@ -14,11 +14,13 @@ import {
   WifiOff,
 } from 'lucide-react';
 import {
-  fetchImageryFrames,
+  EMPTY_TIMELINE,
+  failedTileTracker,
   frameLabel,
   imageryForPlace,
   imageryTileUrl,
   isFrameStale,
+  loadTimeline,
   normalizeLongitude,
 } from '../imagery';
 import { alertOutline } from '../data';
@@ -47,10 +49,8 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
   const [ready, setReady] = useState(0);
   const [manualEnabled, setManualEnabled] = useState(false);
   const [sourceId, setSourceId] = useState('');
-  const [frames, setFrames] = useState<string[]>([]);
-  const [frameSourceId, setFrameSourceId] = useState('');
-  const [index, setIndex] = useState(0);
-  const [playing, setPlaying] = useState(false);
+  const [timeline, setTimeline] = useState(EMPTY_TIMELINE);
+  const { frames, index, playing } = timeline;
   const [loading, setLoading] = useState(false);
   const [metadataError, setMetadataError] = useState('');
   const [tileError, setTileError] = useState(false);
@@ -63,14 +63,14 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
     [place.latitude, place.longitude],
   );
   const source = options.find((option) => option.id === sourceId) || options[0];
-  const frame = frameSourceId === source.id ? frames[index] : undefined;
+  const frame = timeline.sourceId === source.id ? frames[index] : undefined;
 
   useEffect(() => {
     setManualEnabled(false);
   }, [lowBandwidth]);
   useEffect(() => {
     setSourceId(options[0].id);
-    setPlaying(false);
+    setTimeline((current) => ({ ...current, playing: false }));
   }, [options]);
   useEffect(() => {
     if (!enabled || !holder.current) return;
@@ -89,7 +89,8 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>',
     })
-      .on('tileerror', () => setBaseError(true))
+      // The notice clears once no failed tile remains on the map, as after panning away.
+      .on(failedTileTracker(setBaseError))
       .addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
       const latitude = Number(event.latlng.lat.toFixed(4));
@@ -134,37 +135,22 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
     }).addTo(map.current);
     const name = document.createElement('span');
     name.textContent = place.name;
-    marker.current
-      .bindTooltip(name, { direction: 'top', className: 'storm-marker-label' })
-      .openTooltip();
+    // A permanent label opens with the marker. A hover tooltip would give the marker focus and blur
+    // listeners: Chrome then makes it an unnamed Tab stop, and tabbing past it hides the label.
+    marker.current.bindTooltip(name, {
+      permanent: true,
+      direction: 'top',
+      className: 'storm-marker-label',
+    });
   }, [place.latitude, place.longitude, place.name, ready]);
 
   useEffect(() => {
-    setFrames([]);
-    setIndex(0);
-    setMetadataError('');
-    setPlaying(false);
-    if (!enabled) return;
-    const controller = new AbortController();
-    setLoading(true);
-    fetchImageryFrames(source, controller.signal, reload > 0)
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        setFrames(next);
-        setFrameSourceId(source.id);
-        // The latest daily mosaic may have incomplete swaths. It remains selectable and labelled.
-        setIndex(next.length - 1);
-        setLoading(false);
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setMetadataError(
-            error instanceof Error ? error.message : 'Satellite metadata is unavailable.',
-          );
-          setLoading(false);
-        }
-      });
-    return () => controller.abort();
+    // A refresh of the layer on the map keeps its frames, selection and playback while it runs
+    // and after it fails. Another layer, or a paused map, starts empty.
+    return loadTimeline(source, enabled, reload > 0, setTimeline, (busy, error) => {
+      setLoading(busy);
+      setMetadataError(error);
+    });
   }, [source.id, enabled, reload]);
 
   useEffect(() => {
@@ -180,7 +166,8 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
       keepBuffer: 1,
       attribution: `<a href="https://nasa-gibs.github.io/gibs-api-docs/access-basics/" target="_blank" rel="noopener noreferrer">${source.attribution}</a>`,
     });
-    layer.on('tileerror', () => setTileError(true));
+    // A refresh can keep this layer for a long time; its notice follows the tiles still shown.
+    layer.on(failedTileTracker(setTileError));
     layer.on('load', () => setLoading(false));
     layer.addTo(map.current);
     // remove() fires Leaflet's internal 'remove' hook, which unregisters map
@@ -215,6 +202,12 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
         const text = document.createElement('div');
         text.textContent = `${alert.event} — ${alert.severity}. ${alert.area}`;
         shape.bindTooltip(text).addTo(group);
+        // The hover tooltip makes each outline a Tab stop (focus opens it), so each needs a name.
+        shape.eachLayer((layer) =>
+          (layer as L.Path)
+            .getElement?.()
+            ?.setAttribute('aria-label', `Official warning area: ${text.textContent}`),
+        );
       } catch {
         /* A malformed provider polygon must not break the rest of the map. */
       }
@@ -227,7 +220,11 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
   useEffect(() => {
     if (!playing || frames.length < 2 || !enabled) return;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') setIndex((value) => (value + 1) % frames.length);
+      if (document.visibilityState === 'visible')
+        setTimeline((current) => ({
+          ...current,
+          index: (current.index + 1) % Math.max(1, current.frames.length),
+        }));
     }, 1800);
     return () => window.clearInterval(timer);
   }, [playing, frames.length, enabled]);
@@ -283,10 +280,12 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
           </label>
           <select
             id="satellite-source"
+            // View state only, so app updates never wait for it (resources/app-updates.mjs).
+            data-update-safe
             value={source.id}
             onChange={(event) => {
               setSourceId(event.target.value);
-              setPlaying(false);
+              setTimeline((current) => ({ ...current, playing: false }));
             }}
           >
             {options.map((option) => (
@@ -300,8 +299,12 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
           type="button"
           className="storm-map-button"
           aria-label="Refresh satellite availability"
-          onClick={() => setReload((value) => value + 1)}
-          disabled={!enabled || loading}
+          // Busy while frames or tiles load, not disabled: that would drop keyboard focus.
+          onClick={() => {
+            if (!loading) setReload((value) => value + 1);
+          }}
+          disabled={!enabled}
+          aria-disabled={loading || undefined}
         >
           <RefreshCw size={16} aria-hidden="true" />
           <span>Refresh</span>
@@ -371,7 +374,7 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
           <button
             type="button"
             aria-label={playing ? 'Pause satellite animation' : 'Play recent satellite frames'}
-            onClick={() => setPlaying((value) => !value)}
+            onClick={() => setTimeline((current) => ({ ...current, playing: !current.playing }))}
             disabled={frames.length < 2}
           >
             {playing ? (
@@ -393,13 +396,15 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
             <input
               id="satellite-frame"
               type="range"
+              // View state only, so app updates never wait for it (resources/app-updates.mjs).
+              data-update-safe
               min={0}
               max={Math.max(0, frames.length - 1)}
               value={index}
               disabled={!frames.length}
               onChange={(event) => {
-                setIndex(Number(event.target.value));
-                setPlaying(false);
+                const selected = Number(event.target.value);
+                setTimeline((current) => ({ ...current, index: selected, playing: false }));
               }}
               aria-valuetext={frame ? frameLabel(frame, source.kind) : 'No imagery'}
             />

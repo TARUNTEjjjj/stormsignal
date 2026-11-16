@@ -4,21 +4,37 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import vm from 'node:vm';
 // @ts-expect-error Shared native ESM worker builder.
-import {workerUpdateProtocolSource} from '../scripts/app-update-protocol.mjs';
+import { workerUpdateProtocolSource } from '../scripts/app-update-protocol.mjs';
 
 type EventHandler = (event: any) => void;
-function harness(origin = 'https://example.org') {
+/**
+ * The worker of the build `version`. Builds given the same `shared` CacheStorage run in it one
+ * after another, as successive releases do in a browser.
+ */
+function harness(
+  origin = 'https://example.org',
+  version = 'stormsignal-v1',
+  shared?: Map<string, Map<string, Response>>,
+) {
   let safe = true;
-  const client = {id:'window-1',url:origin+'/',postMessage(data:any,ports:MessagePort[]){ports[0].postMessage({type:'APP_UPDATE_SAFETY',nonce:data.nonce,safe});}};
+  const client = {
+    id: 'window-1',
+    url: origin + '/',
+    postMessage(data: any, ports: MessagePort[]) {
+      ports[0].postMessage({ type: 'APP_UPDATE_SAFETY', nonce: data.nonce, safe });
+    },
+  };
   const events: Record<string, EventHandler> = {};
-  const store = new Map<string, Response>();
-  const stores = new Map<string, Map<string, Response>>([
-    ['stormsignal-ancient', new Map()],
-    ['unrelated-app', new Map()],
-    ['resource-library-shell:/resources/:current', new Map()],
-    ['stormsignal-previous', new Map()],
-    ['stormsignal-v1', store],
-  ]);
+  const store = shared?.get(version) ?? new Map<string, Response>();
+  const stores =
+    shared ??
+    new Map<string, Map<string, Response>>([
+      ['stormsignal-ancient', new Map()],
+      ['unrelated-app', new Map()],
+      ['resource-library-shell:/resources/:current', new Map()],
+      ['stormsignal-previous', new Map()],
+      [version, store],
+    ]);
   const saved: string[] = [],
     deleted: string[] = [];
   const timers = new Map<number, { callback: () => void; delay: number }>();
@@ -43,16 +59,21 @@ function harness(origin = 'https://example.org') {
   let quota = false,
     installFailure = false,
     cacheUnavailable = false;
+  // Set while a test holds this build's installation download in progress.
+  let download: Promise<void> | undefined;
   const key = (request: string | Request) =>
     new URL(typeof request === 'string' ? request : request.url, origin).href;
   const caches = {
     open: async (name: string) => {
       if (cacheUnavailable) throw Error('storage unavailable');
-      if (!stores.has(name)) stores.set(name, new Map());
+      // A build's cache comes into being when its worker first opens it, as in a browser.
+      if (!stores.has(name)) stores.set(name, name === version ? store : new Map());
+      // As in a browser, a Cache stays writable after its deletion but cannot be opened by name.
       const contents = stores.get(name)!;
       return {
         addAll: async (paths: string[]) => {
           if (installFailure) throw Error('failed critical asset');
+          if (download) await download;
           saved.push(...paths);
           for (const path of paths) contents.set(key(path), new Response(`cached ${path}`));
         },
@@ -64,6 +85,7 @@ function harness(origin = 'https://example.org') {
       };
     },
     keys: async () => [...stores.keys()],
+    has: async (name: string) => stores.has(name),
     delete: async (name: string) => {
       deleted.push(name);
       return stores.delete(name);
@@ -100,11 +122,19 @@ function harness(origin = 'https://example.org') {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Shell-Version': 'network' },
     });
   };
+  // A test sets `installing` or `waiting` when a newer release is downloading or waits to activate.
+  const registration: { scope: string; installing?: object | null; waiting?: object | null } = {
+    scope: origin + '/',
+  };
   const self = {
     location: { origin },
-    registration: {scope:origin+'/'},
+    registration,
     addEventListener: (type: string, callback: EventHandler) => {
-      const previous=events[type];events[type]=event=>{previous?.(event);callback(event);};
+      const previous = events[type];
+      events[type] = (event) => {
+        previous?.(event);
+        callback(event);
+      };
     },
     skipWaiting: async () => {
       skipped++;
@@ -117,7 +147,14 @@ function harness(origin = 'https://example.org') {
     },
   };
   const source = readFileSync('public/sw.js', 'utf8')
-    .replace('/* APP_UPDATE_PROTOCOL */',workerUpdateProtocolSource({readyExpression:'(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)'}))
+    .replace("const VERSION = 'stormsignal-v1';", `const VERSION = ${JSON.stringify(version)};`)
+    .replace(
+      '/* APP_UPDATE_PROTOCOL */',
+      workerUpdateProtocolSource({
+        readyExpression:
+          '(await Promise.all([...DOCUMENTS,...STATIC_FILES,...BUILD_ASSETS].map(async path=>(await caches.open(VERSION)).match(path,{ignoreVary:true})))).every(Boolean)',
+      }),
+    )
     .replace(
       'const BUILD_ASSETS = [];',
       "const BUILD_ASSETS = ['/assets/main-a1.js', '/assets/main-a1.css'];",
@@ -198,11 +235,28 @@ function harness(origin = 'https://example.org') {
       await pending;
       return reply;
     },
-    setSafe(value:boolean){safe=value;},
-    message: async (data:unknown) => {
-      let reply:any;const pending:Promise<unknown>[]=[];
-      events.message({source:client,data,ports:[{postMessage(value:unknown){reply=value;}}],waitUntil(value:Promise<unknown>){pending.push(value);}});
-      await Promise.all(pending);return reply;
+    setSafe(value: boolean) {
+      safe = value;
+    },
+    message: async (data: unknown) => {
+      let reply: any;
+      const pending: Promise<unknown>[] = [];
+      events.message({
+        source: client,
+        data,
+        ports: [
+          {
+            postMessage(value: unknown) {
+              reply = value;
+            },
+          },
+        ],
+        waitUntil(value: Promise<unknown>) {
+          pending.push(value);
+        },
+      });
+      await Promise.all(pending);
+      return reply;
     },
     counts: () => ({ requests, skipped, claimed, aborted, bodyCancelled }),
     setMode: (value: typeof mode) => {
@@ -216,6 +270,15 @@ function harness(origin = 'https://example.org') {
     failInstall: () => {
       installFailure = true;
     },
+    /** Holds the next installation's download in progress; the returned function completes it. */
+    holdInstall: () => {
+      let finish!: () => void;
+      download = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return finish;
+    },
+    registration,
     failCache: () => {
       cacheUnavailable = true;
     },
@@ -272,7 +335,31 @@ test('offline installation atomically precaches core and standalone kit, not opt
   ])
     assert.ok(h.saved.includes(path), path);
   assert.ok(!h.saved.includes('/assets/WeatherMap-b2.js'));
-  assert.equal(h.counts().skipped, 0, 'A new release waits until every open window approves activation');
+  assert.equal(
+    h.counts().skipped,
+    0,
+    'A new release waits until every open window approves activation',
+  );
+});
+
+test('the dashboard shell loads nothing the installed worker cannot serve offline', async () => {
+  const h = harness();
+  await h.lifecycle('install');
+  const shell = readFileSync('index.html', 'utf8');
+  const loaded = [...shell.matchAll(/<(?:script|link)\b[^>]*?\s(?:src|href)="([^"]+)"/g)]
+    .map((match) => match[1])
+    // The canonical link is metadata; the browser does not request it.
+    .filter((url) => url !== 'https://stormsignal-weather.pages.dev/');
+  assert.ok(loaded.includes('/src/main.tsx'), 'the shell starts the application');
+  // A file the worker does not serve fails to load offline. A module script among them also keeps
+  // the saved application from starting on a stalled connection: module scripts run in document
+  // order, each after its whole import graph has arrived or failed.
+  for (const url of loaded) {
+    // Vite replaces the source entry with hashed /assets/ files, which it lists in BUILD_ASSETS.
+    if (url === '/src/main.tsx') continue;
+    assert.ok(h.saved.includes(url), `${url} is not saved by the worker`);
+    assert.ok(h.dispatch(url).response, `${url} is not served by the worker`);
+  }
 });
 
 test('failed installation cannot activate a partially downloaded offline shell', async () => {
@@ -283,15 +370,20 @@ test('failed installation cannot activate a partially downloaded offline shell',
   assert.equal(h.saved.length, 0);
 });
 
-test('a matching complete update still waits for every window to become safe',async()=>{
-  const h=harness(),command={type:'ACTIVATE_APP_UPDATE',version:'development',nonce:'a'.repeat(32)};
-  assert.equal((await h.message({type:'GET_APP_UPDATE_STATUS'})).ready,false);
-  assert.equal((await h.message(command)).accepted,false);
-  await h.lifecycle('install');h.setSafe(false);
-  assert.equal((await h.message(command)).accepted,false);assert.equal(h.counts().skipped,0);
-  h.setSafe(true);assert.equal(await h.message({...command,nonce:'invalid'}),undefined);
-  assert.equal((await h.message(command)).accepted,true);assert.equal(h.counts().skipped,1);
-  assert.equal(h.dispatch('/app-version.json').response,undefined);
+test('a matching complete update still waits for every window to become safe', async () => {
+  const h = harness(),
+    command = { type: 'ACTIVATE_APP_UPDATE', version: 'development', nonce: 'a'.repeat(32) };
+  assert.equal((await h.message({ type: 'GET_APP_UPDATE_STATUS' })).ready, false);
+  assert.equal((await h.message(command)).accepted, false);
+  await h.lifecycle('install');
+  h.setSafe(false);
+  assert.equal((await h.message(command)).accepted, false);
+  assert.equal(h.counts().skipped, 0);
+  h.setSafe(true);
+  assert.equal(await h.message({ ...command, nonce: 'invalid' }), undefined);
+  assert.equal((await h.message(command)).accepted, true);
+  assert.equal(h.counts().skipped, 1);
+  assert.equal(h.dispatch('/app-version.json').response, undefined);
 });
 
 test('offline readiness confirms every critical file, not just an active worker', async () => {
@@ -311,6 +403,101 @@ test('activation retains previous shell and unrelated applications', async () =>
   await h.lifecycle('activate');
   assert.deepEqual(h.deleted, ['stormsignal-ancient']);
   assert.equal(h.counts().claimed, 1);
+});
+
+test('activation keeps the shell of the build that was active, not a newer release that never activated', async () => {
+  for (const skipped of ['superseded while waiting', 'failed installation']) {
+    const stores = new Map<string, Map<string, Response>>();
+    const build = (version: string) => harness(undefined, version, stores);
+    const first = build('stormsignal-a');
+    await first.lifecycle('install');
+    await first.lifecycle('activate');
+    const chunk = '/assets/WeatherMap-Ab123456.js';
+    first.putInCache('stormsignal-a', chunk, 'saved by the active build');
+    // The next release creates its cache but never activates: a newer one arrives while open
+    // windows have not yet approved it, or its download fails.
+    const second = build('stormsignal-b');
+    if (skipped === 'failed installation') {
+      second.failInstall();
+      await assert.rejects(second.lifecycle('install'));
+    } else await second.lifecycle('install');
+    const third = build('stormsignal-c');
+    await third.lifecycle('install');
+    await third.lifecycle('activate');
+    assert.deepEqual([...stores.keys()], ['stormsignal-a', 'stormsignal-c'], skipped);
+    // A tab still on the first build opens one of its chunks without a connection.
+    third.setMode('offline');
+    assert.equal(await (await third.dispatch(chunk).done())?.text(), 'saved by the active build');
+    assert.equal(third.counts().requests, 0);
+    // Old shells do not pile up: the following release keeps only the build it replaces.
+    const fourth = build('stormsignal-d');
+    await fourth.lifecycle('install');
+    await fourth.lifecycle('activate');
+    assert.deepEqual([...stores.keys()], ['stormsignal-c', 'stormsignal-d'], skipped);
+  }
+});
+
+test('activation keeps the cache of a newer release that is still downloading or has just finished', async () => {
+  for (const state of ['installing', 'waiting'] as const) {
+    const stores = new Map<string, Map<string, Response>>();
+    const build = (version: string) => harness(undefined, version, stores);
+    const first = build('stormsignal-a');
+    await first.lifecycle('install');
+    await first.lifecycle('activate');
+    // The second release waits while a tab stays open on the first. A navigation in that tab
+    // starts the browser's update check, and a third release starts downloading.
+    const second = build('stormsignal-b');
+    await second.lifecycle('install');
+    const third = build('stormsignal-c');
+    const finishDownload = third.holdInstall();
+    const installing = third.lifecycle('install');
+    second.registration.installing = {};
+    // The last tab closes before that download ends, so the waiting second release activates.
+    const activation = second.lifecycle('activate');
+    if (state === 'waiting') {
+      // The download ends while that activation runs; the third release now waits.
+      finishDownload();
+      second.registration.installing = null;
+      second.registration.waiting = {};
+    }
+    await activation;
+    assert.deepEqual(
+      [...stores.keys()],
+      ['stormsignal-a', 'stormsignal-b', 'stormsignal-c'],
+      state,
+    );
+    finishDownload();
+    await installing;
+    // With no tab open, the third release takes over with its complete offline shell.
+    await third.lifecycle('activate');
+    assert.deepEqual([...stores.keys()], ['stormsignal-b', 'stormsignal-c'], state);
+    assert.equal((await third.status()).ready, true, state);
+    third.setMode('offline');
+    assert.equal(await (await third.dispatch('/').done())?.text(), 'cached /', state);
+  }
+});
+
+test('a release whose cache is deleted during its download fails to install and installs again later', async () => {
+  const stores = new Map<string, Map<string, Response>>();
+  const build = (version: string) => harness(undefined, version, stores);
+  const first = build('stormsignal-a');
+  await first.lifecycle('install');
+  await first.lifecycle('activate');
+  const second = build('stormsignal-b');
+  const finishDownload = second.holdInstall();
+  const installing = second.lifecycle('install');
+  // Its cache is deleted mid-download. For a release in progress, an activating build keeps only
+  // the newest cache, so a release reinstalled after a rollback, under an older name, can lose it.
+  stores.delete('stormsignal-b');
+  finishDownload();
+  await assert.rejects(installing, /deleted during installation/);
+  assert.deepEqual([...stores.keys()], ['stormsignal-a']);
+  // The browser's next update check installs the release again, this time with its shell.
+  const retry = build('stormsignal-b');
+  await retry.lifecycle('install');
+  await retry.lifecycle('activate');
+  assert.equal((await retry.status()).ready, true);
+  assert.deepEqual([...stores.keys()], ['stormsignal-a', 'stormsignal-b']);
 });
 
 test('worker never intercepts remote feeds, API/private/arbitrary assets, query strings or writes', () => {

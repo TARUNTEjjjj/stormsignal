@@ -282,6 +282,120 @@ test('polygon and circle geometry take precedence over matching area labels', as
   );
 });
 
+// A SWIC row for one area of a multi-area information block carries all of that block's area
+// names joined with "; ", and no geocode (LVGMC wind warning, read 15 November 2026). The areas
+// have an EMMA_ID geocode and no polygon, so only those names can place the warning.
+const zone = (name: string, code: string) =>
+  `<area><areaDesc>${name}</areaDesc><geocode><valueName>EMMA_ID</valueName><value>${code}</value></geocode></area>`;
+const gulf =
+  zone('Southern Gulf of Riga', 'LV801') +
+  zone('Gulf of Riga East', 'LV802') +
+  zone('Gulf of Riga West', 'LV804');
+const gulfRow = feature(1, {
+  areadesc: 'Southern Gulf of Riga; Gulf of Riga East; Gulf of Riga West',
+  gc: '',
+});
+const UNMATCHED =
+  /1 current indexed warning document\(s\) for this point could not be matched to it by area name or code and are not listed\./;
+const soon = new Date(now + 1_800_000).toISOString();
+const effectiveSoon = (body: string) =>
+  body.replace(`<effective>${issued}</effective>`, `<effective>${soon}</effective>`);
+
+test('a multi-area warning indexed under its joined area names is listed, for that information only', async () => {
+  const check = (infos: string, rows: unknown[] = [gulfRow]) =>
+    harness(rows, new Map([[path(1), cap(1, { infos })]])).fetch(place);
+  const listed = await check(info({ area: gulf }));
+  assert.equal(listed.status, 'available');
+  assert.deepEqual(
+    listed.alerts.map((alert) => alert.title),
+    ['Thunderstorm warning'],
+  );
+  assert.equal(
+    listed.alerts[0].area,
+    'Southern Gulf of Riga; Gulf of Riga East; Gulf of Riga West',
+  );
+  assert.doesNotMatch(listed.coverage, UNMATCHED);
+  // As in that record, a second block in the national language names the same zones differently:
+  // the block that the row indexes is the one shown.
+  const latvian = info({
+    language: 'lv',
+    headline: 'Negaisa brīdinājums',
+    area:
+      zone('Rīgas līča dienvidu daļa', 'LV801') +
+      zone('Rīgas līča austrumu daļa', 'LV802') +
+      zone('Rīgas līča rietumu daļa', 'LV804'),
+  });
+  assert.deepEqual(
+    (await check(info({ area: gulf }) + latvian)).alerts.map((alert) => alert.title),
+    ['Thunderstorm warning'],
+  );
+  // Other information in the document that names only one of the row's areas is not matched by
+  // it: the point may lie in an area that information does not name.
+  const narrower = info({ headline: 'Narrower warning', area: zone('Gulf of Riga West', 'LV804') });
+  const precise = await check(info({ area: gulf }) + narrower);
+  assert.deepEqual(
+    precise.alerts.map((alert) => alert.title),
+    ['Thunderstorm warning'],
+  );
+  // Information that names every area of the row, and more, covers the point as well.
+  const wider = info({ headline: 'Wider warning', area: gulf + zone('Irbe Strait', 'LV805') });
+  assert.deepEqual(
+    (await check(info({ area: gulf }) + wider)).alerts.map((alert) => [alert.title, alert.area]),
+    [
+      ['Thunderstorm warning', 'Southern Gulf of Riga; Gulf of Riga East; Gulf of Riga West'],
+      ['Wider warning', 'Southern Gulf of Riga; Gulf of Riga East; Gulf of Riga West'],
+    ],
+  );
+  // One area whose own name contains ";" still matches its row as a whole.
+  const single = 'Southern Gulf of Riga; Gulf of Riga East; Gulf of Riga West';
+  assert.equal((await check(info({ area: zone(single, 'LV800') }))).alerts[0].area, single);
+  // A joined row only places a block that nothing else places. Beside a row that names one of the
+  // block's areas, or carries its geocode, that area alone is matched, as before.
+  for (const own of [{ areadesc: 'Gulf of Riga East', gc: '' }, { gc: 'LV802' }])
+    assert.equal(
+      (await check(info({ area: gulf }), [gulfRow, feature(1, own)])).alerts[0].area,
+      'Gulf of Riga East',
+    );
+  // The same document taking effect later is disclosed like any other matched one.
+  const upcoming = await check(effectiveSoon(info({ area: gulf })));
+  assert.deepEqual(upcoming.alerts, []);
+  assert.equal(upcoming.upcomingDocuments, 1);
+  assert.match(upcoming.coverage, /1 matched warning document\(s\) take effect later/);
+});
+
+test('a current indexed document whose areas cannot be placed at the point is disclosed, never dropped silently', async () => {
+  const check = (infos: string, row: unknown) =>
+    harness([row], new Map([[path(1), cap(1, { infos })]])).fetch(place);
+  // The index returned this document for the point, but its row names other areas.
+  const other = feature(1, { areadesc: 'Northern Gulf of Riga; Coast of Kurzeme', gc: '' });
+  const unplaced = await check(info({ area: gulf }), other);
+  assert.equal(unplaced.status, 'available');
+  assert.deepEqual(unplaced.alerts, []);
+  assert.match(unplaced.coverage, UNMATCHED);
+  assert.match(unplaced.coverage, /not an all-clear/);
+  // Information without any area cannot be placed either.
+  const areaLess = await check(info({ area: gulf }).replace(/<area>.*<\/area>/, ''), gulfRow);
+  assert.deepEqual(areaLess.alerts, []);
+  assert.match(areaLess.coverage, UNMATCHED);
+  // A document whose own boundary excludes the point was evaluated: nothing is claimed about it.
+  const outside = await check(
+    info({ area: area('<polygon>0,0 0,1 1,1 1,0 0,0</polygon>') }),
+    feature(1),
+  );
+  assert.deepEqual(outside.alerts, []);
+  assert.doesNotMatch(outside.coverage, /could not be matched/);
+  // Nor about current information for other areas beside matched information that takes effect
+  // later: the row is accounted for, and that document is disclosed as upcoming.
+  const staged = await check(
+    info({ headline: 'Elsewhere now', area: zone('Coast of Kurzeme', 'LV806') }) +
+      effectiveSoon(info({ area: gulf })),
+    gulfRow,
+  );
+  assert.deepEqual(staged.alerts, []);
+  assert.equal(staged.upcomingDocuments, 1);
+  assert.doesNotMatch(staged.coverage, /could not be matched/);
+});
+
 test('preferred language retains exact issuer text and blocks executable web URLs', async () => {
   const infos =
     info({ language: 'fr', headline: 'French warning' }) +
@@ -292,6 +406,8 @@ test('preferred language retains exact issuer text and blocks executable web URL
     result.alerts.map((alert) => alert.title),
     ['English warning'],
   );
+  // The id numbers the block by its place in the document, not among the blocks shown.
+  assert.equal(result.alerts[0].id, 'weather@example.gov/alert-1/1');
   assert.match(result.alerts[0].url, /^https:\/\/severeweather\.wmo\.int\/v2\/cap-alerts\//);
 });
 
@@ -610,6 +726,7 @@ function bmkgHarness(
   english: string | null = bmkgEnglish,
   related = bmkgEnglishPath,
   original = bmkgOriginal,
+  row = {},
 ) {
   const calls: string[] = [];
   const fetch = createGlobalAlertAdapter(async (url, options) => {
@@ -620,7 +737,7 @@ function bmkgHarness(
       return {
         text: JSON.stringify({
           type: 'FeatureCollection',
-          features: [feature(1, { capurl: bmkgPath, rlink: related, mem: '043' })],
+          features: [feature(1, { capurl: bmkgPath, rlink: related, mem: '043', ...row })],
         }),
         fetchedAt: now,
       };
@@ -663,6 +780,49 @@ test('an unavailable, different or spatially altered language copy retains origi
     assert.equal(result.alerts[0].title, 'Hujan Lebat');
     assert.equal(result.alerts[0].url, `https://severeweather.wmo.int/v2/cap-alerts/${bmkgPath}`);
   }
+});
+
+test('a verified English copy that renames an area cannot hide a warning matched by its original name', async () => {
+  // No polygon: the index row places this area by its Indonesian name, the English copy renames
+  // it, and the area's geocode makes the two copies equivalent.
+  const district = (name: string) =>
+    `<area><areaDesc>${name}</areaDesc><geocode><valueName>BPS</valueName><value>3171</value></geocode></area>`;
+  const pair = (areas: (name: string) => string, more: (language: string) => string = () => '') =>
+    [
+      ['id', 'Hujan Lebat', 'Kota Jakarta Selatan'],
+      ['en', 'Heavy Rain', 'South Jakarta City'],
+    ].map(([language, headline, name]) =>
+      cap(1, { infos: info({ language, headline, area: areas(name) }) + more(language) }),
+    );
+  const shown = async (documents: string[], gc: string) =>
+    (
+      await bmkgHarness(documents[1], bmkgEnglishPath, documents[0], {
+        areadesc: 'Kota Jakarta Selatan',
+        gc,
+      }).fetch(jakarta)
+    ).alerts.map((alert) => [alert.title, alert.area, alert.url.split('/cap-alerts/')[1]]);
+  assert.deepEqual(await shown(pair(district), ''), [
+    ['Hujan Lebat', 'Kota Jakarta Selatan', bmkgPath],
+  ]);
+  // With the geocode in the index row the renamed area is matched as well: English is used.
+  assert.deepEqual(await shown(pair(district), '3171'), [
+    ['Heavy Rain', 'South Jakarta City', bmkgEnglishPath],
+  ]);
+  // A second block matched by its polygon in both copies must not let the first one disappear.
+  const wind = (language: string) =>
+    info({ language, headline: `Wind (${language})`, area: jakartaArea }).replace(
+      '<event>Thunderstorm</event>',
+      '<event>Wind</event>',
+    );
+  assert.deepEqual(await shown(pair(district, wind), ''), [
+    ['Hujan Lebat', 'Kota Jakarta Selatan', bmkgPath],
+    ['Wind (id)', 'Test region', bmkgPath],
+  ]);
+  // Nor may one block lose a matched area's name to its translation.
+  const twoAreas = pair((name) => district(name) + jakartaArea);
+  assert.deepEqual(await shown(twoAreas, ''), [
+    ['Hujan Lebat', 'Kota Jakarta Selatan; Test region', bmkgPath],
+  ]);
 });
 
 test('unrelated, cross-authority and arbitrary rlink paths are never fetched', async () => {

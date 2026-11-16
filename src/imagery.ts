@@ -87,7 +87,9 @@ function strictDate(text: string): number {
 /** Expand only supported bounded intervals, respecting gaps and never inventing future frames. */
 export function parseDomainTimes(xml: string, source: ImagerySource, now = Date.now()): string[] {
   if (xml.length > 200_000) throw new Error('Imagery metadata exceeded the size limit.');
-  const match = xml.match(/<(?:\w+:)?Domain(?:\s[^>]*)?>([^<]*)<\/(?:\w+:)?Domain>/);
+  // Attributes stop at the next tag. `[^>]*` would let every unclosed `<Domain ` scan the rest of
+  // the body, which makes a hostile response quadratic on the page's main thread.
+  const match = xml.match(/<(?:\w+:)?Domain(?:\s[^<>]*)?>([^<]*)<\/(?:\w+:)?Domain>/);
   if (!match) throw new Error('NASA did not return imagery time metadata.');
   const latest = new Set<number>();
   const period = source.kind === 'daily' ? 86400_000 : 600_000;
@@ -178,7 +180,9 @@ export async function fetchImageryFrames(
 ): Promise<string[]> {
   signal?.throwIfAborted();
   const cached = domainCache.get(source.id);
-  if (!force && cached && Date.now() - cached.at < 5 * 60_000) return cached.frames;
+  // A negative age means the device clock was set back since: the metadata's age is unknown.
+  const age = cached ? Date.now() - cached.at : -1;
+  if (!force && cached && age >= 0 && age < 5 * 60_000) return cached.frames;
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (signal?.aborted) controller.abort();
@@ -234,4 +238,96 @@ export function isFrameStale(
 ): boolean {
   const time = strictDate(frame);
   return !Number.isFinite(time) || now - time > (kind === 'daily' ? 3 * 86400_000 : 90 * 60_000);
+}
+
+/** The satellite frames on the map, the layer they belong to, and the viewer's place in them. */
+export interface FrameTimeline {
+  sourceId: string;
+  frames: string[];
+  index: number;
+  playing: boolean;
+}
+export const EMPTY_TIMELINE: FrameTimeline = { sourceId: '', frames: [], index: 0, playing: false };
+
+/**
+ * The timeline once `frames` arrive for a layer. A layer that was not on the map opens on its
+ * newest frame, paused. After a refresh of the layer on the map, playback continues; a viewer on
+ * the newest frame moves to the new newest frame, and a viewer on an earlier frame keeps its
+ * observation time, or the next later one when that is no longer advertised.
+ */
+export function timelineWithFrames(
+  timeline: FrameTimeline,
+  sourceId: string,
+  frames: string[],
+): FrameTimeline {
+  const newest = Math.max(0, frames.length - 1);
+  if (timeline.sourceId !== sourceId) return { sourceId, frames, index: newest, playing: false };
+  const shown =
+    timeline.index < timeline.frames.length - 1 ? timeline.frames[timeline.index] : undefined;
+  const kept = shown === undefined ? -1 : frames.findIndex((frame) => frame >= shown);
+  return {
+    sourceId,
+    frames,
+    index: kept < 0 ? newest : kept,
+    playing: timeline.playing && frames.length > 1,
+  };
+}
+
+/**
+ * Loads a layer's frames into the timeline and returns the cleanup that cancels the request.
+ * A refresh of the layer on the map keeps its frames, the selected frame and playback while it
+ * runs and after it fails; `status` then reports the failure beside them. Each frame keeps its
+ * observation time, so an old frame is still labelled delayed. Another layer, or a paused map,
+ * starts empty.
+ */
+export function loadTimeline(
+  source: ImagerySource,
+  enabled: boolean,
+  force: boolean,
+  update: (change: (timeline: FrameTimeline) => FrameTimeline) => void,
+  status: (loading: boolean, error: string) => void,
+  load = fetchImageryFrames,
+): () => void {
+  update((timeline) => (enabled && timeline.sourceId === source.id ? timeline : EMPTY_TIMELINE));
+  status(enabled, '');
+  if (!enabled) return () => {};
+  const controller = new AbortController();
+  load(source, controller.signal, force)
+    .then((frames) => {
+      if (controller.signal.aborted) return;
+      // The latest daily mosaic may have incomplete swaths. It remains selectable and labelled.
+      update((timeline) => timelineWithFrames(timeline, source.id, frames));
+      status(false, '');
+    })
+    .catch((error) => {
+      if (!controller.signal.aborted)
+        status(
+          false,
+          error instanceof Error ? error.message : 'Satellite metadata is unavailable.',
+        );
+    });
+  return () => controller.abort();
+}
+
+/** A Leaflet tile event: the grid coordinates of the tile concerned. */
+type TileEvent = { coords: { x: number; y: number; z: number } };
+/**
+ * Leaflet event handlers for one tile layer that report whether a tile that failed to load is
+ * still on the map. A failure counts until that tile loads or the layer unloads it, for example
+ * after panning or zooming away, so a missing-tile notice clears once no blank tile remains.
+ */
+export function failedTileTracker(report: (failed: boolean) => void) {
+  const failed = new Set<string>();
+  const key = ({ coords }: TileEvent) => `${coords.x}:${coords.y}:${coords.z}`;
+  const settled = (event: TileEvent) => {
+    if (failed.delete(key(event))) report(failed.size > 0);
+  };
+  return {
+    tileerror: (event: TileEvent) => {
+      failed.add(key(event));
+      report(true);
+    },
+    tileload: settled,
+    tileunload: settled,
+  };
 }

@@ -13,6 +13,11 @@ export interface CapArea {
   geocodes: Array<{ name: string; value: string }>;
 }
 export interface CapInfo {
+  /**
+   * The block's place among the document's <info> blocks, from 0. It stays the same however the
+   * blocks are filtered, so an alert id built from it names the same block in every source.
+   */
+  position: number;
   language: string;
   event: string;
   severity: string;
@@ -46,7 +51,6 @@ export interface RssFeed {
    */
   items: Array<{ url: string; publishedAt: number | null; order: number | null }>;
   updatedAt: number | null;
-  truncated: boolean;
   /** Some publication times named no time zone, so their instants were left unknown (null). */
   unzonedTimes: boolean;
 }
@@ -296,7 +300,9 @@ export function parseRss(raw: string): RssFeed {
     if (parsed.at === null && parsed.order !== null) unzonedTimes = true;
     return parsed;
   };
-  const items = all.slice(0, 100).map((value) => {
+  // Every entry is kept: RSS sets no item order, so the newest may be listed last. Callers order
+  // the entries (newestFirst) before they bound how many bulletins they read.
+  const items = all.map((value) => {
     const item = record(value),
       published = time(item.pubDate);
     return { url: text(item.link, 4000, true), publishedAt: published.at, order: published.order };
@@ -309,7 +315,6 @@ export function parseRss(raw: string): RssFeed {
   return {
     items,
     updatedAt: times.length ? Math.max(...times) : null,
-    truncated: all.length > 100,
     unzonedTimes,
   };
 }
@@ -356,7 +361,7 @@ export function parseCap(raw: string, now = Date.now()): CapDocument {
   const msgType = choice(a.msgType, ['Alert', 'Update', 'Cancel', 'Ack', 'Error']);
   if (['Update', 'Cancel'].includes(msgType) && !references.length)
     throw new Error('CAP update or cancellation has no references.');
-  const infos = list(a.info, 30).map((value) => {
+  const infos = list(a.info, 30).map((value, position) => {
     // A Cancel or Update may end a warning now, so its information can expire at or before its
     // issue or effective time. That information is never current (activeCapRecords), but the
     // document is kept and its references still withdraw the original. In any other message such
@@ -372,6 +377,7 @@ export function parseCap(raw: string, now = Date.now()): CapDocument {
     )
       throw new Error('Invalid CAP validity interval.');
     return {
+      position,
       language: text(i.language, 40) || 'en-US',
       event: text(i.event, 400, true),
       severity: choice(i.severity, ['Extreme', 'Severe', 'Moderate', 'Minor', 'Unknown']),

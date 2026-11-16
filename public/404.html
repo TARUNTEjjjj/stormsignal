@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>Page not found · StormSignal</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
       body {
         margin: 0;
@@ -31,5 +32,24 @@
       <p>This address does not have a page.</p>
       <a href="/">Return to the weather workspace</a>
     </main>
+    <script>
+      // An app update never reloads this page, so it answers the new version's safety check at
+      // once instead of holding the update back while it is open.
+      try {
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          const data = event.data;
+          if (
+            data?.type === 'APP_UPDATE_CAN_ACTIVATE' &&
+            /^[a-f0-9]{32}$/.test(data.nonce) &&
+            event.ports?.[0]
+          )
+            event.ports[0].postMessage({
+              type: 'APP_UPDATE_SAFETY',
+              nonce: data.nonce,
+              safe: true,
+            });
+        });
+      } catch {}
+    </script>
   </body>
 </html>

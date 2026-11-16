@@ -3,6 +3,12 @@ export interface TextOptions {
   maxBytes?: number;
   ttlMs?: number;
   signal?: AbortSignal;
+  /**
+   * Throws for a body that is not the expected document. Such a body is never kept, in memory or
+   * the shared cache, so the next read asks the provider again instead of reusing it until its TTL
+   * passes. A read is shared by every caller of its URL, so they all pass the same check.
+   */
+  validate?: (text: string) => void;
 }
 export interface TextResult {
   text: string;
@@ -15,6 +21,15 @@ const pending = new Map<string, Promise<TextResult>>();
 export const MAX_PENDING_READS = 32;
 /** How many of them are in progress now. */
 export const pendingReads = () => pending.size;
+/** Settles once every upstream read in progress now has settled; it never rejects. */
+export const readsSettled = (): Promise<void> =>
+  Promise.allSettled([...pending.values()]).then(() => {});
+/**
+ * How long a copy of a live feed or bulletin is reused. The dashboard checks warnings every minute
+ * (src/connectivity.ts), and a copy is stamped when its read ends, seconds into its check. Kept for
+ * a whole minute, it would answer the next check too: each feed would be read every two minutes.
+ */
+export const LIVE_TTL_MS = 45_000;
 const MAX_ENTRIES = 96;
 const MAX_MEMORY_BYTES = 12_000_000;
 const RETENTION = 24 * 60 * 60_000;
@@ -63,6 +78,11 @@ function remember(key: string, value: TextResult) {
     bytes -= memory.get(oldest)!.text.length * 2;
     memory.delete(oldest);
   }
+}
+/** Retention bounds memory as it does the edge cache: each read first drops every copy past it. */
+function forgetExpired() {
+  const now = Date.now();
+  for (const [key, value] of memory) if (now - value.fetchedAt >= RETENTION) memory.delete(key);
 }
 export function clearWarningCache() {
   memory.clear();
@@ -295,7 +315,12 @@ async function providerResponse(
   }
 }
 
-async function retrieve(target: string, maxBytes: number, ttlMs: number): Promise<TextResult> {
+async function retrieve(
+  target: string,
+  maxBytes: number,
+  ttlMs: number,
+  validate?: (text: string) => void,
+): Promise<TextResult> {
   let old = memory.get(target);
   if (!old) {
     try {
@@ -313,11 +338,9 @@ async function retrieve(target: string, maxBytes: number, ttlMs: number): Promis
           cancel(cached.body);
           return;
         }
-        return {
-          text: await boundedText(cached, maxBytes, signal),
-          fetchedAt,
-          etag: cached.headers.get('etag') || undefined,
-        };
+        const text = await boundedText(cached, maxBytes, signal);
+        validate?.(text); // A copy that an earlier release kept unchecked is a miss.
+        return { text, fetchedAt, etag: cached.headers.get('etag') || undefined };
       });
       if (hit) {
         old = hit;
@@ -341,8 +364,12 @@ async function retrieve(target: string, maxBytes: number, ttlMs: number): Promis
       cancel(response.body);
       throw new Error('Warning cache could not be revalidated');
     }
+    const text =
+      response.status === 304 ? old!.text : await boundedText(response, maxBytes, signal);
+    // Before it is kept: an unusable body neither replaces the last good copy nor is served on.
+    validate?.(text);
     return {
-      text: response.status === 304 ? old!.text : await boundedText(response, maxBytes, signal),
+      text,
       fetchedAt: Date.now(),
       etag: response.headers.get('etag') || (response.status === 304 ? old?.etag : undefined),
     };
@@ -379,7 +406,9 @@ export async function requestText(target: string, options: TextOptions = {}): Pr
   )
     throw new Error('Invalid warning request limits');
   const maxBytes = Math.min(options.maxBytes ?? 2_000_000, 4_000_000);
-  const ttlMs = Math.min(Math.max(options.ttlMs ?? 60_000, 0), 24 * 60 * 60_000);
+  const ttlMs = Math.min(Math.max(options.ttlMs ?? LIVE_TTL_MS, 0), 24 * 60 * 60_000);
+  // Before memory is read, here and in retrieve(): an aged copy is never a revalidation base.
+  forgetExpired();
   let task = pending.get(target);
   const kept = memory.get(target);
   // A fresh copy in memory needs no upstream read, so it is served even when reads are at capacity.
@@ -387,7 +416,7 @@ export async function requestText(target: string, options: TextOptions = {}): Pr
   if (!task) {
     if (pending.size >= MAX_PENDING_READS)
       throw new Error('Warning service busy; retry shortly or check the official source');
-    task = retrieve(target, maxBytes, ttlMs);
+    task = retrieve(target, maxBytes, ttlMs, options.validate);
     pending.set(target, task);
     task
       .finally(() => {

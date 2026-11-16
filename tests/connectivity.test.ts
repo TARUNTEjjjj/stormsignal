@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   alertCheckIsRecent,
+  alertToggleDisabled,
   networkPolicy,
   readConnectionMode,
   sourceClock,
@@ -79,6 +80,30 @@ test('warning expiry is judged on the clock of the source that answered the chec
   assert.deepEqual(ids(-600_000, now - 600_000 + 300_000), []);
   assert.deepEqual(unexpiredAlerts(null, now), []);
   assert.deepEqual(unexpiredAlerts(undefined, now), []);
+});
+test('page alerts switch on only for a complete polled point feed, and switch off at any place', () => {
+  const point = { status: 'available', scope: 'point' } as const;
+  // A complete NWS point answer while Full workspace polls it.
+  assert.equal(alertToggleDisabled(false, point, true), false);
+  assert.equal(alertToggleDisabled(false, { ...point, partial: false }, true), false);
+  // Alerts stay on when another place is chosen. Its check may be anything below.
+  const otherPlaces = [
+    null, // still loading, or it failed
+    undefined,
+    { ...point, partial: true }, // WMO SWIC, or an NWS answer with pages not loaded
+    { status: 'available', scope: 'region', partial: true }, // NDMA SACHET state bulletins
+    { status: 'available', scope: 'country' },
+    { status: 'available' }, // no scope stated
+    { status: 'unsupported', scope: 'point', partial: true },
+  ] as const;
+  for (const check of otherPlaces) {
+    assert.equal(alertToggleDisabled(false, check, true), true, 'alerts cannot be switched on');
+    assert.equal(alertToggleDisabled(true, check, true), false, '"Disable alerts" must work');
+  }
+  // Data saver does not poll: alerts cannot be switched on, but alerts that are on can be stopped.
+  assert.equal(alertToggleDisabled(false, point, false), true);
+  assert.equal(alertToggleDisabled(true, point, false), false);
+  assert.equal(alertToggleDisabled(true, point, true), false);
 });
 test('a check completed after a connection-mode change is judged against the current time', (t) => {
   const start = 1_800_000_000_000;

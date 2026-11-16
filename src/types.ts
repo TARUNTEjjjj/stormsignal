@@ -82,9 +82,10 @@ export interface AlertResult {
   feedUpdatedAt?: number | null;
   checks?: AlertSourceCheck[];
   /**
-   * Gateway checks only: this device's clock minus the gateway's clock, in milliseconds, measured
-   * when the check arrived. Official issue and expiry times are instants on the gateway's clock, so
-   * they are compared with the device clock less this offset (`sourceClock` in connectivity.ts).
+   * Gateway checks, and NWS checks whose cache headers state NWS's clock: this device's clock minus
+   * that service's clock, in milliseconds, measured when the check arrived. Official issue and
+   * expiry times are instants on the service's clock, so they are compared with the device clock
+   * less this offset (`sourceClock` in connectivity.ts).
    */
   clockOffset?: number;
 }
@@ -98,7 +99,7 @@ export interface AlertSourceCheck {
   coverage: string;
 }
 export interface Hazard {
-  kind: 'rain' | 'wind' | 'heat' | 'cold' | 'uv' | 'thunder';
+  kind: 'rain' | 'snow' | 'wind' | 'heat' | 'cold' | 'uv' | 'thunder';
   level: 'elevated' | 'high';
   title: string;
   detail: string;

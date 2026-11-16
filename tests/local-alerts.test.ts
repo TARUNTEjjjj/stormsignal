@@ -212,6 +212,116 @@ test('a WMO match for a direct document without point geometry stays visible whi
   );
 });
 
+test('each information block of one document keeps its own warning while both sources answer', async () => {
+  const manila: Place = {
+    id: 'manila',
+    name: 'Manila',
+    country: 'Philippines',
+    countryCode: 'PH',
+    latitude: 14.6042,
+    longitude: 120.9822,
+  };
+  const sent = new Date(now - 60_000).toISOString();
+  const expires = new Date(now + 3_600_000).toISOString();
+  const geocoded =
+    '<area><areaDesc>Metro Manila</areaDesc><geocode><valueName>PSGC</valueName><value>1300000000</value></geocode></area>';
+  const polygon =
+    '<area><areaDesc>Manila rain polygon</areaDesc><polygon>14,120 14,122 16,122 16,120 14,120</polygon></area>';
+  const info = (event: string, headline: string, areas: string) =>
+    `<info><language>en</language><category>Met</category><event>${event}</event><urgency>Immediate</urgency><severity>Severe</severity><certainty>Likely</certainty><effective>${sent}</effective><expires>${expires}</expires><senderName>PAGASA</senderName><headline>${headline}</headline><description>${headline} description.</description><instruction>${headline} instruction.</instruction>${areas}</info>`;
+  const direct =
+    'https://publicalert.pagasa.dost.gov.ph/output/wcp/00000000-0000-4000-8000-000000000001.cap';
+  const indexed = 'ph-pagasa-en/2026/11/09/01/00/TC-1.xml';
+  // The first block names Metro Manila by geocode only: WMO matches it and the direct check cannot
+  // evaluate it. The second has a polygon containing Manila, which both sources match. Naming the
+  // geocoded area in the second block too changes WMO's area text, so the removal of identical
+  // content cannot hide a wrong id.
+  for (const rainAreas of [polygon, polygon + geocoded]) {
+    const xml = `<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2"><identifier>TC-1</identifier><sender>pagasa@example.gov.ph</sender><sent>${sent}</sent><status>Actual</status><msgType>Alert</msgType><scope>Public</scope>${info('Tropical Cyclone Wind Signal', 'Wind Signal No. 2', geocoded)}${info('Rainfall Warning', 'Orange Rainfall Warning', rainAreas)}</alert>`;
+    const national = createNationalAlertAdapter(async (url) => {
+      if (url.endsWith('/feeds/'))
+        return {
+          text: `<feed xmlns="http://www.w3.org/2005/Atom"><updated>${sent}</updated><entry><updated>${sent}</updated><link type="application/cap+xml" href="${direct}"/></entry></feed>`,
+          fetchedAt: now - 1_000,
+        };
+      if (url === direct) return { text: xml, fetchedAt: now - 500 };
+      throw new Error(`Unexpected direct request: ${url}`);
+    });
+    const global = createGlobalAlertAdapter(async (url) => {
+      if (url.endsWith('/json/sources.json'))
+        return {
+          text: JSON.stringify({
+            sources: [
+              {
+                source: {
+                  authorityCountry: 'ph',
+                  sourceIsOfficial: true,
+                  capAlertFeedStatus: 'operating',
+                  sourceId: 'ph-pagasa-en',
+                  memID: '127',
+                  byLanguage: [{ code: 'en', name: 'PAGASA' }],
+                },
+              },
+            ],
+          }),
+          fetchedAt: now - 10_000,
+        };
+      if (url.includes('/f/ows/'))
+        return {
+          text: JSON.stringify({
+            type: 'FeatureCollection',
+            features: [
+              { areadesc: 'Metro Manila', gc: '1300000000' },
+              { areadesc: 'Manila rain polygon', gc: '' },
+            ].map((row) => ({
+              type: 'Feature',
+              properties: { capurl: indexed, mem: '127', ...row },
+            })),
+          }),
+          fetchedAt: now,
+        };
+      if (url.endsWith(`/v2/cap-alerts/${indexed}`)) return { text: xml, fetchedAt: now - 500 };
+      throw new Error(`Unexpected WMO request: ${url}`);
+    });
+    const both = await createLocalAlertAdapter({
+      national,
+      global,
+      kolkata: unavailable,
+      india: unavailable,
+    })(manila);
+    const directDown = await createLocalAlertAdapter({
+      national: unavailable,
+      global,
+      kolkata: unavailable,
+      india: unavailable,
+    })(manila);
+    assert.deepEqual(
+      both.checks?.map((check) => check.status),
+      ['available', 'available'],
+    );
+    for (const value of [both, directDown])
+      assert.deepEqual(value.alerts.map((alert) => alert.title).sort(), [
+        'Orange Rainfall Warning',
+        'Wind Signal No. 2',
+      ]);
+    // The directly verified copy still wins for the block that both sources matched.
+    assert.equal(
+      both.alerts.find((alert) => alert.title === 'Orange Rainfall Warning')?.url,
+      direct,
+    );
+    // A block has one id, its place in the document, whichever source matched it.
+    const ids = (value: AlertResult) =>
+      Object.fromEntries(value.alerts.map((alert) => [alert.title, alert.id]));
+    assert.deepEqual(ids(await national(manila)), {
+      'Orange Rainfall Warning': 'pagasa@example.gov.ph/TC-1/1',
+    });
+    assert.deepEqual(ids(await global(manila)), {
+      'Wind Signal No. 2': 'pagasa@example.gov.ph/TC-1/0',
+      'Orange Rainfall Warning': 'pagasa@example.gov.ph/TC-1/1',
+    });
+  }
+});
+
 test('bulletins a source lists as taking effect later are named in the combined coverage', async () => {
   const quiet = await adapter(result([]), result([]))(jakarta);
   assert.doesNotMatch(quiet.coverage, /take effect later/);

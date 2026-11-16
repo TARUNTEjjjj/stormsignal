@@ -638,7 +638,9 @@ test('an open kit, preparedness or 404 page no longer holds back worker activati
       URL,
       MessageChannel,
       clearTimeout,
-      setTimeout: (run: () => void) => setTimeout(run, 15),
+      // The protocol's own 2-second reply window: a reply clears the timer, so a passing run is not
+      // slowed, while a shortened window failed on a cold CI runner before the first reply arrived.
+      setTimeout,
       APP_VERSION: version,
       complete: () => true,
       self: {

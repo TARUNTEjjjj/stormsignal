@@ -79,10 +79,11 @@ function remember(key: string, value: TextResult) {
     memory.delete(oldest);
   }
 }
-/** Retention bounds memory as it does the edge cache: each read first drops every copy past it. */
+/** Drop expired or future-dated copies, including after a server clock correction. */
 function forgetExpired() {
   const now = Date.now();
-  for (const [key, value] of memory) if (now - value.fetchedAt >= RETENTION) memory.delete(key);
+  for (const [key, value] of memory)
+    if (value.fetchedAt > now || now - value.fetchedAt >= RETENTION) memory.delete(key);
 }
 export function clearWarningCache() {
   memory.clear();

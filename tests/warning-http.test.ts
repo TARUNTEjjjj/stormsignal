@@ -93,6 +93,19 @@ test('approved provider paths forbid redirect following and use bounded request 
   }
 });
 
+test('a backward clock change cannot keep a future-dated warning copy fresh', async () => {
+  optionalEdgeCache();
+  mockFetch(async () => new Response('before correction', { headers: { ETag: '"before"' } }));
+  await requestText(SOURCE);
+  now -= 60 * 60_000;
+  mockFetch(async () => new Response('after correction'));
+  const result = await requestText(SOURCE);
+  assert.equal(result.text, 'after correction');
+  assert.equal(result.fetchedAt, now);
+  assert.equal(calls.length, 2);
+  assert.equal(new Headers(calls[1].init?.headers).has('If-None-Match'), false);
+});
+
 test('fresh memory cache preserves the actual retrieval time and respects TTL', async () => {
   mockFetch(async () => new Response('first', { headers: { ETag: '"v1"' } }));
   const first = await requestText(SOURCE, { ttlMs: 60_000 });

@@ -3,10 +3,10 @@
 ## Midnight Aurora redesign and 3D globe — 19 November 2026
 
 The interface was restyled and a 3D globe added as the centrepiece of Full workspace.
-Two engineers built the restyle and the globe in parallel, each patch was reviewed and
-repaired by independent reviewers, and an integrator combined them. Final reviews
-followed (engineering, visual design, accessibility), then a test-coverage round, a
-repair and an approving recheck. The main changes:
+A multi-agent workflow built the restyle and the globe as separate changes. Independent
+review agents checked and repaired each one, the two were combined, and final
+engineering, visual-design and accessibility reviews followed, then a test-coverage
+round, a repair and an approving recheck. The main changes:
 
 - **Midnight Aurora palette.** Shared tokens on `:root` in `src/frontend-design.css`: a
   midnight base, a glass sidebar and top bar, panels inside gradient hairlines, and aurora
@@ -41,7 +41,12 @@ Pacific/Pago_Pago and Australia/Lord_Howe, and with German, Arabic (Egypt) and J
 locales. Prettier reports every checked file formatted, and a clean install reported zero
 known dependency vulnerabilities. Each of 96 one-line changes to the globe code (66
 written with the new tests and the repair, 30 by the independent recheck) makes at least
-one test fail.
+one test fail. Those changes were aimed at the behaviour the tests describe. A later random
+spot check of 24 other one-line changes in the same files found 9 that no test catches:
+the device-pixel-ratio fallback, the drag's pointer check, the texture upload flag, the
+star colours, the image-release guard, an abort listener option, the flag that keeps
+Enter from selecting the centre before the globe is turned, and two decorative icons'
+`aria-hidden`. Most are drawing details that the stand-in renderer cannot observe.
 
 Bundle sizes (raw / compressed): the entry script is 342.0 / 108.6 kB (334.3 / 106.1 kB
 before) and the entry stylesheet 84.3 / 17.4 kB (51.9 / 11.9 kB before). three.js
@@ -80,6 +85,12 @@ then reported version `7014fb5e…`, and `npm run test:live` through it returned
 On the hosted site, Data saver loaded only the application bundle and the forecast.
 Switching to Full workspace loaded the globe, which drew NASA's 18 November 2026 mosaic
 (93% of Earth imaged) with no console errors.
+
+Screenshots: [desktop globe](images/aurora-globe-desktop.jpg) (Full workspace, 17:24 UTC)
+and [desktop forecast explorer](images/aurora-forecast-desktop.jpg) (Data saver, 17:25
+UTC), each captured for New York City from the hosted site in its own headless Chrome
+load (software WebGL). They show the data of those moments, not current weather or proof
+of complete provider coverage.
 
 Not covered: Safari, Firefox, Windows and a real GPU. Forced colours were checked only
 through Chrome's emulation, so the toggles and focus rings still need one look in

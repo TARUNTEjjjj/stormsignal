@@ -8,9 +8,9 @@ StormSignal is intended for public situational awareness and learning. It does n
 
 ## Frontend showcase
 
-A React + TypeScript dashboard for exploring weather evidence, with custom SVG graphics, responsive layouts and explicit loading, missing-data and offline states.
+A React + TypeScript dashboard for exploring weather evidence, with an interactive three.js globe, custom SVG graphics, responsive layouts and explicit loading, missing-data and offline states.
 
-![StormSignal desktop dashboard with current conditions and the interactive forecast explorer](docs/images/dashboard-desktop.jpg)
+![StormSignal in Full workspace: the 3D globe shows NASA's 18 November 2026 satellite mosaic over North America with New York City selected, beside the mosaic's date, its coverage and the globe controls](docs/images/aurora-globe-desktop.jpg)
 
 - **Explore the forecast:** inspect individual hours with a pointer or keyboard, switch temperature/precipitation/wind, and compare available time ranges. The SVG chart preserves missing-data gaps and has an exact-value table. Data saver uses the forecast already loaded; model comparisons and map downloads remain optional.
 - **Export a comparison:** download the displayed metric as CSV with UTC timestamps, units, and model columns aligned by timestamp. Missing values stay blank. The 24/72-hour ranges measure elapsed time even when a provider omits observations.

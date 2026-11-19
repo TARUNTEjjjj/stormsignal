@@ -4,7 +4,7 @@ StormSignal combines forecasts, imagery, official-warning coverage and saved off
 
 This iteration focuses on visual hierarchy and hands-on exploration in React and TypeScript. It builds on the existing forecast adapters, warning gateway, Leaflet map and offline workflow.
 
-![Desktop dashboard and forecast explorer](images/dashboard-desktop.jpg)
+![Desktop dashboard and forecast explorer in Data saver, in the Midnight Aurora design](images/aurora-forecast-desktop.jpg)
 
 ## The design problem
 

@@ -1,5 +1,21 @@
 # Release verification
 
+## Worker CPU budget harness — 19 November 2026
+
+Added `npm run measure:worker-cpu`. It runs the IMD Kolkata district-feed check in
+workerd (`wrangler@4.157.0 dev`, compatibility date `2026-10-30`) against synthetic
+feeds of 20 entries and of 1,000 entries at 629 KB and at exactly 1 MB. Upstream
+`fetch` is faked in-process, so no provider was contacted. On an Apple M5, a
+near-bound check used about 12–14 ms by the runtime clock and 15–20 ms of CPU charged by
+the OS for a whole `/api/alerts` request. That is above the 10 ms Workers Free
+allowance. A short feed used about 2 ms. Waiting on a simulated 400 ms upstream was
+measured separately from CPU. All nine bounded-read, timeout and error cases behaved as
+documented in workerd. Details, the selected remedy (a hosting-plan decision) and the
+owner follow-up are in [deployment](deployment.md#worker-cpu-budget). The deployed
+revision, the plan's effective CPU limit and production request metrics need the owner's
+Cloudflare account and were **not** recorded. Two tests check the fixtures against the
+parser bounds and the production adapter.
+
 ## Submission audit — 16 November 2026
 
 A multi-agent audit reviewed the repository by area (warning feeds, gateway, client

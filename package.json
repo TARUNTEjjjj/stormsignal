@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:live": "node --import tsx scripts/check-live-alerts.ts --live",
+    "measure:worker-cpu": "node scripts/measure-worker-cpu.mjs",
     "resources:stage": "node scripts/stage-resource-explorer.mjs public/resources",
     "predev": "npm run resources:stage",
     "prebuild": "npm run resources:stage",

@@ -1,11 +1,14 @@
 /**
- * A small GLSL interpreter for the tests: enough of the language to run a fragment shader of the
- * globe (src/globe-shaders.ts) on the CPU, one fragment at a time, so a test can ask what colour a
- * point of the globe gets rather than search the source for a line. It reads declarations,
- * functions, local variables, assignments (swizzles too), if/else, return and discard, the usual
- * operators and the built-ins those shaders use. Preprocessor lines such as three.js's
- * `#include <colorspace_fragment>` are left out, so colours come back in linear light. fwidth has
- * no neighbouring fragments here: it returns `options.fwidth` (a small screen-space step).
+ * A small GLSL interpreter for the tests: enough of the language to run a shader of the globe
+ * (src/globe-shaders.ts) on the CPU, one fragment or one vertex at a time, so a test can ask what
+ * colour a point of the globe gets rather than search the source for a line. It reads
+ * declarations, functions, local variables, assignments (swizzles too), if/else, return and
+ * discard, the usual operators (a mat3 or mat4, column-major as in GLSL, times a vector or a matrix
+ * of its size, or indexed for a column) and the built-ins those shaders use. #ifdef, #ifndef,
+ * #else and #endif keep or drop lines by `options.defines`, as for a three.js material; other
+ * preprocessor lines, such as three.js's `#include <colorspace_fragment>`, are left out, so
+ * colours come back in linear light. fwidth has no neighbouring fragments here: it returns
+ * `options.fwidth` (a small screen-space step).
  */
 export type Value = number | boolean | number[];
 /** A texture: the RGBA colour (0 to 1) at texture coordinates u, v. */
@@ -59,6 +62,29 @@ const QUALIFIERS = new Set([
   'flat',
 ]);
 const SIZES: Record<string, number> = { vec2: 2, vec3: 3, vec4: 4 };
+/** Matrices are flat arrays of their columns: told from vectors by their length. */
+const MATRICES: Record<string, number> = { mat3: 9, mat4: 16 };
+const order = (value: Value) =>
+  !Array.isArray(value) ? 0 : value.length === 16 ? 4 : value.length === 9 ? 3 : 0;
+
+/** The conditional lines of the preprocessor: each block is kept or dropped by `defines`. */
+function preprocess(source: string, defines: ReadonlySet<string>): string {
+  const blocks: boolean[] = [];
+  return source
+    .split('\n')
+    .map((line) => {
+      const directive = /^\s*#\s*(\w+)\s*(\w*)/.exec(line);
+      if (!directive) return blocks.every(Boolean) ? line : '';
+      const [, name, argument] = directive;
+      if (name === 'ifdef') blocks.push(defines.has(argument));
+      else if (name === 'ifndef') blocks.push(!defines.has(argument));
+      else if (name === 'else') blocks.push(!blocks.pop());
+      else if (name === 'endif') blocks.pop();
+      else if (name === 'if' || name === 'elif') throw new Error(`GLSL: no #${name} here`);
+      return '';
+    })
+    .join('\n');
+}
 
 function tokenize(source: string): Token[] {
   const text = source
@@ -95,7 +121,7 @@ function parse(source: string) {
     const got = next();
     if (got !== text) throw new Error(`GLSL: expected "${text}", found "${got}"`);
   };
-  const globals: { type: string; name: string; init: Expr | null }[] = [];
+  const globals: { type: string; name: string; init: Expr | null; varying: boolean }[] = [];
   const functions = new Map<string, Fn>();
 
   function expression(): Expr {
@@ -219,7 +245,9 @@ function parse(source: string) {
       while (next() !== ';');
       continue;
     }
-    while (QUALIFIERS.has(peek() ?? '')) next();
+    const qualifiers: string[] = [];
+    while (QUALIFIERS.has(peek() ?? '')) qualifiers.push(next());
+    const varying = qualifiers.includes('varying') || qualifiers.includes('out');
     const type = next();
     const name = next();
     if (peek() === '(') {
@@ -239,7 +267,7 @@ function parse(source: string) {
     at -= 1;
     const declared = declaration(type);
     if (declared.kind === 'declare')
-      for (const entry of declared.names) globals.push({ type, ...entry });
+      for (const entry of declared.names) globals.push({ type, ...entry, varying });
   }
   return { globals, functions };
 }
@@ -250,8 +278,10 @@ class Returned {
 class Discarded {}
 
 const copy = (value: Value): Value => (Array.isArray(value) ? [...value] : value);
-const zero = (type: string): Value =>
-  type in SIZES ? new Array(SIZES[type]).fill(0) : type === 'bool' ? false : 0;
+const zero = (type: string): Value => {
+  const size = SIZES[type] ?? MATRICES[type];
+  return size ? new Array(size).fill(0) : type === 'bool' ? false : 0;
+};
 const num = (value: Value) => {
   if (Array.isArray(value)) throw new Error('GLSL: expected a scalar');
   return Number(value);
@@ -276,6 +306,19 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
 };
 const dot = (a: Value, b: Value) =>
   vec(a).reduce((total, value, index) => total + value * vec(b)[index], 0);
+/** A matrix times a vector, or a matrix, of its size: column by column, as GLSL stores them. */
+function multiply(matrix: number[], right: number[]): number[] {
+  const n = order(matrix);
+  if (right.length === n)
+    return Array.from({ length: n }, (_, row) =>
+      right.reduce((total, value, column) => total + matrix[column * n + row] * value, 0),
+    );
+  if (right.length === n * n)
+    return Array.from({ length: n }, (_, column) =>
+      multiply(matrix, right.slice(column * n, column * n + n)),
+    ).flat();
+  throw new Error(`GLSL: a mat${n} times something of another size`);
+}
 const SWIZZLE: Record<string, number> = {
   x: 0,
   y: 1,
@@ -315,8 +358,11 @@ class Scope {
 }
 
 /** A compiled shader: `run` executes `main` for one fragment with these uniforms and varyings. */
-export function glsl(source: string, { fwidth = 0.01 }: { fwidth?: number } = {}) {
-  const { globals, functions } = parse(source);
+export function glsl(
+  source: string,
+  { fwidth = 0.01, defines = [] }: { fwidth?: number; defines?: string[] } = {},
+) {
+  const { globals, functions } = parse(preprocess(source, new Set(defines)));
   const builtins: Record<string, (...args: Value[]) => Value> = {
     abs: each(Math.abs),
     sign: each(Math.sign),
@@ -383,8 +429,13 @@ export function glsl(source: string, { fwidth = 0.01 }: { fwidth?: number } = {}
         const object = vec(evaluate(expr.object, scope));
         return indices.length === 1 ? object[indices[0]] : indices.map((index) => object[index]);
       }
-      case 'index':
-        return vec(evaluate(expr.object, scope))[num(evaluate(expr.index, scope))];
+      case 'index': {
+        const object = vec(evaluate(expr.object, scope));
+        const index = num(evaluate(expr.index, scope));
+        // A matrix gives a column: m[3][2] is the third entry of its fourth column.
+        const n = order(object);
+        return n ? object.slice(index * n, index * n + n) : object[index];
+      }
       case 'unary': {
         const operand = evaluate(expr.operand, scope);
         if (expr.op === '!') return !operand;
@@ -412,6 +463,9 @@ export function glsl(source: string, { fwidth = 0.01 }: { fwidth?: number } = {}
       case '-':
         return each((a, b) => a - b)(left, right);
       case '*':
+        if (order(left) && Array.isArray(right)) return multiply(left as number[], right);
+        if (order(right) && Array.isArray(left))
+          throw new Error('GLSL: a vector times a matrix is not supported');
         return each((a, b) => a * b)(left, right);
       case '/':
         return each((a, b) => a / b)(left, right);
@@ -498,26 +552,45 @@ export function glsl(source: string, { fwidth = 0.01 }: { fwidth?: number } = {}
   }
 
   let globalScope = new Scope(null);
+  /** Runs main() with these inputs: false when it discards the fragment. */
+  function main(inputs: Record<string, Input>): boolean {
+    globalScope = new Scope(null);
+    // What a shader writes without declaring it: a fragment's colour, a vertex's place and size.
+    globalScope.define('gl_FragColor', [0, 0, 0, 0]);
+    globalScope.define('gl_Position', [0, 0, 0, 0]);
+    globalScope.define('gl_PointSize', 0);
+    for (const { type, name, init } of globals) {
+      const given = inputs[name];
+      if (given !== undefined) globalScope.define(name, given);
+      else if (init) globalScope.define(name, evaluate(init, globalScope));
+      else if (type !== 'sampler2D') globalScope.define(name, zero(type));
+    }
+    const entry = functions.get('main');
+    if (!entry) throw new Error('GLSL: no main()');
+    try {
+      execute(entry.body, new Scope(globalScope));
+    } catch (signal) {
+      if (signal instanceof Discarded) return false;
+      if (!(signal instanceof Returned)) throw signal;
+    }
+    return true;
+  }
   return {
     /** Runs main() with these uniforms and varyings: gl_FragColor, or null for a discard. */
     run(inputs: Record<string, Input>): number[] | null {
-      globalScope = new Scope(null);
-      globalScope.define('gl_FragColor', [0, 0, 0, 0]);
-      for (const { type, name, init } of globals) {
-        const given = inputs[name];
-        if (given !== undefined) globalScope.define(name, given);
-        else if (init) globalScope.define(name, evaluate(init, globalScope));
-        else if (type !== 'sampler2D') globalScope.define(name, zero(type));
-      }
-      const main = functions.get('main');
-      if (!main) throw new Error('GLSL: no main()');
-      try {
-        execute(main.body, new Scope(globalScope));
-      } catch (signal) {
-        if (signal instanceof Discarded) return null;
-        if (!(signal instanceof Returned)) throw signal;
-      }
-      return vec(value(globalScope.get('gl_FragColor')));
+      return main(inputs) ? vec(value(globalScope.get('gl_FragColor'))) : null;
+    },
+    /**
+     * Runs main() as a vertex shader, with these uniforms and attributes: where it puts the vertex
+     * (gl_Position), how large a point it draws there (gl_PointSize) and each varying it hands on.
+     */
+    vertex(inputs: Record<string, Input>): Record<string, Value> {
+      main(inputs);
+      const outputs: Record<string, Value> = {};
+      const names = globals.filter(({ varying }) => varying).map(({ name }) => name);
+      for (const name of ['gl_Position', 'gl_PointSize', ...names])
+        outputs[name] = value(globalScope.get(name));
+      return outputs;
     },
   };
 }

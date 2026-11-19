@@ -9,7 +9,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build, type Metafile } from 'esbuild';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { WARNING_LINE, type DailyImagery, type ImageryMask } from '../src/globe';
+import {
+  WARNING_LINE,
+  daylight,
+  solarElevation,
+  type DailyImagery,
+  type ImageryMask,
+} from '../src/globe';
 import type { Place, WeatherAlert } from '../src/types';
 
 // The globe in the dashboard and on its own. App is compiled and server-rendered as in
@@ -1003,4 +1009,77 @@ test('focus stays visible, in forced colours too', () => {
   );
   // Both toggles are pressed buttons: the daily mosaic and the globe's motion.
   assert.equal(card().match(/<button [^>]*aria-pressed="true"/g)?.length, 2);
+});
+
+test('every icon on the card is decoration, hidden from screen readers: the words beside it speak', () => {
+  // An icon left to a screen reader is read as an unnamed image, between the words that say what
+  // it means. Chennai by day, at twilight and by night, as the place line shows it; the controls
+  // with the motion switch on and off; a notice; and the card without WebGL 2.
+  const phase = (wanted: string) => {
+    for (let minute = 0; minute < 24 * 60; minute++) {
+      const now = Date.parse('2026-11-19T00:00:00Z') + minute * 60_000;
+      if (daylight(solarElevation(chennai.latitude, chennai.longitude, now)).phase === wanted)
+        return now;
+    }
+    throw new Error(`no ${wanted} at Chennai on 19 November`);
+  };
+  const cards = {
+    day: card(),
+    twilight: card({ now: phase('twilight') }),
+    night: card({ now: phase('night') }),
+    paused: card({ paused: true, showDaily: false }),
+    notice: card({ base: { state: 'failed', message: 'NASA imagery is unavailable (503).' } }),
+    unsupported: card({ status: 'unsupported', alertCount: 2 }),
+    'first paint': globe([warning()]),
+  };
+  for (const [state, html] of Object.entries(cards)) {
+    const icons = html.match(/<svg\b[^>]*>/g) ?? [];
+    assert.ok(icons.length >= 3, `${state}: ${icons.length} icons`);
+    for (const icon of icons) assert.match(icon, /\saria-hidden="true"/, `${state}: ${icon}`);
+  }
+  // Among them, those that change with the state: the sun, dusk or moon on the place line, and
+  // the icon of the Globe motion switch.
+  for (const [state, line] of [
+    ['day', 'is-day'],
+    ['twilight', 'is-twilight'],
+    ['night', 'is-night'],
+  ] as const)
+    assert.match(
+      cards[state],
+      new RegExp(`<span class="globe-place-line ${line}"><svg [^>]*aria-hidden="true"`),
+      state,
+    );
+  for (const html of [cards.day, cards.paused])
+    assert.match(
+      html,
+      /aria-label="Globe motion" aria-pressed="(?:true|false)"><svg [^>]*aria-hidden="true"/,
+    );
+});
+
+test("the place card's imagery line shows a satellite for imagery, a struck-out image for none", () => {
+  // The icon says at a glance what the words beside it say: NOAA-20 imaged the place, or NASA is
+  // still being asked; or there is no imagery there, or none is shown.
+  const newYork = { ...chennai, id: 'nyc', name: 'New York', latitude: 40.71, longitude: -74.01 };
+  for (const [state, html, kind, words, icon] of [
+    ['Chennai, in the 17 Nov gap', card(), 'gap', /No imagery here on 17 Nov/, 'image-off'],
+    ['New York', card({ place: newYork }), 'imaged', /Imaged by NOAA-20 on 17 Nov/, 'satellite'],
+    ['NASA asked', card({ daily: { state: 'loading' } }), 'pending', /Checking NASA/, 'satellite'],
+    ['mosaic hidden', card({ showDaily: false }), 'none', /Daily mosaic hidden;/, 'image-off'],
+  ] as const) {
+    const line = new RegExp(
+      `<span class="globe-place-line is-${kind}"><svg [^>]*class="lucide lucide-([\\w-]+)"[^>]*>.*?</svg>([^<]*)</span>`,
+    ).exec(html);
+    assert.ok(line, `${state}: the imagery line`);
+    assert.match(line[2], words, state);
+    assert.equal(line[1], icon, state);
+  }
+});
+
+test('the zoom hint is drawn only just after a wheel turn has scrolled past the globe', () => {
+  assert.doesNotMatch(card(), /globe-wheel-hint/, 'a ready globe nobody has scrolled over');
+  assert.doesNotMatch(globe(), /globe-wheel-hint/, 'GlobeView as the browser first paints it');
+  assert.match(
+    card({ wheelHint: true }),
+    /<p class="globe-wheel-hint" aria-hidden="true">Hold Ctrl and scroll, or pinch, to zoom the globe<\/p>/,
+  );
 });

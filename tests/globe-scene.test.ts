@@ -1,12 +1,27 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Camera, Mesh, Object3D, ShaderMaterial, Vector3 } from 'three';
+import {
+  Matrix4,
+  Vector3,
+  Vector4,
+  type Camera,
+  type Color,
+  type DataTexture,
+  type Material,
+  type Mesh,
+  type Object3D,
+  type Points,
+  type ShaderMaterial,
+  type Texture,
+} from 'three';
 import {
   AUTO_ROTATE_MS,
   DAILY_OPACITY,
   HOME_GLIDE_MS,
   SETTLE_MS,
   angularDistance,
+  latLonToVector,
+  pointPlace,
   sunDirection,
   vectorToLatLon,
   type GlobeViewState,
@@ -28,20 +43,47 @@ class FakeRenderer {
   forcedLoss = 0;
   fail = false;
   scene: Object3D | null = null;
+  camera: Camera | null = null;
   /** Where the camera stood in the last frame drawn: what the viewer saw. */
   seen: Vector | null = null;
+  /** The drawing buffer: the stage's size in CSS pixels, times the device pixels in each one. */
+  pixelRatio = 1;
+  size = { width: 0, height: 0 };
+  /**
+   * The textures handed to the GPU, in order, by WebGLRenderer's rule: a frame that draws a
+   * texture uploads it once it is marked for upload (needsUpdate), and again only when it is
+   * marked again. One never marked never reaches the GPU: its sampler reads three.js's own empty
+   * texture instead.
+   */
+  uploads: Texture[] = [];
+  private uploaded = new Map<Texture, number>();
   capabilities = { getMaxAnisotropy: () => 16 };
   constructor() {
     FakeRenderer.made.push(this);
   }
   setClearColor() {}
-  setPixelRatio() {}
-  setSize() {}
+  setPixelRatio(ratio: number) {
+    this.pixelRatio = ratio;
+  }
+  setSize(width: number, height: number) {
+    this.size = { width, height };
+  }
   render(scene: Object3D, camera: Camera) {
     if (this.fail) throw new Error('A frame could not be drawn.');
     this.renders++;
     this.scene = scene;
+    this.camera = camera;
     this.seen = camera.position.toArray() as Vector;
+    scene.traverseVisible((object) => {
+      const uniforms = ((object as Mesh).material as ShaderMaterial | undefined)?.uniforms ?? {};
+      for (const { value } of Object.values(uniforms)) {
+        const texture = value as Texture | null;
+        if (!texture?.isTexture || texture.version === 0) continue;
+        if (this.uploaded.get(texture) === texture.version) continue;
+        this.uploaded.set(texture, texture.version);
+        this.uploads.push(texture);
+      }
+    });
   }
   dispose() {
     this.disposed++;
@@ -114,8 +156,10 @@ const london: Place = {
 /**
  * One globe in a stand-in browser. `prompt`: a refresh asked for between two is handed out at once,
  * stamped with the last refresh if that one is unused, as Chrome does; otherwise at the next one.
+ * `pixels`: the screen's device pixels for each CSS pixel (window.devicePixelRatio), or null for a
+ * browser that does not say.
  */
-function scene({ prompt = false } = {}) {
+function scene({ prompt = false, pixels = 2 as number | null } = {}) {
   let time = 1_000;
   /** The last display refresh, and the last one handed out. */
   let refresh = time;
@@ -145,7 +189,7 @@ function scene({ prompt = false } = {}) {
   let inView: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
   install('document', document);
   install('window', {
-    devicePixelRatio: 2,
+    ...(pixels === null ? {} : { devicePixelRatio: pixels }),
     setInterval: (run: () => void, ms: number) => {
       timers.set(++handle, { run, ms, due: time + ms });
       return handle;
@@ -194,10 +238,14 @@ function scene({ prompt = false } = {}) {
   );
   install('now', () => time, performance);
   const log: string[] = [];
+  const picked: Place[] = [];
   const events: GlobeEvents = {
     interact: () => void log.push('interact'),
     turned: () => void log.push('turned'),
-    pick: (place) => void log.push(`pick ${place.name}`),
+    pick: (place) => {
+      log.push(`pick ${place.name}`);
+      picked.push(place);
+    },
     wheel: () => void log.push('wheel'),
     zoomed: (closer) => void log.push(`zoomed ${closer}`),
     lost: () => void log.push('lost'),
@@ -252,15 +300,19 @@ function scene({ prompt = false } = {}) {
     }
     time = end - 1e-6;
   };
-  const material = () => {
+  /** The material with `uniform` in the last frame drawn. */
+  const shader = (uniform: string, what: string) => {
     let found: ShaderMaterial | null = null;
     renderer.scene?.traverse((object) => {
-      const shader = (object as Mesh).material as ShaderMaterial | undefined;
-      if (shader?.uniforms?.baseMap) found = shader;
+      const material = (object as Mesh).material as ShaderMaterial | undefined;
+      if (material?.uniforms?.[uniform]) found = material;
     });
-    assert.ok(found, 'the earth is in the scene');
+    assert.ok(found, `${what} in the scene`);
     return found as ShaderMaterial;
   };
+  const material = () => shader('baseMap', 'the earth is');
+  const stars = () => shader('twinkle', 'the stars are');
+  const glow = () => shader('edge', 'the glow round the globe is');
   /** How far the view's centre is from the place, in degrees. */
   const offPlace = (place: LatLon = chennai) => angularDistance(globe.centre(), place);
   /** The view the last frame drawn showed: its centre and the camera's distance. */
@@ -278,11 +330,14 @@ function scene({ prompt = false } = {}) {
     document,
     label,
     log,
+    picked,
     frames,
     timers,
     observers,
     run,
     material,
+    stars,
+    glow,
     offPlace,
     seen,
     waits,
@@ -314,6 +369,34 @@ function drag(s: ReturnType<typeof scene>, pixels = 200) {
   }
   s.document.dispatchEvent(pointer('pointerup', 450 - pixels, 350));
   s.canvas.dispatchEvent(pointer('pointerup', 450 - pixels, 350));
+}
+/** A pointer event the browser stamped at `time` ms: the stamps tell a tap from a press. */
+function stamped(
+  type: string,
+  x: number,
+  y: number,
+  time: number,
+  extra: Record<string, unknown> = {},
+) {
+  const event = pointer(type, x, y, extra);
+  Object.defineProperty(event, 'timeStamp', { value: time });
+  return event;
+}
+/** A pointer let go at (x, y): on the canvas, then on the document, where it bubbles. */
+function lift(
+  s: ReturnType<typeof scene>,
+  x: number,
+  y: number,
+  time: number,
+  extra: Record<string, unknown> = {},
+) {
+  s.canvas.dispatchEvent(stamped('pointerup', x, y, time, extra));
+  s.document.dispatchEvent(stamped('pointerup', x, y, time, extra));
+}
+/** A mouse click on the globe at (x, y): pressed and let go on the spot, 120 ms later. */
+function tap(s: ReturnType<typeof scene>, x: number, y: number) {
+  s.canvas.dispatchEvent(stamped('pointerdown', x, y, 5_000));
+  lift(s, x, y, 5_120);
 }
 /** Asserts that two views share their centre. */
 function sameCentre(actual: LatLon, expected: LatLon, what: string) {
@@ -815,4 +898,281 @@ test('a tab shown again draws the sun where it is now, not where it was when it 
   sunDirection(later).forEach((value, axis) =>
     assert.ok(Math.abs(sun()[axis] - value) < 1e-9, `axis ${axis}: ${sun()[axis]} vs ${value}`),
   );
+});
+
+test('a click or tap on the globe selects what is under it; a drag, or another pointer let go, selects nothing', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setSaved([], chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  // The view is centred on Chennai: its marker is in the middle of the 900 × 700 stage.
+  tap(s, 450, 350);
+  assert.deepEqual(
+    s.picked.map(({ name }) => name),
+    ['Chennai'],
+    'a click on a marker selects its place',
+  );
+  // Off the markers, the point under the pointer: 100 px right of the centre of a globe some
+  // 530 px across lies about 19° east of Chennai.
+  tap(s, 550, 350);
+  assert.equal(s.picked.length, 2, 'a click on the globe selects a point');
+  const point = s.picked[1];
+  assert.ok(Math.abs(point.latitude - chennai.latitude) < 1.5, `${point.latitude}°`);
+  const east = point.longitude - chennai.longitude;
+  assert.ok(east > 15 && east < 22, `${east}° east of Chennai`);
+  // A finger's tap on a phone selects too, though a finger lands and lifts a few pixels apart:
+  // here 8 px, more than a mouse may move in a click (5 px), within a finger's 12.
+  const finger = { pointerId: 7, pointerType: 'touch' };
+  s.canvas.dispatchEvent(stamped('pointerdown', 450, 350, 6_000, finger));
+  lift(s, 456, 355, 6_090, finger);
+  assert.deepEqual(
+    s.picked.map(({ name }) => name).slice(2),
+    ['Chennai'],
+    'a tap on a marker selects its place',
+  );
+  // A drag turns the globe and selects nothing.
+  drag(s);
+  assert.equal(s.picked.length, 3, 'a drag is not a click');
+  // A finger rests on the globe while a mouse, pressed elsewhere on the page, is let go over it.
+  // That release is not the finger's tap.
+  s.canvas.dispatchEvent(stamped('pointerdown', 450, 350, 9_000, finger));
+  lift(s, 450, 350, 9_080, { pointerId: 1, pointerType: 'mouse' });
+  assert.equal(s.picked.length, 3, 'another pointer let go selects nothing');
+  // Only lets the finger go, so no pointer is left down on the globe: nothing more is checked.
+  lift(s, 450, 350, 9_160, finger);
+});
+
+test('on a high-density screen the globe is drawn in its device pixels, up to two for each CSS pixel', () => {
+  for (const [pixels, drawn] of [
+    [2, 2],
+    [1.5, 1.5],
+    [3, 2],
+    [1, 1],
+    [null, 1],
+  ] as const) {
+    const s = scene({ pixels });
+    s.globe.setPlace(chennai);
+    s.run(100);
+    const screen = `a ${pixels ?? 'silent'}× screen`;
+    // The 900 × 700 stage: 1800 × 1400 pixels on a 2× screen, so the globe is sharp there.
+    assert.equal(s.renderer.pixelRatio, drawn, screen);
+    assert.deepEqual(s.renderer.size, { width: 900, height: 700 }, screen);
+    // The stars are sized in the same pixels, so they look the same size on every screen.
+    assert.equal(s.stars().uniforms.pixelRatio.value, drawn, `${screen}: stars`);
+    s.globe.dispose();
+  }
+});
+
+test("every texture the earth is drawn with reaches the GPU: a plain placeholder, then NASA's imagery", () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(100);
+  const maps = () =>
+    ['baseMap', 'dailyMap'].map((name) => s.material().uniforms[name].value as Texture);
+  const uploaded = (texture: Texture) => s.renderer.uploads.includes(texture);
+  // Before NASA answers, each map is one opaque black texel, handed to the GPU with the first
+  // frame: the shader draws a plain sphere until an image arrives.
+  for (const texture of maps()) {
+    assert.ok(uploaded(texture), 'the placeholder is uploaded');
+    const { data, width, height } = (texture as DataTexture).image;
+    assert.deepEqual([width, height, ...(data ?? [])], [1, 1, 0, 0, 0, 255]);
+  }
+  // The Blue Marble and a daily mosaic arrive: each is uploaded by the next frame.
+  const base = { width: 2048, height: 1024 } as unknown as TexImageSource;
+  const daily = { width: 2048, height: 1024 } as unknown as TexImageSource;
+  s.globe.setImage('base', base);
+  s.globe.setImage('daily', daily);
+  s.run(1000 / 60);
+  const [baseMap, dailyMap] = maps();
+  assert.equal(baseMap.image, base);
+  assert.equal(dailyMap.image, daily);
+  assert.ok(uploaded(baseMap), 'the base image reaches the GPU');
+  assert.ok(uploaded(dailyMap), 'the mosaic reaches the GPU');
+  // Once: not again with each frame of the mosaic's fade and the marker's pulse.
+  const drawn = s.renderer.renders;
+  s.run(1_000);
+  assert.ok(s.renderer.renders > drawn + 10, `${s.renderer.renders - drawn} frames in a second`);
+  for (const map of [baseMap, dailyMap])
+    assert.equal(s.renderer.uploads.filter((texture) => texture === map).length, 1);
+  // The card no longer dates the mosaic: a new placeholder takes its place on the GPU.
+  s.globe.setImage('daily', null);
+  s.run(100);
+  const [, cleared] = maps();
+  assert.notEqual(cleared, dailyMap);
+  assert.ok(uploaded(cleared), 'the new placeholder is uploaded');
+});
+
+/**
+ * What the last frame drew on the globe at `place`: the colour of each marker part lying there
+ * (within a hundredth of the globe's radius of its point on the surface), in the order drawn.
+ */
+function drawnAt(s: ReturnType<typeof scene>, place: LatLon) {
+  const surface = new Vector3(...latLonToVector(place.latitude, place.longitude));
+  const parts: string[] = [];
+  s.renderer.scene?.traverseVisible((object) => {
+    const part = object as Mesh;
+    if (!part.isMesh || part.getWorldPosition(new Vector3()).distanceTo(surface) > 0.01) return;
+    const colour = (part.material as ShaderMaterial).uniforms?.colour?.value as Color | undefined;
+    parts.push(colour ? `#${colour.getHexString()}` : 'no colour');
+  });
+  return parts;
+}
+
+test('each saved place is marked on the globe in violet; the selected place by its own marker alone', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setSaved([], chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  // The selected place: a white dot in a teal ring, with its glow, beam and pulses.
+  const own = drawnAt(s, chennai);
+  assert.ok(own.includes('#ffffff') && own.includes('#3ee6c1'), `${own}`);
+  // Saved too, with London and a point picked on the globe due north of Chennai, on its meridian.
+  const north = pointPlace(30, chennai.longitude);
+  s.globe.setSaved([london, chennai, north], chennai);
+  s.run(100);
+  assert.deepEqual(drawnAt(s, chennai), own, 'no saved marker under the selected one');
+  for (const place of [london, north])
+    assert.deepEqual(drawnAt(s, place), ['#8b7cff', '#8b7cff'], `${place.name}: violet dot, glow`);
+  // A place no longer saved loses its marker.
+  s.globe.setSaved([north], chennai);
+  s.run(100);
+  assert.deepEqual(drawnAt(s, london), []);
+  assert.deepEqual(drawnAt(s, north), ['#8b7cff', '#8b7cff']);
+});
+
+/**
+ * The starry sky as the GPU leaves it in the last frame drawn. three.js (WebGLRenderer) draws
+ * opaque objects first, then see-through ones by render order and from the furthest to the
+ * nearest, judged by the centre of each one's bounding sphere; a star is hidden where something
+ * drawn before it wrote depth nearer the camera, as the stars' own depth test finds. Each object
+ * stands for its bounding sphere here, which for the earth and its glow is the object itself.
+ */
+function sky(s: ReturnType<typeof scene>) {
+  const { scene: drawn, camera } = s.renderer;
+  assert.ok(drawn && camera, 'a frame was drawn');
+  drawn.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  const screen = new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const items: { object: Mesh | Points; centre: Vector3; radius: number; z: number }[] = [];
+  drawn.traverseVisible((object) => {
+    const shape = object as Mesh | Points;
+    if (!(shape as Mesh).isMesh && !(shape as Points).isPoints) return;
+    if (!shape.geometry.boundingSphere) shape.geometry.computeBoundingSphere();
+    const { center, radius } = shape.geometry
+      .boundingSphere!.clone()
+      .applyMatrix4(object.matrixWorld);
+    const z = new Vector4(center.x, center.y, center.z, 1).applyMatrix4(screen).z;
+    items.push({ object: shape, centre: center, radius, z });
+  });
+  const material = ({ object }: (typeof items)[number]) => object.material as Material;
+  const order = [
+    ...items.filter((item) => !material(item).transparent),
+    ...items
+      .filter((item) => material(item).transparent)
+      .sort(
+        (a, b) =>
+          a.object.renderOrder - b.object.renderOrder || b.z - a.z || a.object.id - b.object.id,
+      ),
+  ];
+  const at = order.findIndex(({ object }) => (object as Points).isPoints);
+  assert.ok(at >= 0, 'the stars are drawn');
+  const stars = order[at].object;
+  const eye = camera.getWorldPosition(new Vector3());
+  const points = stars.geometry.getAttribute('position');
+  const star = (index: number) =>
+    new Vector3().fromBufferAttribute(points, index).applyMatrix4(stars.matrixWorld);
+  /** Whether the line of sight to `point` passes through the sphere at `centre` on the way. */
+  const through = (point: Vector3, centre: Vector3, radius: number) => {
+    const sight = point.clone().sub(eye);
+    const along = Math.min(1, Math.max(0, centre.clone().sub(eye).dot(sight) / sight.lengthSq()));
+    return eye.clone().addScaledVector(sight, along).distanceTo(centre) < radius;
+  };
+  const indices = Array.from({ length: points.count }, (_, index) => index);
+  const before = order.slice(0, at);
+  // Stars drawn without the depth test would show over everything, the earth included.
+  const writers = material(order[at]).depthTest
+    ? before.filter((item) => material(item).depthWrite && material(item).depthTest)
+    : [];
+  return {
+    /** The stars no viewer sees in this frame. */
+    hidden: indices.filter((index) =>
+      writers.some(({ centre, radius }) => through(star(index), centre, radius)),
+    ),
+    /** The stars seen through a sphere of `radius` at the centre of the globe. */
+    behind: (radius: number) =>
+      indices.filter((index) => through(star(index), new Vector3(), radius)),
+    /** Whether `material` is drawn before the stars in this frame. */
+    drawnBefore: (wanted: Material) => before.some((item) => material(item) === wanted),
+  };
+}
+
+test('the glow round the globe hides no star: only the earth itself does, whichever is drawn first', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  const glow = s.glow();
+  /** The glow's shell reaches 1.16 times the earth's radius (globe-scene.ts ATMOSPHERE). */
+  const shell = 1.16;
+  let throughGlow = 0;
+  // Round the globe in steps of the rotate pad: along Chennai's parallel, then further north.
+  for (let step = 0; step < 24; step++) {
+    s.globe.rotate({ kind: 'rotate', latitude: step === 12 ? 40 : 0, longitude: 30 });
+    s.run(100);
+    const view = sky(s);
+    const earth = view.behind(1);
+    assert.deepEqual(
+      view.hidden,
+      earth,
+      `view ${step}: only the stars behind the earth are hidden`,
+    );
+    if (view.drawnBefore(glow)) throughGlow += view.behind(shell).length - earth.length;
+  }
+  // three.js drew the glow before the stars in some of those views, with stars seen through it.
+  assert.ok(throughGlow > 0, `${throughGlow} stars seen through a glow drawn before them`);
+});
+
+test('a globe first drawn after its minute, in a tab opened late, draws once and rests', () => {
+  const s = scene();
+  tab(s, false); // hidden before the first refresh, as a dashboard opened in a background tab
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(AUTO_ROTATE_MS + 5_000);
+  tab(s, true);
+  s.run(HOME_GLIDE_MS + 500);
+  assert.ok(s.offPlace() < 0.01, 'it is already on the place');
+  assert.equal(s.renderer.renders, 1, 'one frame, not a glide back to where it already is');
+  assert.equal(s.frames.size, 0, 'and no frame is left asked for');
+});
+
+test('a zoom step says how the view moved, and when it reaches the furthest view', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  assert.equal(s.globe.zoom(1 / 1.25), 'in', 'one step in from the starting view');
+  assert.equal(s.globe.zoom(1.25), 'out', 'and back');
+  assert.deepEqual(
+    [1, 2, 3].map(() => s.globe.zoom(1.25)),
+    ['out', 'out', 'furthest'],
+    'the third step out reaches the limit',
+  );
+});
+
+test('zoomed in, a new place keeps the zoom the viewer chose', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  s.globe.zoom(1 / 1.25);
+  s.run(100);
+  const close = s.seen().distance;
+  assert.equal(s.globe.setPlace(london), true);
+  s.run(100);
+  sameCentre(s.seen(), london, 'the new place');
+  assert.ok(Math.abs(s.seen().distance - close) < 1e-6, `${s.seen().distance}: not ${close}`);
+  assert.deepEqual(s.log, ['zoomed true'], 'still closer: the title stays aside');
 });

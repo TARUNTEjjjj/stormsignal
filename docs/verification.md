@@ -1,5 +1,40 @@
 # Release verification
 
+## Globe test gaps — 20 November 2026
+
+The random spot check recorded on 19 November found one-line changes to the globe code that
+no test caught. Only tests changed in response; no application file did, so the hosted
+build is unchanged.
+
+- Its 9 changes, and a tenth found while reproducing them (the upload flag on NASA's decoded
+  image), are now caught, except two that change nothing a user, the browser or memory use
+  can see. One is the abort listener's `{ once: true }`: an `AbortSignal` fires `abort` at
+  most once, and the listener is always removed. The other is the starting value of the
+  flag that records whether the globe was turned: a mount effect resets it before any key
+  can read it, so the 19 November entry was wrong to count it as visible.
+- A second random spot check, of 40 changes, found 11 more that no test caught. The 5 a user
+  could see are now caught: a saved-place marker drawn under the selected place, a glow
+  that would hide stars, a warning outline cut on the wrong side of the horizon, the wrong
+  imagery icon on the place card, and Enter selecting the drifted centre after Home. The
+  other 6 change nothing observable.
+- A third random spot check, of 30 changes, caught 24. Independent judges found that 4 of
+  the 6 left would be noticed, and those are now caught: a wrong screen-reader message at
+  the zoom limit, the zoom hint showing all the time, a new place discarding the viewer's
+  zoom, and a tab opened late gliding to where the globe already is. The other 2 change
+  nothing: the daily layer's name is never read, and the antialias option is ignored
+  because the globe hands three.js a context it opened itself.
+- After an independent review, three tests now do what their names say: a real finger tap
+  selects a place, every star is placed through the scene's real camera, and each star's
+  colour follows its tint.
+- The GLSL interpreter used by the tests gained `#ifdef`/`#else` handling and matrix
+  column indexing, so it runs three.js's own line shader with the horizon patch.
+
+`npm test` passed **724** application tests (708 before). Of the 24 tracked changes, 22 are
+caught and the 2 described first are equivalent; all 96 earlier changes are still caught.
+The build, TypeScript and Prettier passed, and the application tests also passed with `TZ`
+set to UTC, Asia/Kolkata and Pacific/Kiritimati. The change scripts are kept outside the
+repository, so these counts cannot be reproduced from it alone.
+
 ## Midnight Aurora redesign and 3D globe — 19 November 2026
 
 The interface was restyled and a 3D globe added as the centrepiece of Full workspace.
@@ -44,9 +79,10 @@ written with the new tests and the repair, 30 by the independent recheck) makes 
 one test fail. Those changes were aimed at the behaviour the tests describe. A later random
 spot check of 24 other one-line changes in the same files found 9 that no test catches:
 the device-pixel-ratio fallback, the drag's pointer check, the texture upload flag, the
-star colours, the image-release guard, an abort listener option, the flag that keeps
-Enter from selecting the centre before the globe is turned, and two decorative icons'
-`aria-hidden`. Most are drawing details that the stand-in renderer cannot observe.
+star colours, the image-release guard, an abort listener option, the starting value of the
+flag that records whether the globe was turned, and two decorative icons' `aria-hidden`.
+Most are drawing details that the stand-in renderer cannot observe. The 20 November entry
+follows them up.
 
 Bundle sizes (raw / compressed): the entry script is 342.0 / 108.6 kB (334.3 / 106.1 kB
 before) and the entry stylesheet 84.3 / 17.4 kB (51.9 / 11.9 kB before). three.js

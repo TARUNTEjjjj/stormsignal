@@ -6,7 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
-import { RECHECK_MS, type LatLon, type MosaicLoader } from '../src/globe';
+import type { GlobeEngine } from '../src/components/GlobeView';
+import {
+  GLOBE_BASE_LAYER,
+  RECHECK_MS,
+  globeImageUrl,
+  type LatLon,
+  type MosaicLoader,
+} from '../src/globe';
 import type { GlobeEvents, SceneOptions } from '../src/globe-scene';
 import type { Place } from '../src/types';
 import { REACT_STAND_IN, mount, type Element } from './support/hooks';
@@ -14,7 +21,9 @@ import { REACT_STAND_IN, mount, type Element } from './support/hooks';
 // GlobeView's effects and handlers, run in Node: React's hooks are a stand-in
 // (tests/support/hooks.ts), and the globe reaches WebGL, three.js, the scene and NASA only
 // through the `engine` prop, which these tests replace. So each decision GlobeView makes about
-// downloads, imagery, focus and keys is checked where it is wired, not only in globe.ts.
+// downloads, imagery, focus and keys is checked where it is wired, not only in globe.ts. The
+// engine the page itself runs on, which holds the decoded NASA images, is exported to these tests
+// alone, as `pageEngine`: GlobeView.tsx exports only components, as Fast Refresh needs.
 const source = (path: string) => fileURLToPath(new URL(`../src/${path}`, import.meta.url));
 const icons = [
   ...readFileSync(source('components/GlobeView.tsx'), 'utf8')
@@ -22,7 +31,7 @@ const icons = [
     .matchAll(/\w+/g),
 ].map(([name]) => name);
 const temporary = await mkdtemp(join(tmpdir(), 'stormsignal-globe-effects-'));
-let view: typeof import('../src/components/GlobeView');
+let view: typeof import('../src/components/GlobeView') & { pageEngine: GlobeEngine };
 try {
   await build({
     entryPoints: [source('components/GlobeView.tsx')],
@@ -52,6 +61,10 @@ try {
           builder.onLoad({ filter: /^icons$/, namespace: 'stand-in' }, () => ({
             contents: icons.map((name) => `export const ${name} = () => null;`).join('\n'),
             loader: 'js',
+          }));
+          builder.onLoad({ filter: /[\\/]components[\\/]GlobeView\.tsx$/ }, ({ path }) => ({
+            contents: `${readFileSync(path, 'utf8')}\nexport { browserEngine as pageEngine };\n`,
+            loader: 'tsx',
           }));
         },
       },
@@ -656,6 +669,43 @@ test('Enter keeps the selected place until the user turns the globe, then select
   mounted.unmount();
 });
 
+test('back on the place by Home or the Return button, Enter keeps it until the user turns again', async () => {
+  const chosen: Place[] = [];
+  const { mounted, scene } = await ready({ onSelect: (place: Place) => void chosen.push(place) });
+  const toggleMotion = () => {
+    (mounted.props.onTogglePause as () => void)();
+    mounted.flush();
+  };
+  for (const [back, goBack] of [
+    ['Home', () => press(mounted.props.onKeyDown, 'Home')],
+    ['the Return button', () => (mounted.props.onReset as () => void)()],
+  ] as const) {
+    // The user turns the globe away from Chennai with a key, then goes back to it.
+    press(mounted.props.onKeyDown, 'ArrowRight');
+    goBack();
+    mounted.flush();
+    assert.deepEqual(scene.view, { latitude: 13.0827, longitude: 80.2707 }, back);
+    // Globe motion off and on: it turns by itself again, and drifts 15° east of Chennai.
+    toggleMotion();
+    toggleMotion();
+    assert.equal(lastCall(scene, 'setMotion'), 'setMotion(true, true)', `${back}: turning`);
+    scene.view = { latitude: 13.0827, longitude: 95.2707 };
+    assert.equal(press(mounted.props.onKeyDown, 'Enter'), true);
+    mounted.flush();
+    assert.equal(chosen.length, 0, `after ${back}, a drifted view keeps Chennai`);
+    assert.match(String(mounted.props.announcement), /^Chennai is still selected\./, back);
+  }
+  // Turned again by the user, Enter selects the point at the centre.
+  press(mounted.props.onKeyDown, 'ArrowRight');
+  press(mounted.props.onKeyDown, 'Enter');
+  mounted.flush();
+  assert.deepEqual(
+    chosen.map(({ latitude, longitude }) => [latitude, longitude]),
+    [[13.0827, 105.2707]],
+  );
+  mounted.unmount();
+});
+
 test('offline, the hourly look waits for the connection, reports no failure, and runs once it is back', async (t: TestContext) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: MORNING });
   // The newest mosaic is partial, so a look is due on the hour.
@@ -710,4 +760,77 @@ test('zoomed in, the title steps aside for the globe, and returns when the view 
   mounted.flush();
   assert.equal(mounted.props.closer, false);
   mounted.unmount();
+});
+
+test('a NASA image the page decoded is let go a minute after the last globe closes, however the browser decoded it', async (t: TestContext) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // The browser around the page's own engine: NASA's answer, and its two ways to decode an image.
+  const restore: (() => void)[] = [];
+  t.after(() => restore.reverse().forEach((undo) => undo()));
+  const put = (name: string, value: unknown) => {
+    const before = Object.getOwnPropertyDescriptor(globalThis, name);
+    restore.push(() => {
+      if (before) Object.defineProperty(globalThis, name, before);
+      else delete (globalThis as Record<string, unknown>)[name];
+    });
+    if (value === undefined) delete (globalThis as Record<string, unknown>)[name];
+    else Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  };
+  let downloads = 0;
+  put('fetch', async () => {
+    downloads++;
+    return new Response(new Uint8Array(64), { headers: { 'content-type': 'image/jpeg' } });
+  });
+  class Bitmap {
+    width = 2048;
+    height = 1024;
+    closed = 0;
+    close() {
+      this.closed++;
+    }
+  }
+  class Picture {
+    src = '';
+    naturalWidth = 2048;
+    naturalHeight = 1024;
+    async decode() {}
+  }
+  put('ImageBitmap', Bitmap);
+  put('createImageBitmap', async () => new Bitmap());
+  put('HTMLImageElement', Picture);
+  put('Image', Picture);
+  const revoked = t.mock.method(URL, 'revokeObjectURL');
+  const { pageEngine: engine } = view;
+  const url = globeImageUrl(GLOBE_BASE_LAYER);
+  const signal = new AbortController().signal;
+
+  // Decoded to an ImageBitmap, it is kept while a globe is open and a minute after: a restored
+  // context or a quick switch of connection mode downloads nothing again.
+  engine.images.hold();
+  const { source } = await engine.loadImage(url, signal);
+  assert.ok(source instanceof Bitmap, 'an ImageBitmap where the browser can make one');
+  engine.images.release();
+  t.mock.timers.tick(30_000);
+  engine.images.hold();
+  assert.equal((await engine.loadImage(url, signal)).source, source, 'the image in memory');
+  assert.equal(downloads, 1);
+  engine.images.release();
+  t.mock.timers.tick(59_000);
+  assert.equal(source.closed, 0, 'kept for a minute');
+  t.mock.timers.tick(1_000);
+  assert.equal(source.closed, 1, 'then closed, so its memory goes at once, not at collection');
+
+  // A browser without ImageBitmap decodes into an <img> from a blob URL; that URL is revoked.
+  put('ImageBitmap', undefined);
+  put('createImageBitmap', undefined);
+  engine.images.hold();
+  const fallback = (await engine.loadImage(url, signal)).source as unknown as Picture;
+  assert.equal(downloads, 2, 'the closed image was forgotten: it is downloaded again');
+  assert.ok(fallback instanceof Picture && fallback.src.startsWith('blob:'));
+  engine.images.release();
+  t.mock.timers.tick(60_000);
+  assert.deepEqual(
+    revoked.mock.calls.map(({ arguments: [address] }) => address),
+    [fallback.src],
+  );
 });

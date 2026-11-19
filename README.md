@@ -14,6 +14,7 @@ A React + TypeScript dashboard for exploring weather evidence, with custom SVG g
 
 - **Explore the forecast:** inspect individual hours with a pointer or keyboard, switch temperature/precipitation/wind, and compare available time ranges. The SVG chart preserves missing-data gaps and has an exact-value table. Data saver uses the forecast already loaded; model comparisons and map downloads remain optional.
 - **Export a comparison:** download the displayed metric as CSV with UTC timestamps, units, and model columns aligned by timestamp. Missing values stay blank. The 24/72-hour ranges measure elapsed time even when a provider omits observations.
+- **Turn the planet:** in Full workspace, an interactive 3D globe ([GlobeView](src/components/GlobeView.tsx), three.js) shows NASA's newest daily VIIRS mosaic whose UTC day has ended over the Blue Marble base, with its date and the share of Earth it covers. When that mosaic is still partial, the globe shows the day before, says so and looks again hourly; a failed look keeps the dated mosaic on show and says the check failed. Areas a mosaic did not image are hatched, and the place card says whether the selected place was imaged, so a cloud-free map never passes for clear weather. Day and night are computed from the sun's position at the current UTC time, read on the warning service's clock once a check has measured it, so the terminator needs no request; the night side is drawn dark. The selected place pulses, saved places and active official warning outlines are marked, active warnings are one click away, and a click or tap selects a point as the map does. Arrow keys or the on-screen rotate pad turn the globe, + and − zoom, Enter selects the point you turned to, Home returns to the place and Escape hides the key help. The globe turns by itself for a minute after it starts, then glides back to the selected place and rests there; a drag or a key stops it sooner, and the Globe motion switch turns off everything it does by itself. An idle globe stops drawing, and with reduced motion nothing moves on its own. Data saver and Offline only never download the globe or its imagery; browsers without WebGL 2 never download three.js and get a short notice instead of the globe.
 - **Inspect the visual implementation:** [ForecastExplorer](src/components/ForecastExplorer.tsx), [AtmosphereScene](src/components/AtmosphereScene.tsx) and the [frontend design styles](src/frontend-design.css) separate interactive data graphics, decorative atmosphere artwork and presentation. The artwork is an illustration, not radar or a satellite observation.
 - **Review the engineering:** follow the [UI case study and acceptance checklist](docs/ui-case-study.md), then the [dated verification record](docs/verification.md). The checklist states expected behavior; historical test results apply to their recorded release, not every later commit.
 
@@ -26,7 +27,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. New forecasts, warning checks and map tiles require internet access. Start in **Data saver**, then open **Full workspace** for maps, satellite imagery, model comparison and regional reports.
+Open the URL printed by Vite. New forecasts, warning checks and map tiles require internet access. Start in **Data saver**, then open **Full workspace** for the 3D globe, maps, satellite imagery, model comparison and regional reports.
 
 ```sh
 npm run check      # unit tests, TypeScript, production build and artifact checks
@@ -54,7 +55,7 @@ Historical test results apply to the recorded version. Use the commands above an
 - **Find and compare places:** worldwide search, saved places and regional shortcuts. Forecast coverage is separate from official-warning coverage.
 - **Inspect evidence:** hourly graphics, timestamped satellite layers and two-model comparison. Decorative artwork stays separate from data graphics; model disagreement is not a calibrated probability.
 - **Understand warning scope:** NWS, NDMA SACHET, participating WMO authorities and bounded national feeds retain source links, affected areas and unavailable-source states.
-- **Control downloads:** Data saver starts with a compact forecast and supported warnings. Optional imagery, maps and reports load in Full workspace; Data saver does not poll.
+- **Control downloads:** Data saver starts with a compact forecast and supported warnings. Optional imagery, maps, the 3D globe and reports load in Full workspace; Data saver does not poll.
 - **Prepare for disconnection:** save up to three dated briefings or download the self-contained offline field kit at `/offline.html`. Historical copies never claim current warning status.
 - **Keep data local:** no account or app analytics. Browser storage holds preferences and saved content; providers receive requests. See [privacy](docs/privacy.md).
 

@@ -175,6 +175,7 @@ const notices = await readFile('pages-dist/third-party-licenses.md', 'utf8');
 for (const name of [
   'react',
   'leaflet',
+  'three',
   'lucide-react',
   'fast-xml-parser',
   '@nodable/entities',

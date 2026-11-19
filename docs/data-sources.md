@@ -71,6 +71,8 @@ No matching retrieved reports does not establish an absence of disasters. Covera
 - `Himawari_AHI_Band13_Clean_Infrared`
 - `MODIS_Terra_CorrectedReflectance_TrueColor`
 
+The 3D globe requests two more GIBS layers as whole-Earth WMS images: `BlueMarble_ShadedRelief_Bathymetry`, a static relief and sea-floor composite with no date and no clouds, and `VIIRS_NOAA20_CorrectedReflectance_TrueColor`, NOAA-20 VIIRS daily true color. The daily layer's date comes from the provider's `DescribeDomains` listing, as for the map. A newest mosaic that is still partial gives way to the day before, and the globe says so and looks again hourly. The globe states how much of Earth the shown mosaic covers; uncovered parts show the static base, hatched, and the place card says whether the selected place was imaged. Day and night on the globe are computed from the sun's position (Astronomical Almanac low-precision solar coordinates), not from a data source. Credit for VIIRS belongs to NASA and NOAA.
+
 Infrared geostationary layers represent thermal observations, not visible-color photographs, rainfall radar, or a temperature sensor on the ground. Their viewing geometry has limits: cloud features distort near the limb, and a map zoom beyond native resolution adds no detail. Terra MODIS is a daily global true-color product with daylight, cloud and orbital limitations. It is not a live camera. See [imagery implementation notes](imagery.md) for frame selection and coverage.
 
 Credits belong to NASA GIBS/EOSDIS and the original observing agencies, including NOAA for GOES and JMA for Himawari. A visible satellite layer does not authorize use of agency logos as endorsements.

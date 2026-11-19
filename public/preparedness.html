@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="theme-color" content="#071922" />
+    <meta name="theme-color" content="#060a14" />
     <meta
       name="description"
       content="A printable, local-only household preparedness checklist from StormSignal, with links to official guidance."
@@ -13,12 +13,16 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #071922;
-        --panel: #0c2530;
-        --line: #2a4650;
-        --text: #eff9f7;
-        --muted: #b3c9ce;
-        --cyan: #6ce5d5;
+        --bg: #060a14;
+        --panel: #0e1626;
+        --line: #2c3856;
+        /* Control boundaries keep 3:1 on the page and the cards, as in the app. */
+        --control: #5d6b92;
+        --text: #eef3ff;
+        --muted: #b4bfd6;
+        --cyan: #3ee6c1;
+        --aurora: linear-gradient(120deg, #3ee6c1, #8b7cff);
+        --focus: #c3bbff;
         --amber: #ffca79;
       }
       * {
@@ -26,7 +30,10 @@
       }
       body {
         margin: 0;
-        background: var(--bg);
+        background:
+          radial-gradient(900px 520px at 88% -140px, rgba(139, 124, 255, 0.16), transparent 70%),
+          radial-gradient(760px 440px at -6% -80px, rgba(62, 230, 193, 0.1), transparent 70%),
+          var(--bg);
         color: var(--text);
         font:
           16px/1.6 ui-sans-serif,
@@ -52,7 +59,7 @@
       button:focus-visible,
       a:focus-visible,
       input:focus-visible {
-        outline: 3px solid var(--amber);
+        outline: 3px solid var(--focus);
       }
       .wrap {
         max-width: 1080px;
@@ -67,15 +74,20 @@
         border-bottom: 1px solid var(--line);
         padding-bottom: 24px;
       }
+      /* The wordmark the app and the kit use. */
       .brand {
         font-weight: 800;
-        letter-spacing: 0.14em;
-        font-size: 15px;
+        letter-spacing: -0.03em;
+        font-size: 22px;
         color: var(--text);
         text-decoration: none;
       }
       .brand span {
-        color: var(--cyan);
+        background: var(--aurora);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        font-weight: 450;
       }
       .tag,
       .eyebrow {
@@ -131,20 +143,20 @@
         margin: 25px 0;
       }
       .toolbar button {
-        border: 1px solid var(--line);
+        border: 1px solid var(--control);
         background: var(--panel);
         color: var(--text);
         padding: 12px 18px;
-        border-radius: 9px;
+        border-radius: 12px;
         cursor: pointer;
         font-size: 14px;
         font-weight: 650;
         min-height: 46px;
       }
       .toolbar button:first-child {
-        background: var(--cyan);
-        border-color: var(--cyan);
-        color: #09282b;
+        background: var(--aurora);
+        border-color: transparent;
+        color: #04121a;
       }
       .count {
         margin-left: auto;
@@ -153,7 +165,7 @@
       }
       .progress-track {
         height: 4px;
-        background: #223e48;
+        background: #1c2742;
         border-radius: 4px;
         overflow: hidden;
         margin-bottom: 28px;
@@ -161,7 +173,7 @@
       .progress-fill {
         height: 100%;
         width: 0;
-        background: var(--cyan);
+        background: var(--aurora);
         transition: width 0.2s;
       }
       .grid {
@@ -171,8 +183,8 @@
       }
       .card {
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--panel);
+        border-radius: 18px;
+        background: linear-gradient(180deg, #111a2e, var(--panel));
         padding: 25px;
         min-width: 0;
       }
@@ -228,7 +240,7 @@
         cursor: pointer;
       }
       label:has(input:checked) span {
-        color: #9bc3bc;
+        color: #8ff3dc;
       }
       .note {
         font-size: 13px;
@@ -293,8 +305,10 @@
         header {
           padding-top: 34px;
         }
+        /* Its two lines stack, each whole, rather than running together. */
         .footer {
-          display: block;
+          flex-direction: column;
+          gap: 4px;
         }
         .priority {
           padding: 16px;
@@ -409,7 +423,7 @@
   <body>
     <main class="wrap">
       <div class="top">
-        <a class="brand" href="/">STORM<span>SIGNAL</span></a
+        <a class="brand" href="/" aria-label="StormSignal home">storm<span>signal</span></a
         ><span class="tag">Preparedness / field guide</span>
       </div>
       <header>

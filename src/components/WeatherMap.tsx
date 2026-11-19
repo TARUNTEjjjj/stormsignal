@@ -23,8 +23,8 @@ import {
   loadTimeline,
   normalizeLongitude,
 } from '../imagery';
-import { alertOutline } from '../data';
-import { sourceClock } from '../connectivity';
+// The globe reuses these, so a click on either selects the same place and draws the same outlines.
+import { pointPlace, warningOutlines } from '../globe';
 import type { Place, WeatherAlert } from '../types';
 import 'leaflet/dist/leaflet.css';
 import './WeatherMap.css';
@@ -93,16 +93,7 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
       .on(failedTileTracker(setBaseError))
       .addTo(instance);
     instance.on('click', (event: L.LeafletMouseEvent) => {
-      const latitude = Number(event.latlng.lat.toFixed(4));
-      const longitude = Number(normalizeLongitude(event.latlng.lng).toFixed(4));
-      select.current({
-        id: `map:${latitude}:${longitude}`,
-        name: `${Math.abs(latitude).toFixed(2)}°${latitude < 0 ? 'S' : 'N'}, ${Math.abs(longitude).toFixed(2)}°${longitude < 0 ? 'W' : 'E'}`,
-        latitude,
-        longitude,
-        country: 'Selected map point',
-        countryCode: '',
-      });
+      select.current(pointPlace(event.latlng.lat, event.latlng.lng));
     });
     const observer = new ResizeObserver(() => instance.invalidateSize());
     observer.observe(holder.current);
@@ -183,13 +174,8 @@ export default function WeatherMap({ place, alerts, clockOffset, lowBandwidth, o
     const group = L.layerGroup().addTo(map.current);
     // Leaflet does not wrap longitudes: outlines are drawn in the world copy around the marker.
     const longitude = Number.isFinite(place.longitude) ? normalizeLongitude(place.longitude) : NaN;
-    const current = sourceClock(Date.now(), clockOffset);
-    for (const alert of alerts) {
-      if (alert.expires <= current || !alert.geometry || typeof alert.geometry !== 'object')
-        continue;
+    for (const { alert, outline } of warningOutlines(alerts, clockOffset, longitude)) {
       try {
-        const outline = alertOutline(alert.geometry, longitude);
-        if (!outline) continue;
         const shape = L.geoJSON(outline as GeoJsonObject, {
           style: {
             color: '#ff6b75',

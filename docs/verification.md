@@ -1,5 +1,75 @@
 # Release verification
 
+## Midnight Aurora redesign and 3D globe — 19 November 2026
+
+The interface was restyled and a 3D globe added as the centrepiece of Full workspace.
+Two engineers built the restyle and the globe in parallel, each patch was reviewed and
+repaired by independent reviewers, and an integrator combined them. Final reviews
+followed (engineering, visual design, accessibility), then a test-coverage round, a
+repair and an approving recheck. The main changes:
+
+- **Midnight Aurora palette.** Shared tokens on `:root` in `src/frontend-design.css`: a
+  midnight base, a glass sidebar and top bar, panels inside gradient hairlines, and aurora
+  light kept for focus, active state and key data. System fonts only. The background
+  settles once in 5 s and is static under reduced motion. The kit, guide and 404 pages
+  follow the palette. Official warning severity colours are unchanged.
+- **Motion** (`src/motion.ts`): sections reveal on scroll when motion is allowed, and
+  cards tilt towards a fine pointer in Full workspace. Nothing moves under
+  `prefers-reduced-motion`.
+- **3D globe** (`src/globe.ts`, `src/globe-scene.ts`, `src/globe-shaders.ts`,
+  `src/components/GlobeView.tsx`), in Full workspace only. three.js 0.187.0 loads on
+  demand, and only after a WebGL 2 probe. It shows real, dated NASA GIBS imagery: the
+  Blue Marble base and the NOAA-20 VIIRS daily mosaic, with its coverage stated and its
+  gaps hatched. Day and night follow the sun on the warning source's clock. It draws the
+  selected place, saved places and active official warning outlines, and a click, tap or
+  Enter selects a point as the map does. It works fully by keyboard, with a polite live
+  region. It falls back cleanly without WebGL 2, after a failed download, a lost context
+  or a failed frame. It stops drawing off screen, in a hidden tab and once its minute of
+  turning ends.
+- **Accessibility fixes found in review.** The official warning summaries now show their
+  focus ring (it was clipped away before this change too). The globe's toggles keep a
+  visible on state in forced colours. On phones the warnings link's visible words begin
+  its accessible name. Every Tab stop shows its ring with nothing cut off.
+
+`npm run check` passed **814 tests** (708 application, 72 resource-library interface and
+34 catalog tests; 516 application tests before this change), TypeScript, the production
+browser build, the new stylesheet budget (84,261 of 90,000 bytes; 17,168 compressed),
+embedded Worker checks and Pages artifact checks on macOS with Node **26.13.0** and npm
+11.20.0. The application tests
+also passed with `TZ` set to UTC, America/Los_Angeles, Asia/Kolkata, Pacific/Kiritimati,
+Pacific/Pago_Pago and Australia/Lord_Howe, and with German, Arabic (Egypt) and Japanese
+locales. Prettier reports every checked file formatted, and a clean install reported zero
+known dependency vulnerabilities. Each of 96 one-line changes to the globe code (66
+written with the new tests and the repair, 30 by the independent recheck) makes at least
+one test fail.
+
+Bundle sizes (raw / compressed): the entry script is 342.0 / 108.6 kB (334.3 / 106.1 kB
+before) and the entry stylesheet 84.3 / 17.4 kB (51.9 / 11.9 kB before). three.js
+(545.2 / 135.3 kB), the globe (61.1 kB) and its line and controls chunks (37.7 kB) load
+only in Full workspace, after the WebGL 2 probe, and the service worker does not
+pre-cache them.
+
+Browser checks ran in headless Chrome on macOS (software WebGL), mostly with outside hosts
+answered from fixtures, plus live NASA GIBS loads and a pass in a desktop browser against
+the real services:
+
+- Data saver loaded only the application bundle, one forecast request and one warning
+  request, then made no request and drew no frame for 70 s: no globe code, no three.js,
+  no imagery and no WebGL context. Offline only made no outside request.
+- Full workspace requested only the hosts listed in [privacy](privacy.md). A live GIBS
+  load drew the 18 November 2026 mosaic (93% of Earth imaged), and the globe came to
+  rest on the selected place with its warning outline in view.
+- At 1440, 1280, 1024, 768, 390 and 360 px wide, in all three modes, with reduced
+  motion, in print and with always-visible scrollbars, no text was clipped or
+  overlapping, nothing scrolled sideways and the console showed no errors in normal use.
+- Tab order, the mobile drawer, 24 px targets, 200% and 400% zoom, 320 px reflow, text
+  spacing, touch scrolling over the globe and the live regions passed. Text over the
+  globe measured at least 5.8:1 over white cloud and 7.9:1 on the night side.
+
+Not covered: Safari, Firefox, Windows and a real GPU. Forced colours were checked only
+through Chrome's emulation, so the toggles and focus rings still need one look in
+Windows High Contrast.
+
 ## Worker CPU budget harness — 19 November 2026
 
 Added `npm run measure:worker-cpu`. It runs the IMD Kolkata district-feed check in

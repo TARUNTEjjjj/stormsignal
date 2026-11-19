@@ -120,5 +120,13 @@ export default defineConfig({
       },
     },
   ],
-  build: { target: 'es2022', manifest: true, license: { fileName: 'third-party-licenses.md' } },
+  build: {
+    target: 'es2022',
+    manifest: true,
+    license: { fileName: 'third-party-licenses.md' },
+    // three.js's core chunk (about 545 kB, 135 kB gzipped) loads on demand, once the globe has
+    // found WebGL 2. The raised warning limit is for it alone: scripts/verify-build.mjs holds every
+    // other chunk to Vite's default of 500 kB.
+    chunkSizeWarningLimit: 600,
+  },
 });

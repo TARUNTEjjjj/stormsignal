@@ -1,0 +1,818 @@
+import test, { afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import type { Camera, Mesh, Object3D, ShaderMaterial, Vector3 } from 'three';
+import {
+  AUTO_ROTATE_MS,
+  DAILY_OPACITY,
+  HOME_GLIDE_MS,
+  SETTLE_MS,
+  angularDistance,
+  sunDirection,
+  vectorToLatLon,
+  type GlobeViewState,
+  type LatLon,
+  type Vector,
+} from '../src/globe';
+import { createGlobe, loadThree, type GlobeEvents, type ThreeKit } from '../src/globe-scene';
+import type { Place } from '../src/types';
+
+// The globe's scene on three.js itself, in Node: everything but the renderer, which alone needs a
+// GPU, is real (the scene graph, the camera, OrbitControls, the materials). The browser around it
+// is a stand-in: elements, a display that refreshes at 60 Hz, a page clock and the timers.
+const three = await loadThree();
+
+class FakeRenderer {
+  static made: FakeRenderer[] = [];
+  renders = 0;
+  disposed = 0;
+  forcedLoss = 0;
+  fail = false;
+  scene: Object3D | null = null;
+  /** Where the camera stood in the last frame drawn: what the viewer saw. */
+  seen: Vector | null = null;
+  capabilities = { getMaxAnisotropy: () => 16 };
+  constructor() {
+    FakeRenderer.made.push(this);
+  }
+  setClearColor() {}
+  setPixelRatio() {}
+  setSize() {}
+  render(scene: Object3D, camera: Camera) {
+    if (this.fail) throw new Error('A frame could not be drawn.');
+    this.renders++;
+    this.scene = scene;
+    this.seen = camera.position.toArray() as Vector;
+  }
+  dispose() {
+    this.disposed++;
+  }
+  forceContextLoss() {
+    this.forcedLoss++;
+  }
+}
+
+/** An EventTarget that knows the listeners it holds (a removal of one it never had is no-op). */
+class Target extends EventTarget {
+  private held: { type: string; listener: unknown; capture: boolean }[] = [];
+  get listening() {
+    return this.held.length;
+  }
+  private find(type: string, listener: unknown, options?: boolean | EventListenerOptions) {
+    const capture = typeof options === 'boolean' ? options : !!options?.capture;
+    return {
+      capture,
+      index: this.held.findIndex(
+        (entry) => entry.type === type && entry.listener === listener && entry.capture === capture,
+      ),
+    };
+  }
+  addEventListener(...args: Parameters<EventTarget['addEventListener']>) {
+    const [type, listener, options] = args;
+    const { capture, index } = this.find(type, listener, options);
+    if (listener && index < 0) this.held.push({ type, listener, capture });
+    super.addEventListener(...args);
+  }
+  removeEventListener(...args: Parameters<EventTarget['removeEventListener']>) {
+    const [type, listener, options] = args;
+    const { index } = this.find(type, listener, options);
+    if (index >= 0) this.held.splice(index, 1);
+    super.removeEventListener(...args);
+  }
+}
+
+const restore: (() => void)[] = [];
+afterEach(() => {
+  for (const undo of restore.splice(0).reverse()) undo();
+});
+function install(name: string, value: unknown, on: object = globalThis) {
+  const before = Object.getOwnPropertyDescriptor(on, name);
+  Object.defineProperty(on, name, { value, configurable: true, writable: true });
+  restore.push(() => {
+    if (before) Object.defineProperty(on, name, before);
+    else delete (on as Record<string, unknown>)[name];
+  });
+}
+
+const chennai: Place = {
+  id: 'chennai',
+  name: 'Chennai',
+  country: 'India',
+  countryCode: 'IN',
+  latitude: 13.0827,
+  longitude: 80.2707,
+};
+const london: Place = {
+  id: 'london',
+  name: 'London',
+  country: 'United Kingdom',
+  countryCode: 'GB',
+  latitude: 51.5072,
+  longitude: -0.1276,
+};
+
+/** One globe in a stand-in browser, and the means to let time pass. */
+/**
+ * One globe in a stand-in browser. `prompt`: a refresh asked for between two is handed out at once,
+ * stamped with the last refresh if that one is unused, as Chrome does; otherwise at the next one.
+ */
+function scene({ prompt = false } = {}) {
+  let time = 1_000;
+  /** The last display refresh, and the last one handed out. */
+  let refresh = time;
+  let used = -Infinity;
+  let wall = Date.parse('2026-11-19T07:30:00Z');
+  let handle = 0;
+  const frames = new Map<number, (time: number) => void>();
+  const timers = new Map<number, { run: () => void; ms: number; due: number; once?: boolean }>();
+  let refreshesAsked = 0;
+  const document = Object.assign(new Target(), { visibilityState: 'visible' });
+  const box = () => ({ left: 0, top: 0, width: 900, height: 700, right: 900, bottom: 700 });
+  let removed = 0;
+  const canvas = Object.assign(new Target(), {
+    style: {} as Record<string, string>,
+    ownerDocument: document,
+    clientHeight: 700,
+    getBoundingClientRect: box,
+    setPointerCapture() {},
+    releasePointerCapture() {},
+    remove: () => void removed++,
+  });
+  const stage = Object.assign(new Target(), { getBoundingClientRect: box });
+  const appended: unknown[] = [];
+  const host = { append: (child: unknown) => void appended.push(child) };
+  const label = { dataset: {} as Record<string, string>, style: {} as Record<string, string> };
+  const observers = { resize: 0, view: 0 };
+  let inView: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
+  install('document', document);
+  install('window', {
+    devicePixelRatio: 2,
+    setInterval: (run: () => void, ms: number) => {
+      timers.set(++handle, { run, ms, due: time + ms });
+      return handle;
+    },
+    clearInterval: (id: number) => void timers.delete(id),
+    setTimeout: (run: () => void, ms: number) => {
+      timers.set(++handle, { run, ms, due: time + ms, once: true });
+      return handle;
+    },
+    clearTimeout: (id: number) => void timers.delete(id),
+  });
+  install('requestAnimationFrame', (callback: (time: number) => void) => {
+    refreshesAsked++;
+    frames.set(++handle, callback);
+    return handle;
+  });
+  install('cancelAnimationFrame', (id: number) => void frames.delete(id));
+  install('getComputedStyle', () => ({
+    getPropertyValue: (name: string) =>
+      ({ '--aurora-teal': '#3EE6C1', '--aurora-violet': '#8B7CFF' })[name] ?? '',
+  }));
+  install(
+    'ResizeObserver',
+    class {
+      constructor() {
+        observers.resize++;
+      }
+      observe() {}
+      disconnect() {
+        observers.resize--;
+      }
+    },
+  );
+  install(
+    'IntersectionObserver',
+    class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        observers.view++;
+        inView = callback;
+      }
+      observe() {}
+      disconnect() {
+        observers.view--;
+      }
+    },
+  );
+  install('now', () => time, performance);
+  const log: string[] = [];
+  const events: GlobeEvents = {
+    interact: () => void log.push('interact'),
+    turned: () => void log.push('turned'),
+    pick: (place) => void log.push(`pick ${place.name}`),
+    wheel: () => void log.push('wheel'),
+    zoomed: (closer) => void log.push(`zoomed ${closer}`),
+    lost: () => void log.push('lost'),
+    restored: () => void log.push('restored'),
+    failed: () => void log.push('failed'),
+  };
+  const kit = { ...three, WebGLRenderer: FakeRenderer } as unknown as ThreeKit;
+  const context = { isContextLost: () => false };
+  const globe = createGlobe(
+    kit,
+    { canvas, context } as never,
+    stage as never,
+    host as never,
+    label as never,
+    events,
+    { clock: () => wall },
+  );
+  assert.ok(globe, 'the scene starts on the stand-in renderer');
+  const renderer = FakeRenderer.made[FakeRenderer.made.length - 1];
+  /** Lets `ms` pass on a display refreshing at `hz`: due timers run, then any frame asked for. */
+  /** Runs the animation frames asked for, stamped with refresh `stamp`. */
+  const handOut = (stamp: number) => {
+    used = stamp;
+    const pending = [...frames.values()];
+    frames.clear();
+    for (const callback of pending) callback(stamp);
+  };
+  /**
+   * Lets `ms` pass on a display refreshing at `hz`: timers run when they are due, and the frames
+   * asked for at the next refresh (or at once, when `prompt` and the last refresh is unused).
+   */
+  const run = (ms: number, hz = 60) => {
+    const end = time + ms + 1e-6;
+    for (;;) {
+      const next = refresh + 1000 / hz;
+      let due = Infinity;
+      for (const timer of timers.values()) due = Math.min(due, timer.due);
+      if (Math.min(next, due) > end) break;
+      if (due < next) {
+        time = due;
+        for (const [id, timer] of [...timers])
+          if (timer.due <= time) {
+            if (timer.once) timers.delete(id);
+            else timer.due += timer.ms;
+            timer.run();
+          }
+        if (prompt && frames.size && refresh > used) handOut(refresh);
+      } else {
+        time = refresh = next;
+        if (frames.size) handOut(refresh);
+      }
+    }
+    time = end - 1e-6;
+  };
+  const material = () => {
+    let found: ShaderMaterial | null = null;
+    renderer.scene?.traverse((object) => {
+      const shader = (object as Mesh).material as ShaderMaterial | undefined;
+      if (shader?.uniforms?.baseMap) found = shader;
+    });
+    assert.ok(found, 'the earth is in the scene');
+    return found as ShaderMaterial;
+  };
+  /** How far the view's centre is from the place, in degrees. */
+  const offPlace = (place: LatLon = chennai) => angularDistance(globe.centre(), place);
+  /** The view the last frame drawn showed: its centre and the camera's distance. */
+  const seen = (): GlobeViewState => {
+    assert.ok(renderer.seen, 'a frame was drawn');
+    return { ...vectorToLatLon(renderer.seen), distance: Math.hypot(...renderer.seen) };
+  };
+  /** Timers waiting to ask for the next frame (the sun's minute is the only one that repeats). */
+  const waits = () => [...timers.values()].filter(({ once }) => once).length;
+  return {
+    globe,
+    renderer,
+    canvas,
+    stage,
+    document,
+    label,
+    log,
+    frames,
+    timers,
+    observers,
+    run,
+    material,
+    offPlace,
+    seen,
+    waits,
+    removed: () => removed,
+    refreshesAsked: () => refreshesAsked,
+    setWall: (value: number) => void (wall = value),
+    view: (visible: boolean) => inView?.([{ isIntersecting: visible }]),
+  };
+}
+/** A pointer event as OrbitControls and the scene read it. */
+function pointer(type: string, x: number, y: number, extra: Record<string, unknown> = {}) {
+  return Object.assign(new Event(type), {
+    pointerId: 1,
+    pointerType: 'mouse',
+    button: 0,
+    clientX: x,
+    clientY: y,
+    pageX: x,
+    pageY: y,
+    ...extra,
+  });
+}
+/** A mouse drag across the middle of the globe, `pixels` to the left, over ten refreshes. */
+function drag(s: ReturnType<typeof scene>, pixels = 200) {
+  s.canvas.dispatchEvent(pointer('pointerdown', 450, 350));
+  for (let step = 1; step <= 10; step++) {
+    s.document.dispatchEvent(pointer('pointermove', 450 - (step * pixels) / 10, 350));
+    s.run(16);
+  }
+  s.document.dispatchEvent(pointer('pointerup', 450 - pixels, 350));
+  s.canvas.dispatchEvent(pointer('pointerup', 450 - pixels, 350));
+}
+/** Asserts that two views share their centre. */
+function sameCentre(actual: LatLon, expected: LatLon, what: string) {
+  const off = angularDistance(actual, expected);
+  assert.ok(off < 0.01, `${what}: ${off}° from where it should be`);
+}
+
+test('the globe turns by itself for a minute, then glides back to the selected place and rests', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  assert.ok(s.offPlace() < 0.01, 'it starts on the place');
+  s.run(30_000);
+  // 1.2° a second: well away by now, and still on the near side of the planet.
+  assert.ok(s.offPlace() > 25 && s.offPlace() < 45, `${s.offPlace()}° after 30 s`);
+  s.run(AUTO_ROTATE_MS - 30_000 - 500);
+  assert.ok(s.offPlace() > 55 && s.offPlace() < 74, `${s.offPlace()}° near the end`);
+  assert.equal(s.label.dataset.hidden, 'false', 'the place is still on the near side');
+  // Its minute over, the globe glides back to the place, and rests there.
+  s.run(500 + HOME_GLIDE_MS + 200);
+  assert.ok(s.offPlace() < 0.05, `${s.offPlace()}° from the place at rest`);
+  assert.equal(s.label.dataset.hidden, 'false', 'its label is shown');
+  s.run(SETTLE_MS);
+  const drawn = s.renderer.renders;
+  s.run(120_000);
+  // At rest it draws one frame a minute, as the sun moves on, and nothing else.
+  assert.ok(s.renderer.renders - drawn <= 2, `${s.renderer.renders - drawn} frames in 2 minutes`);
+  assert.equal(s.frames.size, 0);
+  assert.ok(s.offPlace() < 0.05, 'and stays on the place');
+});
+
+test('a change restarts the pulse, not the turning; Play turns it for another minute', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(AUTO_ROTATE_MS + HOME_GLIDE_MS + SETTLE_MS + 1000);
+  const drawn = s.renderer.renders;
+  // A new mosaic: the pulse runs for a while, the view stays on the place.
+  s.globe.setImage('daily', { width: 2048, height: 1024 } as unknown as TexImageSource);
+  s.run(SETTLE_MS + 2000);
+  assert.ok(s.renderer.renders > drawn, 'the change is drawn');
+  assert.ok(s.offPlace() < 0.05, 'no turning');
+  assert.equal(s.frames.size, 0, 'and it rests again');
+  s.globe.setDailyVisible(false);
+  s.run(SETTLE_MS + 2000);
+  assert.ok(s.offPlace() < 0.05);
+  // Pause, then Play: it turns again, and comes back on the minute. The same motion asked for
+  // again while it turns does not start the minute over.
+  s.globe.setMotion(false, false);
+  s.globe.setMotion(true, true);
+  s.run(30_000);
+  assert.ok(s.offPlace() > 5, 'turning after Play');
+  s.globe.setMotion(true, true);
+  s.run(AUTO_ROTATE_MS - 30_000 + HOME_GLIDE_MS + 200);
+  assert.ok(s.offPlace() < 0.05, `${s.offPlace()}°: home on the minute`);
+});
+
+test('a globe the user takes in hand stops turning, and is never pulled back', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(5_000);
+  // A drag across the globe.
+  s.canvas.dispatchEvent(pointer('pointerdown', 450, 350));
+  for (let step = 1; step <= 10; step++) {
+    s.document.dispatchEvent(pointer('pointermove', 450 - step * 20, 350));
+    s.run(16);
+  }
+  s.document.dispatchEvent(pointer('pointerup', 250, 350));
+  s.canvas.dispatchEvent(pointer('pointerup', 250, 350));
+  assert.ok(s.log.includes('interact'), 'OrbitControls reported the drag');
+  s.run(3_000);
+  const centre = s.globe.centre();
+  s.run(AUTO_ROTATE_MS + HOME_GLIDE_MS + 5_000);
+  assert.ok(angularDistance(s.globe.centre(), centre) < 0.01, 'it stays where the user left it');
+  assert.ok(s.offPlace() > 1);
+});
+
+for (const prompt of [false, true])
+  test(`turning by itself is drawn 30 times a second, a drag or a fly-to at every refresh${prompt ? ' (refreshes handed out at once)' : ''}`, () => {
+    const s = scene({ prompt });
+    s.globe.setPlace(chennai);
+    s.globe.setMotion(true, true);
+    s.run(1000);
+    let drawn = s.renderer.renders;
+    const asked = s.refreshesAsked();
+    s.run(10_000);
+    const turning = (s.renderer.renders - drawn) / 10;
+    assert.ok(turning >= 29 && turning <= 31, `${turning} frames a second while turning`);
+    // Between frames it waits on a timer, so a display that hands out the next refresh is woken
+    // once a frame. One that hands out a refresh at once, stamped with the one in between, is
+    // asked twice: still no more than its refresh rate.
+    const woken = (s.refreshesAsked() - asked) / 10;
+    assert.ok(woken <= (prompt ? 61 : 31), `${woken} refreshes asked for a second`);
+    // At 120 Hz too.
+    drawn = s.renderer.renders;
+    s.run(2_000, 120);
+    assert.ok((s.renderer.renders - drawn) / 2 <= 31);
+    // A key pressed while it waits is drawn at the very next refresh, not after the wait.
+    for (let tick = 0; tick < 4; tick++) {
+      const before = s.renderer.renders;
+      s.run(1000 / 60);
+      if (s.renderer.renders > before) break;
+    }
+    drawn = s.renderer.renders;
+    s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 10 });
+    s.run(1000 / 60);
+    assert.equal(s.renderer.renders, drawn + 1, 'drawn at the next refresh');
+    // Once at rest, a step of the rotate pad flies at every refresh.
+    s.run(AUTO_ROTATE_MS + HOME_GLIDE_MS + SETTLE_MS);
+    drawn = s.renderer.renders;
+    s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 10 });
+    s.run(250);
+    assert.ok(s.renderer.renders - drawn >= 14, `${s.renderer.renders - drawn} frames in 250 ms`);
+  });
+
+test('the globe draws only on screen, in a shown tab and with its graphics context', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(500);
+  let drawn = s.renderer.renders;
+  assert.ok(drawn > 0);
+  // Scrolled out of view: nothing is asked for or drawn, and the turning does not go on.
+  s.view(false);
+  assert.equal(s.frames.size, 0);
+  s.run(5_000);
+  assert.equal(s.renderer.renders, drawn, 'off screen');
+  s.view(true);
+  s.run(500);
+  assert.ok(s.renderer.renders > drawn, 'back on screen');
+  // A hidden tab.
+  drawn = s.renderer.renders;
+  s.document.visibilityState = 'hidden';
+  s.document.dispatchEvent(new Event('visibilitychange'));
+  s.run(5_000);
+  assert.equal(s.renderer.renders, drawn, 'in a hidden tab');
+  s.document.visibilityState = 'visible';
+  s.document.dispatchEvent(new Event('visibilitychange'));
+  s.run(500);
+  assert.ok(s.renderer.renders > drawn, 'shown again');
+  // The browser takes the graphics context away: the label goes, nothing is drawn, until it is
+  // given back.
+  drawn = s.renderer.renders;
+  const lost = new Event('webglcontextlost', { cancelable: true });
+  s.canvas.dispatchEvent(lost);
+  assert.ok(lost.defaultPrevented, 'the scene asks for the context back');
+  assert.deepEqual(s.log.slice(-1), ['lost']);
+  assert.equal(s.label.dataset.hidden, 'true');
+  s.run(5_000);
+  assert.equal(s.renderer.renders, drawn, 'without a context');
+  s.canvas.dispatchEvent(new Event('webglcontextrestored'));
+  assert.deepEqual(s.log.slice(-1), ['restored']);
+  s.run(500);
+  assert.ok(s.renderer.renders > drawn);
+});
+
+test('a frame that fails stops the globe, says so once and frees its graphics memory', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(500);
+  assert.ok(s.canvas.listening > 0 && s.document.listening > 0 && s.stage.listening > 0);
+  s.renderer.fail = true;
+  s.run(2_000);
+  assert.deepEqual(
+    s.log.filter((entry) => entry === 'failed'),
+    ['failed'],
+  );
+  assert.equal(s.label.dataset.hidden, 'true');
+  // Released at once, not at Restart: the renderer, its context and canvas, every listener,
+  // observer and timer.
+  assert.equal(s.renderer.disposed, 1);
+  assert.equal(s.renderer.forcedLoss, 1);
+  assert.equal(s.removed(), 1);
+  assert.equal(s.frames.size, 0);
+  assert.equal(s.timers.size, 0);
+  assert.deepEqual(s.observers, { resize: 0, view: 0 });
+  assert.equal(s.canvas.listening, 0);
+  assert.equal(s.document.listening, 0);
+  assert.equal(s.stage.listening, 0);
+  // Restart disposes the old globe again: nothing happens twice.
+  s.globe.dispose();
+  assert.equal(s.renderer.disposed, 1);
+  s.globe.setImage('base', { width: 2048, height: 1024 } as unknown as TexImageSource);
+  s.run(1_000);
+  assert.equal(s.frames.size, 0, 'a stopped globe draws nothing more');
+});
+
+test('dispose lets go of everything the globe holds, once', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(500);
+  s.globe.dispose();
+  s.globe.dispose();
+  assert.equal(s.renderer.disposed, 1);
+  assert.equal(s.removed(), 1);
+  assert.equal(s.frames.size, 0);
+  assert.equal(s.timers.size, 0);
+  assert.deepEqual(s.observers, { resize: 0, view: 0 });
+  assert.equal(s.canvas.listening, 0);
+  assert.equal(s.document.listening, 0);
+  assert.equal(s.stage.listening, 0);
+});
+
+test('the sun is placed by the clock the globe is given, and moves with it every minute', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  const sun = () => (s.material().uniforms.sun.value as Vector3).toArray();
+  const expect = (time: number) =>
+    sunDirection(time).forEach((value, axis) =>
+      assert.ok(Math.abs(sun()[axis] - value) < 1e-9, `axis ${axis}: ${sun()[axis]} vs ${value}`),
+    );
+  expect(Date.parse('2026-11-19T07:30:00Z'));
+  // The warning source's clock reads six hours on: within a minute the sun follows it.
+  const later = Date.parse('2026-11-19T13:30:00Z');
+  s.setWall(later);
+  s.run(60_000);
+  expect(later);
+});
+
+test('a wheel turn scrolls the page unless Ctrl or ⌘ is held, which zooms the globe', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  const wheel = (held: Record<string, boolean>) => {
+    const event = Object.assign(new Event('wheel'), { ctrlKey: false, metaKey: false, ...held });
+    let stopped = false;
+    event.stopPropagation = () => void (stopped = true);
+    s.stage.dispatchEvent(event);
+    return stopped;
+  };
+  assert.equal(wheel({}), true, 'kept from the globe, so the page scrolls');
+  assert.deepEqual(s.log.slice(-1), ['wheel'], 'and the hint shows');
+  assert.equal(wheel({ ctrlKey: true }), false, 'Ctrl and scroll zooms');
+  assert.equal(wheel({ metaKey: true }), false, '⌘ and scroll zooms');
+  assert.equal(s.log.filter((entry) => entry === 'wheel').length, 1);
+});
+
+test('the daily mosaic fades in with motion, and goes at once when its image goes', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  const uniforms = () => s.material().uniforms;
+  const image = { width: 2048, height: 1024 } as unknown as TexImageSource;
+  s.run(100);
+  s.globe.setImage('daily', image);
+  s.run(250);
+  const mix = uniforms().dailyMix.value as number;
+  assert.ok(mix > 0.2 && mix < DAILY_OPACITY, `fading in: ${mix}`);
+  s.run(1000);
+  assert.equal(uniforms().dailyMix.value, DAILY_OPACITY);
+  assert.equal(uniforms().dailyShown.value, 1);
+  // The card no longer dates it: nothing of it stays, not even for a frame.
+  s.globe.setImage('daily', null);
+  assert.equal(uniforms().dailyMix.value, 0);
+  assert.equal(uniforms().dailyShown.value, 0);
+  // Without motion it appears at once.
+  s.globe.setMotion(false, false);
+  s.globe.setImage('daily', image);
+  s.run(20);
+  assert.equal(uniforms().dailyMix.value, DAILY_OPACITY);
+  // Hidden with the layer button: it fades out, and its image stays for when it comes back.
+  s.globe.setDailyVisible(false);
+  s.run(20);
+  assert.equal(uniforms().dailyMix.value, 0);
+});
+
+// Reduced motion: nothing moves by itself, and nothing the user asks for is animated either.
+test('under reduced motion a step, a zoom, Home and a new place land at once, in one frame', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  /** The move is drawn at the next refresh, where it ends, and nothing is drawn after it. */
+  const lands = (what: string, move: () => void, check: (view: GlobeViewState) => void) => {
+    const drawn = s.renderer.renders;
+    move();
+    s.run(1000 / 60);
+    assert.equal(s.renderer.renders, drawn + 1, `${what}: drawn at the next refresh`);
+    check(s.seen());
+    s.run(2_000);
+    assert.equal(s.renderer.renders, drawn + 1, `${what}: nothing moves after it`);
+  };
+  let step: LatLon = chennai;
+  lands(
+    'a step of the rotate pad',
+    () => void (step = s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 30 })),
+    (view) => sameCentre(view, step, 'a step'),
+  );
+  assert.ok(s.offPlace() > 25);
+  const distance = s.seen().distance;
+  lands(
+    'a zoom step',
+    () => void s.globe.zoom(1 / 1.25),
+    (view) => assert.ok(Math.abs(view.distance - distance / 1.25) < 1e-6, `${view.distance}`),
+  );
+  lands(
+    'Home',
+    () => s.globe.reset(),
+    (view) => {
+      sameCentre(view, chennai, 'Home');
+      assert.ok(Math.abs(view.distance - distance) < 1e-6, 'at its starting distance');
+    },
+  );
+  lands(
+    'a new place',
+    () => void s.globe.setPlace(london),
+    (view) => sameCentre(view, london, 'a new place'),
+  );
+});
+
+test('under reduced motion a drag turns the globe only while the pointer moves: no glide after', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  const stopsWithThePointer = (what: string) => {
+    const before = s.globe.centre();
+    drag(s);
+    const released = s.globe.centre();
+    assert.ok(angularDistance(released, before) > 20, `${what}: the drag turned the globe`);
+    const drawn = s.renderer.renders;
+    s.run(3_000);
+    sameCentre(s.globe.centre(), released, `${what}: it stays where the pointer let go`);
+    assert.ok(s.renderer.renders - drawn <= 1, `${what}: ${s.renderer.renders - drawn} frames`);
+  };
+  stopsWithThePointer('a drag');
+  // A step of the rotate pad ends any glide a drag left behind; it must not bring one back.
+  s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 10 });
+  s.run(100);
+  stopsWithThePointer('a drag after a step');
+});
+
+test('Pause, or reduced motion switched on, in the middle of a glide lands it at once', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(1_000);
+  const step = s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 30 });
+  s.run(60);
+  assert.ok(angularDistance(s.seen(), step) > 1, 'gliding');
+  s.globe.setMotion(false, false);
+  s.run(1000 / 60);
+  sameCentre(s.seen(), step, 'the next frame shows where the step lands');
+  const drawn = s.renderer.renders;
+  s.run(2_000);
+  sameCentre(s.seen(), step, 'and it stays there');
+  assert.ok(s.renderer.renders - drawn <= 1, `${s.renderer.renders - drawn} frames after`);
+});
+
+test('the place label hides while the place is on the far side of the globe, and returns with it', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  assert.equal(s.label.dataset.hidden, 'false');
+  // Six steps of Shift and an arrow key: half way round, and back.
+  const turn = (longitude: number) => {
+    for (let step = 0; step < 6; step++) s.globe.rotate({ kind: 'rotate', latitude: 0, longitude });
+    s.run(100);
+  };
+  turn(30);
+  assert.ok(s.offPlace() > 120, `${s.offPlace()}° from the place`);
+  assert.equal(s.label.dataset.hidden, 'true', 'no label over the far side');
+  turn(-30);
+  assert.ok(s.offPlace() < 0.05);
+  assert.equal(s.label.dataset.hidden, 'false', 'shown over the place again');
+});
+
+test('a new place flies the view to it; the same place renamed leaves the view alone', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(1_000);
+  assert.equal(s.globe.setPlace(london), true, 'the view moves to the new place');
+  // Chennai to London is about 74°: a glide of about 0.9 s, half way there in under half a second.
+  s.run(450);
+  assert.ok(angularDistance(s.seen(), chennai) > 20 && angularDistance(s.seen(), london) > 20);
+  s.run(700);
+  sameCentre(s.seen(), london, 'at rest on the new place');
+  assert.equal(s.label.dataset.hidden, 'false', 'with its label');
+  // Renamed, as when a saved place is edited: the view stays where the user turned it.
+  s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 20 });
+  s.run(1_000);
+  const turned = s.seen();
+  assert.equal(s.globe.setPlace({ ...london, name: 'London, UK' }), false);
+  s.run(1_500);
+  sameCentre(s.seen(), turned, 'a renamed place');
+});
+
+test('Home brings the view back over the place at its starting distance', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(1_000);
+  const start = s.seen();
+  s.globe.rotate({ kind: 'rotate', latitude: 20, longitude: 30 });
+  s.globe.zoom(1 / 1.25);
+  s.run(1_000);
+  assert.ok(s.offPlace() > 20 && s.seen().distance < start.distance - 0.5);
+  s.globe.reset();
+  s.run(1_200);
+  sameCentre(s.seen(), chennai, 'Home');
+  assert.ok(Math.abs(s.seen().distance - start.distance) < 1e-6, 'at its starting distance');
+});
+
+test('quick steps add up: each starts where the last one lands, not where the glide has got to', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(1_000);
+  // A held arrow key repeats about every 30 ms, well inside a step's quarter-second glide.
+  let step: LatLon = chennai;
+  for (let press = 0; press < 3; press++) {
+    step = s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 10 });
+    s.run(30);
+  }
+  assert.ok(Math.abs(step.longitude - chennai.longitude - 30) < 1e-9, `${step.longitude}`);
+  s.run(1_000);
+  sameCentre(s.seen(), step, 'where the third step lands');
+});
+
+test('it turns by itself for one minute by the clock, then glides home in a second and a half', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, true);
+  s.run(59_000);
+  const late = s.globe.centre();
+  s.run(500);
+  assert.ok(angularDistance(s.globe.centre(), late) > 0.3, 'still turning at 59.5 s');
+  // From 60 s it glides back: part way home 0.8 s later, home by 1.6 s, never a jump.
+  s.run(500 + 800);
+  const part = angularDistance(s.seen(), chennai);
+  assert.ok(part > 5 && part < 65, `${part}° from the place 0.8 s into the glide`);
+  s.run(800 + 200);
+  sameCentre(s.seen(), chennai, 'at rest on the place');
+});
+
+test('a vertical swipe over the globe scrolls the page; a sideways one or a pinch turns it', () => {
+  const s = scene();
+  // OrbitControls takes every touch gesture from the page (touch-action: none). The globe gives
+  // vertical pans back, so a phone can scroll past a globe that fills its screen.
+  assert.equal(s.canvas.style.touchAction, 'pan-y');
+});
+
+const tab = (s: ReturnType<typeof scene>, shown: boolean) => {
+  s.document.visibilityState = shown ? 'visible' : 'hidden';
+  s.document.dispatchEvent(new Event('visibilitychange'));
+};
+for (const [where, leave, back] of [
+  ['scrolled out of view', (s) => s.view(false), (s) => s.view(true)],
+  ['in a hidden tab', (s) => tab(s, false), (s) => tab(s, true)],
+] as [string, (s: ReturnType<typeof scene>) => void, (s: ReturnType<typeof scene>) => void][])
+  test(`${where}, the globe asks for no frame and keeps no timer but the sun's minute`, () => {
+    const s = scene();
+    s.globe.setPlace(chennai);
+    s.globe.setMotion(true, true);
+    s.run(1_000);
+    // Turning by itself, it waits on a timer between two frames.
+    for (let tick = 0; tick < 4 && !s.waits(); tick++) s.run(1000 / 60);
+    assert.equal(s.waits(), 1, 'waiting for the next frame');
+    leave(s);
+    assert.equal(s.waits(), 0, 'the wait is cancelled');
+    assert.equal(s.frames.size, 0, 'no frame is asked for');
+    let drawn = s.renderer.renders;
+    s.run(5_000);
+    assert.equal(s.renderer.renders, drawn, 'nothing is drawn');
+    back(s);
+    s.run(500);
+    assert.ok(s.renderer.renders > drawn, 'drawn again once back');
+    // A step of the rotate pad asks for a frame at once: leaving cancels it too.
+    s.globe.rotate({ kind: 'rotate', latitude: 0, longitude: 10 });
+    assert.equal(s.frames.size, 1);
+    leave(s);
+    assert.equal(s.frames.size, 0, 'the frame asked for is cancelled');
+    drawn = s.renderer.renders;
+    s.run(5_000);
+    assert.equal(s.renderer.renders, drawn, 'and not drawn');
+    assert.equal(s.waits(), 0);
+  });
+
+test('a tab shown again draws the sun where it is now, not where it was when it was hidden', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(false, false);
+  s.run(100);
+  const sun = () => (s.material().uniforms.sun.value as Vector3).toArray();
+  tab(s, false);
+  // Six hours on by the clock, before the sun's minute comes round: a browser holds back the
+  // timers of a hidden tab.
+  const later = Date.parse('2026-11-19T13:30:00Z');
+  s.setWall(later);
+  s.run(10_000);
+  tab(s, true);
+  s.run(1000 / 60);
+  sunDirection(later).forEach((value, axis) =>
+    assert.ok(Math.abs(sun()[axis] - value) < 1e-9, `axis ${axis}: ${sun()[axis]} vs ${value}`),
+  );
+});

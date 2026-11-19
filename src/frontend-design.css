@@ -1,181 +1,476 @@
-/* StormSignal's visual layer: a quiet instrument panel, with data in the foreground. */
+/* StormSignal's visual layer, "Midnight Aurora": a deep midnight base, frosted glass where the
+   page frames its content, and aurora light kept for focus, the active state and key data.
+   Official warning colours (red, orange, yellow) live with their components and never change
+   with this palette. */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #0b131b;
-  --bg: #0b131b;
-  --panel: #121f29;
-  --line: #283a47;
-  --muted: #a2b5c2;
-  --mint: #9ce6d2;
+  /* Shared tokens. Other stylesheets read them as var(--name, fallback). */
+  --aurora-bg: #060a14;
+  --aurora-surface: #0e1626;
+  --aurora-surface-raised: #131e33;
+  --aurora-glass: rgba(14, 22, 38, 0.62);
+  --aurora-line: rgba(160, 178, 255, 0.16);
+  --aurora-teal: #3ee6c1;
+  --aurora-violet: #8b7cff;
+  --aurora-gradient: linear-gradient(120deg, #3ee6c1 0%, #8b7cff 100%);
+  --aurora-text: #eef3ff;
+  --aurora-muted: #9aa7bf;
+  --aurora-glow: 0 0 0 1px rgba(62, 230, 193, 0.35), 0 12px 40px -12px rgba(139, 124, 255, 0.45);
+  /* Design-system extensions of those tokens. */
+  --aurora-glass-filter: blur(18px) saturate(140%);
+  --aurora-surface-sunken: #080d19;
+  --aurora-surface-hover: #182540;
+  --aurora-panel-fill: rgba(14, 22, 38, 0.86);
+  --aurora-text-soft: #c8d2e8;
+  --aurora-faint: #8592ad;
+  --aurora-line-soft: rgba(160, 178, 255, 0.09);
+  /* Boundaries that identify a control: at least 3:1 on every surface a control rests on. */
+  --aurora-line-strong: #5d6b92;
+  --aurora-hairline: linear-gradient(
+    150deg,
+    rgba(160, 178, 255, 0.28),
+    rgba(160, 178, 255, 0.08) 32%,
+    rgba(160, 178, 255, 0.06) 64%,
+    rgba(62, 230, 193, 0.24)
+  );
+  --aurora-teal-soft: #8ff3dc;
+  --aurora-violet-soft: #bdb4ff;
+  /* The focus ring: lavender, so focus never reads as the teal of a pressed control. */
+  --aurora-focus: #c3bbff;
+  --aurora-ink: #04121a;
+  --aurora-shadow: 0 28px 60px -34px rgba(0, 0, 0, 0.85);
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text',
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display',
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Earlier names, remapped onto the palette so every rule that reads them follows it. */
+  --bg: var(--aurora-bg);
+  --panel: var(--aurora-surface);
+  --line: var(--aurora-line);
+  --muted: var(--aurora-muted);
+  --mint: var(--aurora-teal);
+  /* The warm tone of the official-alert count and the amber status dot, as before the palette. */
   --amber: #edc18e;
+  font-family: var(--font-sans);
+  color: var(--aurora-text);
+  background: var(--aurora-bg);
+  /* Every scroll container inherits this. The thumb is a control boundary, so it keeps 3:1 on the
+     surfaces it scrolls over (see --aurora-line-strong). */
+  scrollbar-color: var(--aurora-line-strong) transparent;
 }
+/* The page base is painted by html; the aurora sits between it and the content. */
 body {
-  background: radial-gradient(ellipse at 65% 0, #192e3b66, transparent 60%), var(--bg);
+  background: transparent;
+  color: var(--aurora-text);
 }
+.app-shell::before {
+  content: '';
+  position: fixed;
+  inset: -8vmax;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40vmax 26vmax at 16% 4%, rgba(62, 230, 193, 0.11), transparent 70%),
+    radial-gradient(46vmax 30vmax at 74% -2%, rgba(139, 124, 255, 0.16), transparent 72%),
+    radial-gradient(40vmax 32vmax at 100% 60%, rgba(91, 108, 255, 0.07), transparent 70%),
+    radial-gradient(56vmax 34vmax at 26% 106%, rgba(62, 230, 193, 0.05), transparent 72%);
+}
+/* The aurora settles into place once, where the page already allows rich media (Full workspace
+   on a wide screen), and then stays still. It never loops: while this layer moves, the compositor
+   redraws every frame and re-blurs the two glass surfaces above it, which would drain a battery
+   on a page kept open for alerts. It is done within five seconds, so it needs no pause control
+   (WCAG 2.2.2), and it never runs under reduced motion. */
+@media (prefers-reduced-motion: no-preference) and (min-width: 801px) {
+  .app-shell:not(.field-mode)::before {
+    animation: aurora-settle 5s var(--ease-out);
+  }
+}
+/* From a slightly turned, dimmer start to the resting gradients everyone else sees. */
+@keyframes aurora-settle {
+  from {
+    opacity: 0.45;
+    transform: translate3d(-2.5%, -2%, 0) rotate(-1.5deg) scale(1.08);
+  }
+}
+::selection {
+  background: rgba(139, 124, 255, 0.45);
+  color: #fff;
+}
+
+/* Typography: system fonts only, a tight display scale and tabular figures for data. */
 h1,
 h2,
 h3,
 .brand,
 .temperature {
-  font-family: inherit;
+  font-family: var(--font-display);
 }
+h1 {
+  font-weight: 600;
+  font-size: clamp(42px, 3.9vw, 64px);
+  line-height: 1.02;
+  letter-spacing: -0.042em;
+  margin: 14px 0 12px;
+  color: var(--aurora-text);
+}
+.eyebrow {
+  color: var(--aurora-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+}
+.panel-heading {
+  margin-bottom: 22px;
+}
+.panel-heading h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  line-height: 1.3;
+  margin-top: 8px;
+  color: var(--aurora-text);
+}
+.panel-heading > svg {
+  color: var(--aurora-faint);
+}
+/* Aurora text: both ends of the gradient keep 4.5:1 on the surfaces it is used on. */
+.brand-light,
+.heading-dot,
+.temperature > span {
+  background: var(--aurora-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+/* Selected, it would keep that transparent fill, leaving the violet end near 2.7:1 on the violet
+   selection. It turns white instead, like any other selected text. */
+.brand-light::selection,
+.heading-dot::selection,
+.temperature > span::selection,
+.temperature > span *::selection {
+  -webkit-text-fill-color: #ffffff;
+  color: #ffffff;
+}
+
+/* Navigation: frosted glass over the aurora, a gradient bar on the active section. It scrolls
+   only up and down: an always-shown scrollbar (Windows, Linux, macOS with a mouse) takes room
+   from the brand and labels, and must never add a sideways one under them. */
 .sidebar {
-  background: #0e1922;
-  border-color: #263541;
-  padding-top: 34px;
+  background:
+    linear-gradient(180deg, rgba(139, 124, 255, 0.08), transparent 30%), var(--aurora-glass);
+  -webkit-backdrop-filter: var(--aurora-glass-filter);
+  backdrop-filter: var(--aurora-glass-filter);
+  border-right: 1px solid var(--aurora-line);
+  padding-top: 30px;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  /* A place focused at the bottom (or top) edge is scrolled clear of it, focus ring included. */
+  scroll-padding-block: 10px;
 }
 .brand {
   font-size: 24px;
-  letter-spacing: -1.3px;
-  margin-bottom: 42px;
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  margin-bottom: 40px;
+  color: var(--aurora-text);
+}
+.brand:hover {
+  color: var(--aurora-text);
+}
+.brand-light {
+  font-weight: 400;
 }
 .brand-mark {
-  color: var(--mint);
+  color: var(--aurora-teal);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: radial-gradient(
+    circle at 30% 25%,
+    rgba(62, 230, 193, 0.22),
+    rgba(139, 124, 255, 0.12) 62%,
+    transparent 76%
+  );
+  box-shadow: inset 0 0 0 1px rgba(62, 230, 193, 0.24);
 }
+/* The tagline is the brand row's widest part. At this spacing it fits beside a classic scrollbar,
+   with room to spare for system fonts a little wider than the one it was measured in. */
 .brand small {
   font-family: inherit;
-  color: #9cafbb;
-  letter-spacing: 1.5px;
+  color: var(--aurora-faint);
+  letter-spacing: 0.12em;
   font-size: 8px;
 }
-/* The fixed sidebar narrows at these widths (see styles.css); the brand has to narrow with it. */
+.nav-label {
+  color: var(--aurora-faint);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+nav {
+  gap: 4px;
+}
+nav a {
+  position: relative;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #aab6cf;
+}
+nav a svg {
+  color: var(--aurora-faint);
+  opacity: 1;
+}
+nav a:hover {
+  background: rgba(160, 178, 255, 0.07);
+  color: var(--aurora-text);
+}
+nav a.active {
+  background: linear-gradient(90deg, rgba(62, 230, 193, 0.13), rgba(139, 124, 255, 0.06) 72%);
+  border-color: rgba(62, 230, 193, 0.2);
+  color: var(--aurora-text);
+}
+nav a.active svg {
+  color: var(--aurora-teal);
+}
+nav a.active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--aurora-teal), var(--aurora-violet));
+  box-shadow: 0 0 12px rgba(62, 230, 193, 0.55);
+}
+.sidebar-divider {
+  margin: 24px 10px;
+  border-color: var(--aurora-line);
+}
+.saved-list button {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #aab6cf;
+}
+.saved-list button svg {
+  color: var(--aurora-faint);
+}
+.saved-list button:hover {
+  background: rgba(160, 178, 255, 0.07);
+  color: var(--aurora-text);
+}
+.saved-list button.current {
+  border-color: var(--aurora-line);
+  background: rgba(19, 30, 51, 0.85);
+  color: var(--aurora-text);
+}
+.saved-list button.current svg {
+  color: var(--aurora-teal);
+}
+.saved-list small {
+  color: var(--aurora-faint);
+}
+/* The fixed sidebar narrows at these widths (see styles.css); the brand and navigation narrow
+   with it, so "Official alerts" and its count keep to one line even beside a scrollbar that
+   takes room (Windows, Linux, macOS set to always show them). These blocks follow the rules
+   above on purpose: a later rule for the same selector would win at every width (the
+   accessibility test checks for that). */
 @media (min-width: 801px) and (max-width: 1250px) {
   .brand {
     font-size: 22px;
   }
   .brand small {
     font-size: 7.5px;
-    letter-spacing: 1.2px;
+  }
+  .brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+  nav a {
+    font-size: 12px;
+    gap: 10px;
+    padding-inline: 10px;
+  }
+  .nav-label {
+    letter-spacing: 0.12em;
   }
 }
 @media (min-width: 801px) and (max-width: 1050px) {
+  .sidebar {
+    padding-inline: 10px;
+  }
   .brand {
     font-size: 20px;
   }
   .brand small {
     font-size: 7px;
-    letter-spacing: 1px;
+    letter-spacing: 0.1em;
+  }
+  .brand-mark {
+    width: 26px;
+    height: 26px;
+  }
+  nav a,
+  .saved-list button {
+    font-size: 11.5px;
+    gap: 7px;
+    padding-inline: 8px;
+  }
+  nav a svg {
+    width: 16px;
+    height: 16px;
+  }
+  .nav-label {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    padding-inline: 10px;
   }
 }
-nav a {
-  border-radius: 9px;
-  font-size: 12px;
-}
-nav a.active {
-  background: linear-gradient(90deg, #244039, #1a302e);
-  border-color: #36544e;
-}
-.nav-label {
-  color: #8da3b2;
-  font-size: 9px;
-}
-.sidebar-divider {
-  margin: 25px 10px;
-  border-color: #253642;
-}
-.saved-list button {
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: #b0c0cb;
-}
-.saved-list button.current {
-  border-color: #314653;
-  background: #1c2c37;
-}
-.saved-list small {
-  color: #91a6b5;
-}
-.sidebar-bottom {
-  border-color: #263946;
-}
+
+/* Top bar and search: glass with an aurora glow around the focused search field. */
 .topbar {
   height: 76px;
-  background: #0b151de8;
-  border-color: #263541;
+  background: var(--aurora-glass);
+  -webkit-backdrop-filter: var(--aurora-glass-filter);
+  backdrop-filter: var(--aurora-glass-filter);
+  border-bottom: 1px solid var(--aurora-line);
+  box-shadow: 0 18px 40px -34px rgba(0, 0, 0, 0.9);
 }
 .search-area {
-  width: 315px;
+  width: 330px;
 }
 .search-area form {
-  height: 40px;
-  border-radius: 9px;
-  background: #12212b;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--aurora-surface-sunken);
+  border: 1px solid var(--aurora-line-strong);
+  color: var(--aurora-faint);
+}
+.search-area form:hover {
+  border-color: #7381a8;
+}
+.search-area form:focus-within {
+  border-color: rgba(62, 230, 193, 0.6);
+  box-shadow: var(--aurora-glow);
+}
+.search-area form:focus-within > svg {
+  color: var(--aurora-teal);
 }
 .search-area input {
-  font-size: 12px;
+  font-size: 13px;
 }
 .breadcrumb {
   font-size: 12px;
 }
-.breadcrumb strong {
-  color: #bdcdd7;
-}
 .status-tag {
-  font-size: 9px;
-  letter-spacing: 0.7px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 7px 11px;
+  border: 1px solid var(--aurora-line);
+  border-radius: 999px;
+  background: rgba(160, 178, 255, 0.04);
 }
+
+/* Page heading. */
 main {
-  padding-top: 34px;
+  padding-top: 36px;
   max-width: 1640px;
 }
 .page-heading {
-  margin-bottom: 26px;
+  margin-bottom: 28px;
+  align-items: flex-end;
 }
 .location-eyebrow {
-  color: #afc0cb;
-  letter-spacing: 1.4px;
-  font-size: 10px;
+  color: var(--aurora-muted);
+  letter-spacing: 0.14em;
+  font-size: 11px;
 }
-h1 {
-  font-weight: 500;
-  font-size: clamp(40px, 3.8vw, 62px);
-  letter-spacing: -2.8px;
-  margin: 13px 0 11px;
+.location-eyebrow svg {
+  color: var(--aurora-teal);
 }
 .page-heading p {
-  color: #a3b5c2;
-  font-size: 14px;
-  letter-spacing: 0.1px;
+  color: var(--aurora-muted);
+  font-size: 15px;
+  letter-spacing: 0;
 }
+
+/* Buttons: an aurora primary with dark ink (over 5.8:1 at both ends), quiet glass otherwise. */
 .primary-button,
 .secondary-button {
-  border-radius: 9px;
+  border-radius: 12px;
   min-height: 42px;
-  padding-inline: 16px;
-  font-size: 12px;
+  padding-inline: 17px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .primary-button {
-  background: #b3ebda;
-  border-color: #b3ebda;
+  background: var(--aurora-gradient);
+  color: var(--aurora-ink);
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 10px 30px -14px rgba(62, 230, 193, 0.65);
+}
+.primary-button:hover {
+  background: var(--aurora-gradient);
+  color: var(--aurora-ink);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    var(--aurora-glow);
+  filter: brightness(1.06);
 }
 .secondary-button {
-  background: #152530;
-  border-color: #354956;
+  background: rgba(19, 30, 51, 0.72);
+  border: 1px solid var(--aurora-line-strong);
+  color: var(--aurora-text);
 }
-.eyebrow {
-  color: #98afbd;
-  font-size: 9px;
-  letter-spacing: 1.65px;
+.secondary-button:hover {
+  background: var(--aurora-surface-hover);
+  border-color: rgba(62, 230, 193, 0.55);
+  color: var(--aurora-text);
+}
+
+/* Surfaces: a translucent fill inside a gradient hairline. Warning-coloured containers set their
+   own background and border colour, which replaces this treatment entirely. */
+.panel,
+.map-card,
+.signal-strip {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--aurora-panel-fill), var(--aurora-panel-fill)) padding-box,
+    var(--aurora-hairline) border-box;
+  box-shadow: var(--aurora-shadow);
 }
 .panel {
-  border-radius: 15px;
-  background: #12202a;
-  border-color: #293b48;
+  border-radius: 22px;
 }
-.panel-heading h2 {
-  font-size: 21px;
-  font-weight: 500;
-  letter-spacing: -0.6px;
-  margin-top: 7px;
+.map-card {
+  border-radius: 24px;
 }
-.panel-heading {
-  margin-bottom: 22px;
+/* The notice that replaces an optional tool that could not load (OptionalPanel): its actions sit
+   in one row that wraps, each clear of the next. */
+.optional-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 14px;
 }
+.optional-actions a {
+  color: var(--aurora-teal-soft);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Connection mode: a segmented control whose pressed state is a ring, not only a fill. */
 .field-controls {
-  background: #12212a;
-  padding: 15px 20px 0;
+  padding: 16px 22px 0;
   margin-bottom: 24px;
-  border-color: #2b414b;
 }
 .connection-bar {
   display: flex;
@@ -187,65 +482,93 @@ h1 {
 .connection-heading {
   display: flex;
   align-items: center;
-  gap: 13px;
-  color: #a6d7cd;
+  gap: 14px;
+  color: var(--aurora-teal);
+}
+.connection-heading > svg {
+  box-sizing: content-box;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(62, 230, 193, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(62, 230, 193, 0.22);
 }
 .connection-heading strong {
   display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: #dfebef;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--aurora-text);
   margin-top: 5px;
 }
 .connection-heading .eyebrow {
-  font-size: 8px;
-  letter-spacing: 1.6px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
 }
 .connection-options {
   margin: 0;
   gap: 4px;
-  background: #0a1720;
-  border: 1px solid #2c404d;
+  background: var(--aurora-surface-sunken);
+  border: 1px solid var(--aurora-line);
   padding: 4px;
-  border-radius: 10px;
+  border-radius: 14px;
 }
 .connection-options button {
+  position: relative;
   border: 0;
-  border-radius: 6px;
-  padding: 9px 14px;
-  min-height: 36px;
-  font-size: 11px;
-  font-weight: 500;
+  border-radius: 10px;
+  padding: 9px 15px;
+  min-height: 38px;
+  font-size: 12px;
+  font-weight: 550;
   background: transparent;
-  color: #b1c2cd;
+  color: var(--aurora-muted);
+}
+.connection-options button:hover {
+  background: rgba(160, 178, 255, 0.08);
+  color: var(--aurora-text);
 }
 .connection-options button[aria-pressed='true'] {
-  background: #2c4c45;
-  color: #c7f2e4;
+  background: #16243b;
+  color: var(--aurora-text);
 }
-/* A pressed toggle carries a mint ring (over 6:1 against the group and the fill), so its state
+/* A pressed toggle carries a teal ring (over 9:1 against the group and the fill), so its state
    does not rest on a fill that differs from the group by less than 2:1. */
 .connection-options button[aria-pressed='true'],
 .fe-metrics button[aria-pressed='true'],
 .fe-ranges button[aria-pressed='true'],
 .segmented button.selected {
-  box-shadow: inset 0 0 0 2px var(--mint);
+  box-shadow: inset 0 0 0 2px var(--aurora-teal);
 }
-.connection-options button:hover {
-  background: #263d46;
+/* A soft halo around the pressed toggle, faded in and out with the state. */
+.connection-options button::after,
+.segmented button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 22px -6px rgba(62, 230, 193, 0.7);
+  opacity: 0;
+}
+.connection-options button[aria-pressed='true']::after,
+.segmented button.selected::after {
+  opacity: 1;
 }
 .connection-details {
-  border-top: 1px solid #2a3c48;
+  border-top: 1px solid var(--aurora-line);
 }
 .connection-details summary {
   cursor: pointer;
   list-style: none;
-  color: #a9bdc9;
-  font-size: 11px;
-  padding: 11px 0;
+  color: var(--aurora-muted);
+  font-size: 12px;
+  padding: 12px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.connection-details summary:hover {
+  color: var(--aurora-text);
 }
 .connection-details summary::-webkit-details-marker {
   display: none;
@@ -256,27 +579,48 @@ h1 {
 .connection-details > p {
   font-size: 13px;
   padding-top: 5px;
+  color: var(--aurora-text-soft);
 }
 .connection-details .field-cache-status {
   margin-bottom: 18px;
   font-size: 12px;
 }
 .field-shortcuts a {
-  font-size: 12px;
+  font-size: 12.5px;
+  color: var(--aurora-teal-soft);
 }
+
+/* Current conditions: the hero card. Its glows are capped (see the accessibility test) so that
+   the violet end of the temperature keeps 4.5:1 even where both would peak together; for the
+   same reason the card gets no pointer glare and the number no glow of its own. */
 .overview-grid {
   grid-template-columns: minmax(310px, 0.8fr) minmax(0, 1.25fr);
   gap: 22px;
 }
 .conditions-card {
+  --hero-base: #0c1424;
+  --hero-glow-violet: rgba(139, 124, 255, 0.09);
+  --hero-glow-teal: rgba(62, 230, 193, 0.05);
   position: relative;
   isolation: isolate;
+  border: 1px solid transparent;
+  border-radius: 24px;
   background:
-    radial-gradient(ellipse at 90% 20%, #294b60 0, transparent 65%),
-    linear-gradient(145deg, #1c3545, #142835 65%, #12222d);
-  border: 1px solid #3b5363;
-  border-radius: 16px;
-  padding: 24px 26px 0;
+    radial-gradient(90% 70% at 94% 2%, var(--hero-glow-violet), transparent 62%) padding-box,
+    radial-gradient(80% 55% at 0% 100%, var(--hero-glow-teal), transparent 62%) padding-box,
+    linear-gradient(var(--hero-base), var(--hero-base)) padding-box,
+    linear-gradient(
+        150deg,
+        rgba(139, 124, 255, 0.5),
+        rgba(160, 178, 255, 0.1) 30%,
+        rgba(160, 178, 255, 0.06) 64%,
+        rgba(62, 230, 193, 0.42)
+      )
+      border-box;
+  box-shadow:
+    0 40px 90px -46px rgba(0, 0, 0, 0.95),
+    0 24px 60px -40px rgba(139, 124, 255, 0.35);
+  padding: 26px 28px 0;
   min-height: 410px;
 }
 .conditions-card > :not(.atmosphere-scene) {
@@ -285,80 +629,177 @@ h1 {
 }
 .atmosphere-scene {
   position: absolute;
-  width: 355px;
+  width: 360px;
   max-width: 90%;
-  right: -42px;
-  top: 36px;
+  right: -40px;
+  top: 34px;
   z-index: 0;
   pointer-events: none;
   opacity: 0.95;
 }
 .card-kicker {
-  font-size: 8px;
-  color: #c0d3dd;
-  letter-spacing: 1.1px;
+  font-size: 10px;
+  color: var(--aurora-text-soft);
+  letter-spacing: 0.14em;
 }
 .card-kicker > span:last-child {
-  color: #bbccd8;
+  color: var(--aurora-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 .temperature {
   margin-top: 34px;
   justify-content: flex-start;
 }
 .temperature > span {
-  font-size: clamp(75px, 6.6vw, 106px);
-  font-weight: 300;
-  letter-spacing: -7px;
-  text-shadow: 0 3px 25px #132b3e;
+  font-size: clamp(80px, 6.8vw, 112px);
+  font-weight: 200;
+  letter-spacing: -0.06em;
+  padding-right: 0.06em;
+  font-variant-numeric: tabular-nums;
 }
 .temperature sup {
-  font-size: 45px;
+  font-size: 0.44em;
   line-height: 1.4;
+  letter-spacing: 0;
+}
+/* No value is plain muted text: in the gradient the dash read as a decorative teal bar. */
+.temperature.is-missing > span {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--aurora-muted);
 }
 .condition-name {
-  margin-top: 17px;
-  font-size: 19px;
-  font-weight: 500;
+  margin-top: 16px;
+  font-size: 20px;
+  font-weight: 550;
+  letter-spacing: -0.015em;
 }
 .feels {
-  color: #b7cbd8;
-  font-size: 11px;
+  color: var(--aurora-muted);
+  font-size: 12px;
   max-width: 60%;
   line-height: 1.6;
 }
 .condition-metrics {
-  gap: 21px 16px;
-  margin: 27px 0 22px;
+  gap: 20px 16px;
+  margin: 26px 0 22px;
   padding-top: 22px;
+  border-top: 1px solid var(--aurora-line);
 }
 .condition-metrics > div {
-  color: #aac4d3;
+  color: var(--aurora-muted);
+}
+.condition-metrics > div > svg {
+  box-sizing: content-box;
+  padding: 8px;
+  border-radius: 11px;
+  color: var(--aurora-teal);
+  background: rgba(62, 230, 193, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(62, 230, 193, 0.16);
 }
 .condition-metrics > div > span {
   font-size: 11px;
+  letter-spacing: 0.02em;
 }
 .condition-metrics strong {
   font-size: 19px;
+  font-weight: 550;
   font-variant-numeric: tabular-nums;
-  margin-top: 7px;
+  letter-spacing: -0.02em;
+  margin-top: 6px;
+  color: var(--aurora-text);
 }
 .condition-metrics strong small {
-  font-size: 10px;
+  font-size: 10.5px;
+  color: var(--aurora-muted);
+  letter-spacing: 0;
+  font-weight: 450;
+}
+/* A period such as "last 15 min" wraps as a whole, never before its last word. */
+.condition-metrics strong small span {
+  white-space: nowrap;
 }
 .condition-footer {
-  margin-left: -26px;
-  margin-right: -26px;
-  padding: 14px 26px;
-  font-size: 10px;
-  color: #b3c5d1;
-  background: #07162342;
-  border-color: #64869a24;
+  margin-left: -28px;
+  margin-right: -28px;
+  padding: 14px 28px;
+  font-size: 11px;
+  color: var(--aurora-muted);
+  background: rgba(6, 10, 20, 0.45);
+  border-top: 1px solid var(--aurora-line-soft);
 }
-.map-card {
+.condition-footer a {
+  color: var(--aurora-teal-soft);
+}
+.condition-horizon {
+  margin-top: auto;
+  margin-bottom: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--aurora-line);
+}
+.horizon-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.horizon-heading > span:last-child {
+  font-size: 11px;
+  color: var(--aurora-muted);
+}
+.horizon-hours {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 18px;
+}
+.horizon-hours > div {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 15px 4px;
+  background: linear-gradient(180deg, rgba(160, 178, 255, 0.07), rgba(160, 178, 255, 0.025));
+  border: 1px solid var(--aurora-line);
   border-radius: 16px;
-  border-color: #2d4351;
-  background: #12212c;
 }
+.horizon-hours time {
+  color: var(--aurora-text-soft);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.horizon-hours time small {
+  display: block;
+  color: var(--aurora-muted);
+  font-size: 10px;
+  margin-top: 4px;
+}
+.horizon-hours svg {
+  color: var(--aurora-text-soft);
+  stroke-width: 1.4;
+}
+.horizon-hours strong {
+  font-size: 22px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.horizon-hours strong small {
+  font-size: 11px;
+  margin-left: 2px;
+  color: var(--aurora-muted);
+  letter-spacing: 0;
+}
+.horizon-hours > div > span {
+  font-size: 10px;
+  color: var(--aurora-teal-soft);
+}
+
+/* The forecast column beside it (Data saver) and the satellite card (Full workspace). */
 .field-forecast {
   padding: 24px 26px 18px;
 }
@@ -366,12 +807,17 @@ h1 {
   margin-bottom: 0;
 }
 .field-forecast .panel-heading > svg {
-  color: #a9dcd0;
+  box-sizing: content-box;
+  padding: 9px;
+  border-radius: 12px;
+  color: var(--aurora-teal);
+  background: rgba(62, 230, 193, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(62, 230, 193, 0.2);
 }
 .field-forecast > .forecast-context {
-  margin: 8px 0 23px;
-  font-size: 11px;
-  color: #9eb4c2;
+  margin: 8px 0 22px;
+  font-size: 12px;
+  color: var(--aurora-muted);
 }
 .explore-invitation {
   display: flex;
@@ -380,10 +826,10 @@ h1 {
   align-items: center;
   gap: 7px;
   margin-top: 17px;
-  border-top: 1px solid #2b404d;
+  border-top: 1px solid var(--aurora-line);
   padding-top: 14px;
-  color: #9fb5c3;
-  font-size: 10px;
+  color: var(--aurora-muted);
+  font-size: 11px;
 }
 .explore-invitation button {
   display: inline-flex;
@@ -391,25 +837,56 @@ h1 {
   gap: 7px;
   padding: 7px 0;
   background: none;
-  color: #a9e7d5;
-  font-size: 11px;
+  color: var(--aurora-teal-soft);
+  font-size: 12px;
+  font-weight: 550;
   text-align: left;
 }
+.explore-invitation button:hover {
+  color: var(--aurora-teal);
+}
+
+/* Forecast signals (the watch level; elevated, high and unknown keep their own colours). */
 .signal-strip {
-  border-radius: 12px;
-  margin: 22px 0;
-  padding: 19px 23px;
+  border-radius: 18px;
+  margin: 24px 0;
+  padding: 18px 22px;
+  background:
+    linear-gradient(100deg, rgba(62, 230, 193, 0.07), rgba(139, 124, 255, 0.05) 55%, transparent)
+      padding-box,
+    linear-gradient(var(--aurora-panel-fill), var(--aurora-panel-fill)) padding-box,
+    var(--aurora-hairline) border-box;
+}
+.signal-icon {
+  color: var(--aurora-teal);
+  border-color: rgba(62, 230, 193, 0.35);
+  background: rgba(62, 230, 193, 0.08);
+  box-shadow: 0 0 20px -6px rgba(62, 230, 193, 0.55);
 }
 .signal-strip p {
-  font-size: 12px;
+  font-size: 12.5px;
+  color: var(--aurora-muted);
 }
 .signal-title strong {
-  font-weight: 500;
+  font-weight: 600;
   font-size: 15px;
+  letter-spacing: -0.01em;
 }
 .signal-strip > a {
-  font-size: 11px;
+  font-size: 12px;
+  color: var(--aurora-teal-soft);
 }
+.signal-strip.signal-unknown {
+  background: #151c2a;
+  border-color: #3b465e;
+}
+.signal-unknown .signal-icon {
+  color: #a9b5cc;
+  border-color: #46526c;
+  background: transparent;
+  box-shadow: none;
+}
+
 .analytics-grid {
   gap: 22px;
   grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.8fr);
@@ -422,7 +899,7 @@ h1 {
 .outlook-panel,
 .alerts-panel,
 .hazards-panel {
-  padding: 25px;
+  padding: 26px;
 }
 .model-note {
   font-size: 11px;
@@ -434,34 +911,44 @@ h1 {
   min-height: 49px;
 }
 .day-row > span:first-child {
-  color: #c9d8df;
+  color: var(--aurora-text-soft);
 }
 .sun-times {
-  color: #adbfcb;
+  color: var(--aurora-muted);
 }
 .coverage-banner {
-  border-radius: 10px;
+  border-radius: 12px;
 }
 .coverage-banner p,
 .section-intro,
 .no-hazards p {
   line-height: 1.7;
 }
+
+/* Preparedness: the one banner with a broad aurora wash. */
 .preparedness-banner {
-  border-radius: 16px;
-  background: radial-gradient(ellipse at 4% 50%, #33534c65, transparent 50%), #15282a;
-  border-color: #37554d;
+  position: relative;
+  isolation: isolate;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  background:
+    radial-gradient(60% 140% at 0% 50%, rgba(62, 230, 193, 0.13), transparent 62%) padding-box,
+    radial-gradient(50% 130% at 100% 0%, rgba(139, 124, 255, 0.16), transparent 66%) padding-box,
+    linear-gradient(#0c1426, #0c1426) padding-box,
+    var(--aurora-hairline) border-box;
+  box-shadow: var(--aurora-shadow);
 }
 .preparedness-banner h2 {
-  font-weight: 500;
-  letter-spacing: -0.9px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
 .sources-panel {
-  border-radius: 16px;
+  border-radius: 22px;
 }
 .sources-grid h3 {
-  color: #dfebef;
-  font-weight: 500;
+  color: var(--aurora-text);
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 .error-note {
   line-height: 1.6;
@@ -469,6 +956,230 @@ h1 {
 .empty-state {
   min-height: 200px;
 }
+/* A message's dismiss button keeps to its trailing edge, also where the message spans the screen. */
+.toast > .icon-button {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Focus on dark glass: the ring is lavender (over 8.5:1 on every surface here, glass included),
+   drawn outside the control so its own fill never hides it, and never the teal of a selection. */
+select:focus-visible,
+textarea:focus-visible,
+[tabindex='0']:focus-visible {
+  outline: 2px solid var(--aurora-focus);
+  outline-offset: 3px;
+}
+/* Sliders: a teal thumb (over 9:1 on the panels) on a track at 3:1, instead of the browser's
+   dark-mode track, which does not belong to the palette. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 24px;
+  background: transparent;
+  accent-color: var(--aurora-teal);
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--aurora-line-strong);
+}
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--aurora-line-strong);
+}
+input[type='range']::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--aurora-gradient);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--aurora-teal);
+  border: 3px solid var(--aurora-bg);
+  box-shadow:
+    0 0 0 1px rgba(62, 230, 193, 0.7),
+    0 0 14px rgba(62, 230, 193, 0.55);
+}
+input[type='range']::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--aurora-teal);
+  border: 3px solid var(--aurora-bg);
+  box-shadow:
+    0 0 0 1px rgba(62, 230, 193, 0.7),
+    0 0 14px rgba(62, 230, 193, 0.55);
+}
+input[type='range']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Motion. motion.ts holds below-the-fold sections back until they scroll into view and leans
+   cards toward a fine pointer. Nothing is hidden without it, and nothing moves under reduced
+   motion: every rule that animates is inside a no-preference query. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Sections that come into view together follow each other by --reveal-delay. */
+  [data-reveal] {
+    transition:
+      opacity 0.75s var(--ease-out) var(--reveal-delay, 0s),
+      translate 0.75s var(--ease-out) var(--reveal-delay, 0s);
+  }
+  [data-reveal='pending'] {
+    opacity: 0;
+    translate: 0 26px;
+  }
+  /* The footer ends the page, so it only fades in. Held lower, it would make the page 26px
+     taller until shown; reaching the end would then shrink the page under the reader and the
+     browser would pull the scroll position back, shifting everything after it had landed. */
+  .footer[data-reveal='pending'] {
+    translate: none;
+  }
+  nav a,
+  nav a svg,
+  .saved-list button,
+  .icon-button,
+  .search-area form,
+  .connection-details summary,
+  .explore-invitation button,
+  .text-link,
+  .quiet-button,
+  .field-shortcuts a {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease,
+      box-shadow 0.25s ease;
+  }
+  .primary-button,
+  .secondary-button {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease,
+      box-shadow 0.3s ease,
+      filter 0.2s ease,
+      scale 0.15s ease;
+  }
+  /* Toggles move smoothly between states. */
+  .connection-options button,
+  .segmented button {
+    transition:
+      background-color 0.28s var(--ease-out),
+      color 0.28s var(--ease-out),
+      box-shadow 0.28s var(--ease-out),
+      scale 0.15s ease;
+  }
+  .connection-options button::after,
+  .segmented button::after {
+    transition: opacity 0.35s var(--ease-out);
+  }
+  .connection-details summary svg {
+    transition: transform 0.3s var(--ease-out);
+  }
+  /* Press feedback. */
+  :is(
+      .primary-button,
+      .secondary-button,
+      .quiet-button,
+      .icon-button,
+      .connection-options button,
+      .segmented button
+    ):active:not(:disabled):not([aria-disabled='true']) {
+    scale: 0.97;
+  }
+  .toast {
+    animation: toast-in 0.45s var(--ease-out) both;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 14px;
+  }
+}
+/* The page dims as the drawer slides in over it. */
+@media (prefers-reduced-motion: no-preference) and (max-width: 800px) {
+  .app-shell:has(> .sidebar.open)::after {
+    animation: scrim-in 0.32s var(--ease-out);
+  }
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+/* Cards that lean toward the pointer: motion.ts sets --tilt-rx/--tilt-ry (degrees), --tilt-px/
+   --tilt-py (-1 to 1) and --glare-x/--glare-y on the card under a fine pointer, in Full
+   workspace only, and removes them, with data-tilt, when the pointer leaves the box the card had
+   before it leaned (the lean moves its edges, never the box that decides). */
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  :is(.conditions-card, .disaster-card, .sources-grid > div, .preparedness-banner) {
+    transition:
+      transform 0.6s var(--ease-out),
+      box-shadow 0.6s var(--ease-out),
+      border-color 0.3s ease,
+      opacity 0.75s var(--ease-out) var(--reveal-delay, 0s),
+      translate 0.75s var(--ease-out) var(--reveal-delay, 0s);
+  }
+  :is(.conditions-card, .disaster-card, .sources-grid > div, .preparedness-banner)[data-tilt] {
+    transform: perspective(1000px) rotateX(var(--tilt-rx, 0deg)) rotateY(var(--tilt-ry, 0deg))
+      translate3d(0, -3px, 0);
+    transition-duration: 0.16s, 0.4s, 0.3s, 0.75s, 0.75s;
+  }
+  :is(.disaster-card, .sources-grid > div)[data-tilt] {
+    border-color: rgba(62, 230, 193, 0.32);
+    box-shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.9);
+  }
+  /* The hour tiles sit inside the tilting card, so they lift on their own instead of leaning. */
+  .horizon-hours > div {
+    transition:
+      translate 0.35s var(--ease-out),
+      border-color 0.3s ease,
+      background-color 0.3s ease;
+  }
+  .horizon-hours > div:hover {
+    translate: 0 -2px;
+    border-color: rgba(62, 230, 193, 0.34);
+  }
+  :is(.conditions-card, .preparedness-banner)[data-tilt] {
+    box-shadow:
+      0 46px 90px -44px rgba(0, 0, 0, 0.95),
+      0 30px 70px -42px rgba(139, 124, 255, 0.5);
+  }
+  [data-tilt]:not(.conditions-card)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at var(--glare-x, 50%) var(--glare-y, 50%),
+      rgba(255, 255, 255, 0.05),
+      transparent 48%
+    );
+  }
+  .atmosphere-scene {
+    transition: translate 0.6s var(--ease-out);
+  }
+  .conditions-card[data-tilt] .atmosphere-scene {
+    translate: calc(var(--tilt-px, 0) * -12px) calc(var(--tilt-py, 0) * -9px);
+    transition-duration: 0.2s;
+  }
+  .secondary-button:hover,
+  .primary-button:hover {
+    translate: 0 -1px;
+  }
+}
+
 @media (min-width: 1600px) {
   .overview-grid {
     grid-template-columns: minmax(350px, 0.78fr) minmax(0, 1.3fr);
@@ -500,10 +1211,13 @@ h1 {
     gap: 10px;
   }
   .connection-options button {
-    padding-inline: 10px;
+    padding-inline: 11px;
   }
   .analytics-grid {
     grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.8fr);
+  }
+  .search-area {
+    width: 270px;
   }
 }
 @media (max-width: 1050px) {
@@ -513,11 +1227,15 @@ h1 {
   .conditions-card {
     min-height: 330px;
   }
+  /* The card is one column here, with its metrics under the artwork: the artwork fades out above
+     them, so its horizon lines and orbit never run through their labels. */
   .atmosphere-scene {
     width: 420px;
     max-width: 60%;
     top: 5px;
     right: 5px;
+    -webkit-mask-image: linear-gradient(180deg, #000 66%, transparent 84%);
+    mask-image: linear-gradient(180deg, #000 66%, transparent 84%);
   }
   .condition-metrics {
     grid-template-columns: repeat(3, 1fr);
@@ -539,6 +1257,22 @@ h1 {
 @media (max-width: 800px) {
   .sidebar {
     padding-top: 28px;
+    background:
+      linear-gradient(180deg, rgba(139, 124, 255, 0.1), transparent 30%), rgba(9, 14, 27, 0.9);
+    box-shadow: none;
+  }
+  .sidebar.open {
+    box-shadow: 30px 0 90px rgba(0, 0, 0, 0.75);
+  }
+  /* The open drawer is a modal dialog (the page behind it is inert): the page dims, a waiting
+     message included, so only the drawer reads as in reach. Under the drawer, over the rest. */
+  .app-shell:has(> .sidebar.open)::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 1075;
+    pointer-events: none;
+    background: rgba(3, 6, 14, 0.62);
   }
   .topbar {
     height: 68px;
@@ -549,28 +1283,28 @@ h1 {
     padding: 28px 20px 0;
   }
   h1 {
-    font-size: 47px;
+    font-size: 48px;
   }
   .search-area {
-    width: min(315px, 75vw);
+    width: min(330px, 75vw);
   }
   .page-heading {
     margin-bottom: 24px;
   }
   .heading-actions {
-    gap: 7px;
+    gap: 8px;
   }
   .connection-options {
     margin-left: 0;
   }
   .primary-button,
   .secondary-button {
-    padding-inline: 12px;
+    padding-inline: 13px;
   }
 }
 @media (max-width: 600px) {
   main {
-    padding: 23px 16px 0;
+    padding: 24px 16px 0;
   }
   .topbar {
     padding-inline: 14px;
@@ -581,19 +1315,23 @@ h1 {
   }
   h1 {
     font-size: 46px;
-    letter-spacing: -2.5px;
+    letter-spacing: -0.045em;
   }
   .page-heading p {
-    font-size: 12px;
+    font-size: 13px;
   }
   .location-eyebrow {
-    font-size: 9px;
-    letter-spacing: 0.8px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
   }
   .heading-actions {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+  .heading-actions > button {
+    width: 100%;
+    justify-self: stretch;
   }
   .field-controls {
     padding: 15px 16px 0;
@@ -608,24 +1346,29 @@ h1 {
     display: flex;
     flex-wrap: nowrap;
     width: 100%;
-    gap: 2px;
+    gap: 3px;
   }
   .connection-options button {
     flex: 1;
-    min-height: 40px;
+    min-height: 42px;
     padding: 8px 6px;
-    font-size: 10px;
+    font-size: 11px;
     text-align: center;
   }
   .connection-heading strong {
-    font-size: 13px;
+    font-size: 14px;
   }
   .overview-grid {
     gap: 18px;
   }
   .conditions-card {
-    padding: 22px 22px 0;
+    padding: 22px 20px 0;
     min-height: 380px;
+    border-radius: 22px;
+  }
+  .condition-footer {
+    margin-inline: -20px;
+    padding-inline: 20px;
   }
   .atmosphere-scene {
     width: 330px;
@@ -637,7 +1380,7 @@ h1 {
     margin-top: 33px;
   }
   .temperature > span {
-    font-size: 91px;
+    font-size: 92px;
   }
   .condition-name {
     font-size: 19px;
@@ -645,7 +1388,7 @@ h1 {
   .condition-metrics {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    gap: 12px;
   }
   .condition-metrics:has(> div:nth-child(4)) {
     grid-template-columns: 1fr 1fr;
@@ -653,16 +1396,21 @@ h1 {
   }
   .condition-metrics > div {
     align-items: flex-start;
-    gap: 7px;
+    gap: 8px;
   }
   .condition-metrics > div > svg {
     width: 14px;
+    padding: 6px;
+    border-radius: 9px;
   }
   .condition-metrics > div > span {
-    font-size: 10px;
+    font-size: 10.5px;
   }
   .condition-metrics strong {
     font-size: 17px;
+  }
+  .map-card {
+    border-radius: 22px;
   }
   .field-forecast {
     padding: 22px 18px 17px;
@@ -675,21 +1423,27 @@ h1 {
     padding: 19px;
   }
   .signal-strip p {
-    font-size: 12px;
+    font-size: 12.5px;
   }
   .forecast-panel,
   .outlook-panel,
   .alerts-panel,
   .hazards-panel {
-    padding: 21px 18px;
+    padding: 22px 18px;
   }
   .safety-grid {
     gap: 18px;
     margin-top: 18px;
   }
+  .panel {
+    border-radius: 20px;
+  }
   .panel-heading h2 {
     font-size: 21px;
     line-height: 1.3;
+  }
+  .preparedness-banner {
+    border-radius: 22px;
   }
   .field-mode .fine-print {
     font-size: 12px;
@@ -707,102 +1461,126 @@ h1 {
     font-size: 16px;
   }
   .card-kicker {
-    letter-spacing: 0.5px;
+    letter-spacing: 0.06em;
+  }
+}
+/* Gradient text has no fill of its own: where backgrounds are not drawn it needs one back. */
+@media (forced-colors: active) {
+  .brand-light,
+  .heading-dot,
+  .temperature > span {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: CanvasText;
+    filter: none;
+  }
+  /* Forced colours drop the teal ring and the fill, so the chosen item takes the system's own
+     selection colours instead. They are opted out of adjustment, or the browser's text backplate
+     would cover the label; everything inside them uses those same system colours. */
+  .connection-options button[aria-pressed='true'],
+  .fe-metrics button[aria-pressed='true'],
+  .fe-ranges button[aria-pressed='true'],
+  .segmented button.selected,
+  .saved-list button.current,
+  nav a.active,
+  .search-results button[aria-selected='true'] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+  :is(
+      .saved-list button.current,
+      nav a.active,
+      .search-results button[aria-selected='true'],
+      .fe-metrics button[aria-pressed='true']
+    )
+    :is(svg, span, small) {
+    color: HighlightText;
+  }
+  :focus-visible {
+    outline-color: CanvasText;
   }
 }
 @media print {
+  /* Paper is white: the palette's light text tokens turn dark, so every rule that reads them
+     prints. */
+  :root {
+    --aurora-text: #111111;
+    --aurora-text-soft: #222222;
+    --aurora-muted: #444444;
+    --aurora-faint: #555555;
+    --aurora-teal: #0b5d4e;
+    --aurora-teal-soft: #0b5d4e;
+    --aurora-violet-soft: #3f33a6;
+  }
+  /* :root, not html: the page base above is set on :root, which would win over html and leave
+     the paper below the content midnight when background graphics are printed. */
+  :root,
   body {
     background: white;
   }
+  .app-shell::before,
   .atmosphere-scene,
   .field-controls,
   .explore-invitation {
     display: none;
   }
+  /* The page prints as ink on white whether or not the browser prints background graphics: every
+     fill, glow and shadow inside it goes, so dark text never lands on a dark box (warning boxes,
+     buttons, table headings and cards included). Borders stay, warning colours with them. Only
+     the legend swatches keep their fill, which names each forecast series. Gradient text paints
+     its letters with its background, so with the background gone it takes its text colour back:
+     no word inside the page can print blank. */
+  main *:not(.fe-legend i) {
+    background: none !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    -webkit-text-fill-color: currentColor !important;
+  }
   .conditions-card,
-  .panel {
-    background: white;
+  .panel,
+  .map-card,
+  .signal-strip,
+  .preparedness-banner {
     color: black;
+    border-color: #aaa;
   }
+  /* Warning boxes and the rain chances set light colours of their own for the dark screen. On
+     paper they print dark; each warning also spells out its severity in words. */
+  .signal-strip,
+  .signal-strip *,
+  .coverage-banner,
+  .coverage-banner *,
+  .official-alert,
+  .official-alert *,
+  .hazard-item,
+  .hazard-item *,
+  .wide-notice,
+  .wide-notice *,
+  .disaster-impact,
+  .disaster-warning,
+  .disaster-warning *,
+  .disaster-distance-note,
+  .briefing-warning,
+  .briefing-warning *,
+  .briefing-remove,
+  .source-missing,
+  .day-rain {
+    color: #111111 !important;
+  }
+  .brand-light,
+  .heading-dot,
   .temperature > span {
-    text-shadow: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: black;
+    filter: none;
   }
-}
-
-@media (max-width: 600px) {
-  .heading-actions > button {
-    width: 100%;
-    justify-self: stretch;
+  [data-reveal] {
+    opacity: 1 !important;
+    translate: none !important;
   }
-}
-
-.condition-horizon {
-  margin-top: auto;
-  margin-bottom: 24px;
-  padding-top: 22px;
-  border-top: 1px solid #9ab7cb24;
-}
-.horizon-heading {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-.horizon-heading > span:last-child {
-  font-size: 9px;
-  color: #a5becd;
-}
-.horizon-hours {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 19px;
-}
-.horizon-hours > div {
-  display: grid;
-  justify-items: center;
-  gap: 11px;
-  padding: 15px 4px;
-  background: #09203140;
-  border: 1px solid #67859a20;
-  border-radius: 11px;
-}
-.horizon-hours time {
-  color: #b7cdda;
-  font-size: 11px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.horizon-hours time small {
-  display: block;
-  color: #96aebf;
-  font-size: 9px;
-  margin-top: 4px;
-}
-.horizon-hours svg {
-  color: #b7d6db;
-  stroke-width: 1.4;
-}
-.horizon-hours strong {
-  font-size: 21px;
-  font-weight: 500;
-}
-.horizon-hours strong small {
-  font-size: 11px;
-  margin-left: 2px;
-  color: #abc3d0;
-}
-.horizon-hours > div > span {
-  font-size: 9px;
-  color: #a5c9d5;
-}
-@media (max-width: 600px) {
-  .condition-horizon {
-    padding-top: 19px;
-    margin-bottom: 20px;
-  }
-  .horizon-hours > div {
-    padding-block: 12px;
+  [data-tilt] {
+    transform: none !important;
   }
 }

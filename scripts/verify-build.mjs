@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
 import worker from '../dist/server/index.js';
 const check = (path, options) =>
   worker.fetch(new Request(`https://stormsignal.invalid${path}`, options));
@@ -95,6 +96,88 @@ const unknownApi = await check('/api/unknown');
 assert.equal(unknownApi.status, 404);
 assert.equal(await unknownApi.text(), 'Not found');
 assert.equal((await check('/server/index.js')).status, 404);
+// three.js belongs to the optional globe, which loads only in Full workspace with a connection,
+// and only after the globe's own code has found WebGL 2. So it must stay out of the entry chunk
+// and everything the entry imports (and so out of the files the offline shell installs), and the
+// globe's code may reach it only through dynamic imports. three.js must be among those, or the
+// checks prove nothing: 'THREE.WebGLRenderer:' is in its renderer's own messages, where the
+// globe's code only names the class.
+const manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
+const reached = (keys, ways = ['imports']) => {
+  const found = new Set();
+  const visit = (key) => {
+    if (found.has(key)) return;
+    found.add(key);
+    for (const way of ways) for (const dependency of manifest[key]?.[way] ?? []) visit(dependency);
+  };
+  for (const key of keys) visit(key);
+  return found;
+};
+const code = (key) => readFile(`dist/${manifest[key].file}`, 'utf8');
+const isThree = async (key) => (await code(key)).includes('THREE.WebGLRenderer:');
+const essential = reached(Object.keys(manifest).filter((key) => manifest[key].isEntry));
+assert.ok(essential.size, 'The build manifest lists an entry chunk');
+for (const key of essential)
+  assert.equal(
+    (await code(key)).includes('WebGLRenderer'),
+    false,
+    `three.js must not load with ${manifest[key].file}`,
+  );
+const globe = 'src/components/GlobeView.tsx';
+assert.ok(manifest[globe]?.isDynamicEntry, 'The globe must be loaded on demand');
+// The globe's skeleton is drawn before its code arrives, so the dashboard's own stylesheet must
+// size it: the slot and the card's height rules ship with the entry.
+const entryCss = (
+  await Promise.all(
+    [...essential].flatMap((key) =>
+      (manifest[key].css ?? []).map((file) => readFile(`dist/${file}`, 'utf8')),
+    ),
+  )
+).join('\n');
+for (const rule of [
+  '.globe-slot{',
+  'container:globe/inline-size',
+  '.globe-view{',
+  '.globe-loading',
+])
+  assert.ok(entryCss.includes(rule), `The dashboard's stylesheet must carry ${rule}`);
+// Every visit downloads the dashboard's stylesheet, Data saver's included, so it keeps to a budget
+// (as JavaScript chunks do below): growing it is a decision, not an accident. 84 kB (17.2 kB
+// compressed) on 19 November 2026, with the 3D globe's card styles.
+const CSS_BUDGET = { bytes: 90_000, compressed: 18_500 };
+const cssBytes = Buffer.byteLength(entryCss);
+const cssCompressed = gzipSync(entryCss, { level: 9 }).length;
+assert.ok(
+  cssBytes <= CSS_BUDGET.bytes,
+  `The dashboard's stylesheet is ${cssBytes} bytes, over ${CSS_BUDGET.bytes}`,
+);
+assert.ok(
+  cssCompressed <= CSS_BUDGET.compressed,
+  `The dashboard's stylesheet is ${cssCompressed} bytes compressed, over ${CSS_BUDGET.compressed}`,
+);
+const globeCode = [...reached([globe])].filter((key) => !essential.has(key));
+for (const key of globeCode)
+  assert.equal(await isThree(key), false, `${manifest[key].file} loads three.js before WebGL 2`);
+const onDemand = [...reached(manifest[globe].dynamicImports ?? [])].filter(
+  (key) => !essential.has(key) && !globeCode.includes(key),
+);
+const threeChunks = [];
+for (const key of onDemand) if (await isThree(key)) threeChunks.push(key);
+assert.ok(threeChunks.length, 'three.js must load with the globe, on demand');
+const installed = JSON.parse(
+  /const BUILD_ASSETS=(\[[^\]]*\]);/.exec(await readFile('dist/sw.js', 'utf8'))?.[1] ?? 'null',
+);
+assert.ok(Array.isArray(installed), 'sw.js lists the files it installs');
+for (const key of [...globeCode, ...onDemand])
+  assert.ok(!installed.includes(`/${manifest[key].file}`), `sw.js installs ${manifest[key].file}`);
+// vite.config.ts raises the chunk-size warning for three.js's chunk; every other chunk keeps
+// Vite's default limit of 500 kB.
+for (const [key, chunk] of Object.entries(manifest)) {
+  if (!chunk.file.endsWith('.js')) continue;
+  const limit = threeChunks.includes(key) ? 600_000 : 500_000;
+  const { size } = await stat(`dist/${chunk.file}`);
+  assert.ok(size <= limit, `${chunk.file} is ${size} bytes, over ${limit}`);
+}
 console.log(
-  'Worker artifact: HTML/assets, offline aliases, conditional reads, 404 page and API boundary passed.',
+  `Worker artifact: HTML/assets, offline aliases, conditional reads, 404 page, API boundary, on-demand globe and stylesheet budget (${cssBytes} bytes, ${cssCompressed} compressed) passed.`,
 );

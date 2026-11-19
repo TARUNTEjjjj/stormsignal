@@ -1,3 +1,5 @@
+/* Regional reports take the Midnight Aurora surfaces. GDACS's red, orange and green impact levels
+   and the report warning keep their own colours. */
 .disaster-watch {
   margin: 0 0 24px;
 }
@@ -9,13 +11,13 @@
   flex-shrink: 0;
 }
 .disaster-intro {
-  font-size: 12px;
-  color: #a4b7c4;
+  font-size: 13px;
+  color: var(--aurora-muted);
   max-width: 800px;
 }
 .disaster-intro strong {
-  font-weight: 500;
-  color: #cedbdc;
+  font-weight: 550;
+  color: var(--aurora-text);
 }
 .disaster-controls {
   display: flex;
@@ -25,25 +27,28 @@
   margin: 19px 0 10px;
 }
 .disaster-controls .segmented button {
-  min-width: 72px;
-  min-height: 30px;
+  min-width: 76px;
+  min-height: 32px;
 }
+/* A caution about what the distance means keeps its warm tone. */
 .disaster-distance-note {
-  font-size: 10px;
+  font-size: 11px;
   color: #b5a791;
   max-width: 800px;
 }
 .disaster-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
+  gap: 14px;
   margin: 19px 0;
 }
 .disaster-card {
-  border: 1px solid #34434d;
-  border-radius: 6px;
-  padding: 17px;
-  background: #18242c;
+  position: relative;
+  isolation: isolate;
+  border: 1px solid var(--aurora-line);
+  border-radius: 18px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(19, 30, 51, 0.9), rgba(14, 22, 38, 0.9));
   min-width: 0;
 }
 .disaster-card-top {
@@ -51,15 +56,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #a7c3ca;
+  color: var(--aurora-text-soft);
   margin-bottom: 12px;
 }
 .disaster-impact {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.5;
-  padding: 4px 7px;
+  padding: 4px 8px;
   border: 1px solid #4b5e69;
-  border-radius: 4px;
+  border-radius: 999px;
   color: #c5d3dd;
 }
 .disaster-impact.impact-red {
@@ -78,35 +83,37 @@
   color: #b3d9bc;
 }
 .disaster-card h3 {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 .disaster-country {
-  font-size: 10px;
-  color: #9db1be;
+  font-size: 11px;
+  color: var(--aurora-muted);
   margin-top: 7px;
   line-height: 1.6;
 }
 .disaster-card dl {
   margin: 15px 0;
-  font-size: 10px;
+  font-size: 11px;
   display: grid;
   gap: 10px;
 }
 .disaster-card dl > div {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 96px 1fr;
   gap: 10px;
 }
 .disaster-card dt {
-  color: #8da4b2;
+  color: var(--aurora-faint);
 }
 .disaster-card dd {
   margin: 0;
-  color: #c1d0d9;
+  color: var(--aurora-text-soft);
   line-height: 1.6;
+  font-variant-numeric: tabular-nums;
 }
 .disaster-card-footer {
   display: flex;
@@ -114,19 +121,20 @@
   justify-content: space-between;
   gap: 10px;
   padding-top: 13px;
-  border-top: 1px solid #2b3c47;
+  border-top: 1px solid var(--aurora-line);
 }
 .disaster-card-footer small {
-  font-size: 9px;
-  color: #90a6b6;
+  font-size: 10px;
+  color: var(--aurora-muted);
 }
 .disaster-card-footer a,
 .disaster-footer > a {
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 550;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--mint);
+  color: var(--aurora-teal-soft);
   white-space: nowrap;
 }
 .disaster-warning {
@@ -148,16 +156,17 @@
 .disaster-empty {
   padding: 19px 0;
   font-size: 12px;
-  color: #9eb2bf;
+  color: var(--aurora-muted);
 }
 .disaster-snapshot {
-  font-size: 9px;
-  color: #9bb0bd;
+  font-size: 10px;
+  color: var(--aurora-muted);
   line-height: 1.8;
   margin: 14px 0;
+  font-variant-numeric: tabular-nums;
 }
 .disaster-footer {
-  border-top: 1px solid #2c3c46;
+  border-top: 1px solid var(--aurora-line);
   padding-top: 14px;
   display: flex;
   gap: 22px;
@@ -165,9 +174,9 @@
   align-items: center;
 }
 .disaster-footer p {
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.8;
-  color: #9bb0bc;
+  color: var(--aurora-muted);
   max-width: 800px;
 }
 @media (max-width: 900px) {
@@ -180,7 +189,7 @@
     flex-direction: column;
   }
   .disaster-impact {
-    font-size: 8px;
+    font-size: 9px;
   }
 }
 @media (max-width: 600px) {
@@ -196,7 +205,7 @@
     align-items: center;
   }
   .disaster-intro {
-    font-size: 11px;
+    font-size: 12px;
   }
   .disaster-controls {
     flex-wrap: wrap;
@@ -209,7 +218,7 @@
     min-width: 60px;
   }
   .disaster-controls .quiet-button {
-    font-size: 10px;
+    font-size: 11px;
   }
   .disaster-footer {
     display: block;
@@ -218,6 +227,6 @@
     margin-top: 12px;
   }
   .disaster-impact {
-    font-size: 9px;
+    font-size: 10px;
   }
 }

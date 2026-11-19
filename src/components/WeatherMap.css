@@ -1,10 +1,12 @@
+/* Satellite panel chrome in the Midnight Aurora palette. It sits inside the dashboard's map card,
+   which draws the frame; stale-frame and imagery warnings keep their amber. */
 .storm-map-panel {
-  background: #101b28;
-  border: 1px solid #273441;
-  border-radius: 20px;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
   overflow: hidden;
   min-width: 0;
-  color: #eaf2f7;
+  color: var(--aurora-text);
 }
 .storm-map-heading {
   display: flex;
@@ -17,14 +19,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #71dfd0;
+  color: var(--aurora-teal);
   font-size: 10px;
   letter-spacing: 0.16em;
   font-weight: 700;
 }
 .storm-map-heading h2 {
   font-size: 23px;
-  letter-spacing: -0.7px;
+  letter-spacing: -0.03em;
   font-weight: 600;
   margin: 10px 0 0;
 }
@@ -32,11 +34,11 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.09em;
-  border: 1px solid #31564f;
-  background: #19322f;
-  color: #8af0cd;
-  padding: 7px 9px;
-  border-radius: 5px;
+  border: 1px solid rgba(62, 230, 193, 0.4);
+  background: rgba(62, 230, 193, 0.08);
+  color: var(--aurora-teal-soft);
+  padding: 7px 10px;
+  border-radius: 999px;
   white-space: nowrap;
 }
 .storm-map-state.is-stale {
@@ -54,17 +56,20 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  border: 1px solid #384653;
-  background: #182433;
-  color: #93a7ba;
-  border-radius: 8px;
-  padding: 0 11px;
+  border: 1px solid var(--aurora-line-strong);
+  background: var(--aurora-surface-sunken);
+  color: var(--aurora-faint);
+  border-radius: 12px;
+  padding: 0 12px;
   min-width: 0;
+}
+.storm-map-layer-control:focus-within {
+  border-color: rgba(62, 230, 193, 0.6);
 }
 .storm-map-layer-control select {
   border: 0;
   background: transparent;
-  color: #d4e3ee;
+  color: var(--aurora-text);
   min-width: 0;
   font: inherit;
   font-size: 12px;
@@ -72,30 +77,34 @@
   max-width: 260px;
 }
 .storm-map-layer-control select option {
-  background: #172435;
-  color: #fff;
+  background: var(--aurora-surface-raised);
+  color: var(--aurora-text);
 }
 .storm-map-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #192735;
-  border: 1px solid #384653;
-  color: #becfdd;
+  background: var(--aurora-surface-raised);
+  border: 1px solid var(--aurora-line-strong);
+  color: var(--aurora-text-soft);
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 12px;
   font-size: 12px;
   cursor: pointer;
+}
+.storm-map-button:hover:not(:disabled) {
+  background: var(--aurora-surface-hover);
+  color: var(--aurora-text);
 }
 .storm-map-viewport {
   position: relative;
   height: 385px;
-  background: #101e29;
+  background: #0a1120;
 }
 .storm-map-canvas {
   width: 100%;
   height: 100%;
-  background: #16242d;
+  background: #0b1324;
   z-index: 0;
   font-family: inherit;
 }
@@ -103,19 +112,20 @@
   filter: invert(0.92) hue-rotate(185deg) saturate(0.45) brightness(0.75);
 }
 .storm-map-canvas .leaflet-control-attribution {
-  background: rgba(13, 24, 35, 0.92);
-  color: #b2c5d0;
+  background: rgba(6, 10, 20, 0.88);
+  color: var(--aurora-text-soft);
   font-size: 9px;
   padding: 3px 7px;
   max-width: 100%;
 }
 .storm-map-canvas .leaflet-control-attribution a {
-  color: #a6e9e4;
+  color: var(--aurora-teal-soft);
 }
 .storm-map-canvas .storm-marker-label {
   color: #fff;
-  border: 1px solid #6c7e86;
-  background: #172c36;
+  border: 1px solid var(--aurora-line-strong);
+  background: var(--aurora-surface-raised);
+  border-radius: 8px;
   box-shadow: none;
 }
 .storm-map-location {
@@ -126,10 +136,10 @@
   align-items: center;
   gap: 9px;
   padding: 10px 13px;
-  color: #e9f9fb;
-  background: rgba(9, 23, 34, 0.92);
-  border: 1px solid #49606a;
-  border-radius: 9px;
+  color: var(--aurora-text);
+  background: rgba(8, 13, 25, 0.92);
+  border: 1px solid var(--aurora-line-strong);
+  border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
   max-width: calc(100% - 90px);
@@ -143,9 +153,11 @@
   flex: none;
   width: 7px;
   height: 7px;
-  background: #61efd7;
+  background: var(--aurora-teal);
   border-radius: 50%;
-  box-shadow: 0 0 0 4px #61efd71c;
+  box-shadow:
+    0 0 0 4px rgba(62, 230, 193, 0.14),
+    0 0 10px rgba(62, 230, 193, 0.6);
 }
 .storm-map-tools {
   position: absolute;
@@ -153,8 +165,8 @@
   top: 18px;
   display: flex;
   flex-direction: column;
-  border: 1px solid #52636b;
-  border-radius: 9px;
+  border: 1px solid var(--aurora-line-strong);
+  border-radius: 12px;
   overflow: hidden;
 }
 .storm-map-tools button {
@@ -163,16 +175,16 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-bottom: 1px solid #364954;
-  color: #d9e9ed;
-  background: rgba(12, 26, 38, 0.95);
+  border-bottom: 1px solid var(--aurora-line);
+  color: var(--aurora-text);
+  background: rgba(8, 13, 25, 0.94);
   cursor: pointer;
 }
 .storm-map-tools button:last-child {
   border-bottom: 0;
 }
 .storm-map-tools button:hover {
-  background: #284050;
+  background: var(--aurora-surface-hover);
 }
 .storm-map-caption {
   position: absolute;
@@ -180,9 +192,9 @@
   left: 18px;
   font-size: 10px;
   padding: 7px 10px;
-  background: rgba(7, 18, 28, 0.9);
-  border-radius: 4px;
-  color: #d3e5eb;
+  background: rgba(6, 10, 20, 0.88);
+  border-radius: 8px;
+  color: var(--aurora-text-soft);
   max-width: calc(100% - 40px);
 }
 .storm-map-loading {
@@ -191,9 +203,9 @@
   left: 18px;
   font-size: 11px;
   padding: 8px 10px;
-  border-radius: 5px;
-  background: #152b36ed;
-  color: #abede2;
+  border-radius: 8px;
+  background: rgba(19, 30, 51, 0.94);
+  color: var(--aurora-teal-soft);
 }
 .storm-map-placeholder {
   position: absolute;
@@ -204,27 +216,31 @@
   flex-direction: column;
   text-align: center;
   padding: 30px;
-  background: radial-gradient(ellipse at top, #1b3744, #132331);
-  color: #88d7d0;
+  background:
+    radial-gradient(70% 60% at 50% 0%, rgba(139, 124, 255, 0.16), transparent 70%),
+    radial-gradient(60% 50% at 50% 100%, rgba(62, 230, 193, 0.08), transparent 70%), #0a1120;
+  color: var(--aurora-teal);
 }
 .storm-map-placeholder h3 {
-  color: #e6f4f5;
+  color: var(--aurora-text);
   margin: 16px 0 8px;
   font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 .storm-map-placeholder p {
   font-size: 13px;
   max-width: 400px;
-  color: #b0c4ce;
+  color: var(--aurora-text-soft);
   line-height: 1.6;
 }
 .storm-map-placeholder button {
-  margin-top: 12px;
-  padding: 10px 20px;
-  background: #70e3ce;
-  color: #10252a;
+  margin-top: 14px;
+  padding: 11px 20px;
+  background: var(--aurora-gradient);
+  color: var(--aurora-ink);
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -232,22 +248,25 @@
   display: flex;
   gap: 14px;
   align-items: center;
-  background: #172432;
+  background: rgba(160, 178, 255, 0.035);
   padding: 17px 23px;
-  border-top: 1px solid #2c3c49;
-  border-bottom: 1px solid #2c3c49;
+  border-top: 1px solid var(--aurora-line);
+  border-bottom: 1px solid var(--aurora-line);
 }
 .storm-map-timeline > button {
-  width: 35px;
-  height: 35px;
+  width: 36px;
+  height: 36px;
   flex: none;
   display: grid;
   place-items: center;
-  background: #2a413f;
-  color: #8aead9;
-  border: 1px solid #46605b;
+  background: rgba(62, 230, 193, 0.1);
+  color: var(--aurora-teal);
+  border: 1px solid rgba(62, 230, 193, 0.45);
   border-radius: 50%;
   cursor: pointer;
+}
+.storm-map-timeline > button:hover:not(:disabled) {
+  background: rgba(62, 230, 193, 0.18);
 }
 .storm-map-timeline-track {
   flex: 1;
@@ -262,41 +281,43 @@
 .storm-map-timeline-track span {
   font-size: 9px;
   letter-spacing: 0.12em;
-  color: #8ca3b4;
+  color: var(--aurora-muted);
 }
 .storm-map-timeline-track strong {
   font-size: 10px;
-  color: #d3e7ec;
+  color: var(--aurora-text);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .storm-map-timeline input {
-  accent-color: #71e6d1;
+  accent-color: var(--aurora-teal);
   width: 100%;
-  height: 5px;
+  height: 22px;
   display: block;
-  margin: 13px 0 4px;
+  margin: 4px 0 0;
   cursor: pointer;
 }
 .storm-map-frame-count {
   font-size: 10px;
-  color: #8fa9bc;
+  color: var(--aurora-muted);
   min-width: 32px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .storm-map-notes {
   padding: 13px 24px 16px;
 }
 .storm-map-notes p {
-  color: #8da5b7;
+  color: var(--aurora-muted);
   font-size: 10px;
   line-height: 1.6;
   margin: 4px 0;
 }
 .storm-map-notes a {
-  color: #85d9d3;
+  color: var(--aurora-teal-soft);
 }
 .storm-map-notes .storm-map-hint {
-  color: #7893a6;
+  color: var(--aurora-muted);
 }
 .storm-map-notes .storm-map-warning {
   color: #ffcc8f;
@@ -313,12 +334,39 @@
 .storm-map-panel select:focus-visible,
 .storm-map-panel input:focus-visible,
 .storm-map-panel a:focus-visible {
-  outline: 3px solid #85f0e0;
+  outline: 3px solid var(--aurora-focus);
   outline-offset: 3px;
 }
 /* The tools column clips anything outside it, so their ring is drawn inside each button. */
 .storm-map-tools button:focus-visible {
   outline-offset: -3px;
+}
+/* The map fills the panel, which clips it at the sides, and its tiles cover whatever is drawn
+   inside its edge. Its ring is a layer over the tiles and controls instead: the palette's focus
+   colour with a dark band inside, which keeps it visible over bright imagery, as on the globe.
+   The credits sit on the map's bottom edge, so theirs keeps close to the link. */
+.storm-map-canvas:focus-visible {
+  outline: none;
+}
+.storm-map-canvas:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1001;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 2px var(--aurora-focus),
+    inset 0 0 0 4px rgba(6, 10, 20, 0.88);
+}
+.storm-map-canvas .leaflet-control-attribution a:focus-visible {
+  outline-offset: 1px;
+}
+@media (forced-colors: active) {
+  .storm-map-canvas:focus-visible::after {
+    box-shadow: none;
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
 }
 .storm-visually-hidden {
   position: absolute;
@@ -332,7 +380,7 @@
   overflow: auto;
   border: 0;
   border-radius: 0;
-  background: #101b28;
+  background: var(--aurora-bg);
 }
 .storm-map-panel:fullscreen .storm-map-viewport {
   height: calc(100vh - 290px);
@@ -349,7 +397,7 @@
   }
   .storm-map-state {
     font-size: 8px;
-    padding: 6px;
+    padding: 6px 8px;
     margin-top: 2px;
   }
   .storm-map-controls {

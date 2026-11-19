@@ -1,0 +1,1056 @@
+/* The 3D globe card in Full workspace. Colours come from the shared aurora tokens on :root
+   (frontend-design.css); each fallback is the token's own value.
+   App.tsx loads this file with the dashboard, and its skeleton uses the same .globe-slot and
+   .globe-view, so the card keeps one size from the first paint: the height of .globe-view depends
+   only on the slot's width and the window, never on the card's state or content, and the frame
+   takes whatever the notes leave (tests/globe-view.test.ts). The one exception is a browser
+   without WebGL 2, where the card is a short notice instead of an empty stage.
+   The layout follows the slot's width: readouts float over the scene when there is room beside
+   the globe, form a rail beside it on medium cards, and stack above and below it on narrow ones.
+   Nothing here blurs what lies behind it: frosted glass belongs to the page frame. */
+/* The card sits in the page's rhythm (frontend-design.css): the gap between the page's blocks,
+   24px (18px on phones), and the corners of the conditions and satellite cards, 24px (22px). */
+.globe-slot {
+  container: globe / inline-size;
+  margin-bottom: 24px;
+}
+/* When the globe's code cannot load, App's notice (OptionalPanel) takes the card's place, with
+   the same gap below it and the card's corners, not a panel's (frontend-design.css loads later,
+   hence the second class). */
+.globe-unavailable {
+  margin-bottom: 24px;
+}
+.panel.globe-unavailable {
+  border-radius: 24px;
+}
+.globe-view {
+  --globe-teal: var(--aurora-teal, #3ee6c1);
+  --globe-violet: var(--aurora-violet, #8b7cff);
+  --globe-text: var(--aurora-text, #eef3ff);
+  --globe-muted: var(--aurora-muted, #9aa7bf);
+  --globe-line: var(--aurora-line, rgba(160, 178, 255, 0.16));
+  --globe-focus: var(--aurora-focus, #c3bbff);
+  /* Drawn beside the focus ring over the scene, where cloud can be white. */
+  --globe-focus-band: rgba(6, 10, 20, 0.88);
+  --globe-card: var(--aurora-panel-fill, rgba(14, 22, 38, 0.86));
+  /* Text over the globe sits on this: 4.5:1 or more even over white cloud (globe-view.test.ts). */
+  --globe-panel: rgba(7, 11, 22, 0.86);
+  /* Control boundaries: 3:1 or more against the scene and against cloud. */
+  --globe-control-line: var(--aurora-line-strong, #5d6b92);
+  --globe-red: #ff6b75;
+  /* Widest place card and the control cluster: the key help keeps clear of both. */
+  --globe-place-width: 320px;
+  --globe-tools-width: 150px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(600px, calc(62vh + 150px), 840px);
+  border: 1px solid transparent;
+  border-radius: 24px;
+  overflow: hidden;
+  color: var(--globe-text);
+  /* A panel fill inside the palette's gradient hairline, as the other cards. */
+  background:
+    linear-gradient(var(--globe-card), var(--globe-card)) padding-box,
+    var(
+        --aurora-hairline,
+        linear-gradient(
+          150deg,
+          rgba(160, 178, 255, 0.28),
+          rgba(160, 178, 255, 0.08) 32%,
+          rgba(160, 178, 255, 0.06) 64%,
+          rgba(62, 230, 193, 0.24)
+        )
+      )
+      border-box;
+  box-shadow:
+    var(--aurora-shadow, 0 28px 60px -34px rgba(0, 0, 0, 0.85)),
+    0 18px 50px -26px rgba(139, 124, 255, 0.42);
+}
+.globe-frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  isolation: isolate;
+  background:
+    radial-gradient(55% 75% at 50% 50%, rgba(62, 230, 193, 0.09), transparent 64%),
+    radial-gradient(42% 60% at 84% 12%, rgba(139, 124, 255, 0.2), transparent 72%),
+    radial-gradient(38% 55% at 8% 96%, rgba(62, 230, 193, 0.1), transparent 70%),
+    linear-gradient(180deg, #0a1124 0%, var(--aurora-bg, #060a14) 78%);
+}
+.globe-stage,
+.globe-viewport,
+.globe-surface,
+.globe-canvas {
+  position: absolute;
+  inset: 0;
+}
+.globe-surface {
+  z-index: 1;
+  outline: none;
+}
+.globe-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* A lost context leaves the browser's blank canvas behind: the fallback replaces it. */
+.globe-view:is(.is-lost, .is-failed) .globe-canvas {
+  visibility: hidden;
+}
+/* The canvas covers the surface, so the focus ring is drawn above it: the palette's focus colour
+   with a dark band inside, which keeps it visible over cloud and space alike. It is the only ring:
+   the page's outline for [tabindex='0'] (frontend-design.css, which loads later and is more
+   specific than .globe-surface) would be a second one outside the stage, clipped by the card. */
+.globe-view .globe-surface:focus-visible {
+  outline: none;
+}
+.globe-surface:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 2px var(--globe-focus),
+    inset 0 0 0 4px var(--globe-focus-band);
+}
+.globe-crosshair,
+.globe-help {
+  position: absolute;
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+.globe-surface:focus-visible ~ .globe-crosshair,
+.globe-surface:focus-visible ~ .globe-help {
+  opacity: 1;
+}
+/* WCAG 1.4.13: what focus shows can be dismissed. A globe key hides the help, so it never covers
+   what the keys move; Escape hides the crosshair too. Focusing the globe again shows both
+   (globe.ts nextAssist). */
+.globe-surface:not([data-assist='full']) ~ .globe-help,
+.globe-surface[data-assist='none'] ~ .globe-crosshair {
+  visibility: hidden;
+}
+/* Nothing floats over a globe that is not drawing. */
+.globe-view:not(.is-ready) :is(.globe-pin, .globe-crosshair, .globe-help) {
+  visibility: hidden;
+}
+.globe-crosshair {
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 2px solid var(--globe-teal);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(7, 11, 22, 0.7);
+}
+.globe-crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: var(--globe-teal);
+}
+/* The key help sits in the band between the place card and the controls, where no readout is. */
+.globe-help {
+  left: calc(26px + var(--globe-place-width) + 16px);
+  right: calc(26px + var(--globe-tools-width) + 16px);
+  bottom: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  width: fit-content;
+  margin-inline: auto;
+  padding: 8px 14px;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 12px;
+  background: var(--globe-panel);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--globe-text);
+}
+.globe-help span {
+  white-space: nowrap;
+}
+.globe-help kbd {
+  display: inline-block;
+  min-width: 20px;
+  margin-right: 3px;
+  padding: 0 5px;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+  color: var(--globe-teal);
+}
+.globe-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  will-change: transform;
+}
+.globe-pin[data-hidden='true'] {
+  visibility: hidden;
+}
+.globe-pin span {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 22px));
+  padding: 5px 11px;
+  border: 1px solid rgba(62, 230, 193, 0.55);
+  border-radius: 999px;
+  background: var(--globe-panel);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  box-shadow: 0 6px 18px -8px rgba(62, 230, 193, 0.6);
+}
+
+/* Readouts float over the scene. The panels take the pointer, so a click on one never selects the
+   point behind it; the open space around them belongs to the globe. */
+.globe-hud {
+  position: absolute;
+  z-index: 3;
+  left: 26px;
+  right: 26px;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  pointer-events: none;
+}
+.globe-hud :is(button, a, .globe-place, .globe-facts > div) {
+  pointer-events: auto;
+}
+.globe-hud-top {
+  top: 24px;
+  align-items: flex-start;
+}
+.globe-hud-bottom {
+  bottom: 22px;
+  right: auto;
+}
+.globe-title {
+  max-width: 330px;
+  text-shadow:
+    0 1px 2px rgba(6, 10, 20, 0.9),
+    0 0 18px rgba(6, 10, 20, 0.85);
+  transition: opacity 0.25s ease;
+}
+/* Closer in, the globe fills the stage behind the title: it steps aside until the view is back.
+   The heading stays in the accessibility tree. */
+.globe-view.is-closer .globe-title {
+  opacity: 0;
+}
+.globe-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.8px;
+  color: var(--globe-teal);
+}
+/* A still day-and-night disc: the sunlight is the live part, not the imagery. */
+.globe-terminator {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: linear-gradient(120deg, var(--globe-teal) 50%, #1b2240 50%);
+  box-shadow:
+    0 0 0 1px rgba(62, 230, 193, 0.55),
+    0 0 10px rgba(62, 230, 193, 0.35);
+}
+.globe-title h2 {
+  margin: 10px 0 8px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.9px;
+  color: var(--globe-text);
+}
+.globe-accent {
+  color: var(--globe-teal);
+}
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .globe-accent {
+    background: var(--aurora-gradient, linear-gradient(120deg, #3ee6c1 0%, #8b7cff 100%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: none;
+  }
+}
+.globe-title p {
+  max-width: 300px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--globe-muted);
+}
+/* The right-hand column: active warnings first, then the imagery and sun readouts. */
+.globe-side {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 0;
+}
+.globe-alerts {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 10px 7px 11px;
+  border: 1px solid rgba(255, 107, 117, 0.62);
+  border-radius: 999px;
+  background: rgba(42, 10, 20, 0.92);
+  color: #ffd2d5;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-decoration: none;
+  transition: border-color 0.16s ease;
+}
+.globe-alerts > svg:first-child {
+  flex-shrink: 0;
+  color: var(--globe-red);
+}
+.globe-alerts > svg:last-child {
+  flex-shrink: 0;
+  color: #ffd2d5;
+}
+.globe-alerts:hover {
+  border-color: var(--globe-red);
+}
+.globe-facts {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  margin: 0;
+}
+.globe-facts > div,
+.globe-place {
+  border: 1px solid var(--globe-line);
+  background: var(--globe-panel);
+}
+.globe-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border-radius: 11px;
+}
+.globe-facts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--globe-muted);
+}
+.globe-facts dt svg {
+  color: var(--globe-teal);
+}
+.globe-facts dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--globe-text);
+}
+/* On a narrow card the mosaic's coverage joins its date (see the narrow layout). */
+.globe-narrow {
+  display: none;
+}
+.globe-place {
+  display: grid;
+  gap: 3px;
+  width: max-content;
+  min-width: 0;
+  max-width: var(--globe-place-width);
+  padding: 13px 16px 14px;
+  border-radius: 16px;
+}
+.globe-place-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--globe-teal);
+}
+.globe-place-name {
+  display: grid;
+  gap: 3px;
+}
+.globe-place strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  line-height: 1.3;
+}
+.globe-place-coords,
+.globe-place-line {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--globe-muted);
+}
+.globe-place-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.45;
+}
+.globe-place-line svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #ffd27a;
+}
+.globe-place-name + .globe-place-line {
+  margin-top: 3px;
+}
+.globe-place-line.is-night svg {
+  color: var(--globe-violet);
+}
+.globe-place-line.is-imaged svg,
+.globe-place-line.is-pending svg {
+  color: var(--globe-teal);
+}
+/* No imagery at the place: said in words, and marked like the hatched areas on the globe. */
+.globe-place-line.is-gap,
+.globe-place-line.is-none {
+  color: var(--globe-text);
+}
+.globe-place-line.is-gap svg,
+.globe-place-line.is-none svg {
+  color: #c2b8ff;
+}
+
+/* Controls: a rotate pad and a column of buttons at the bottom right of the scene. */
+.globe-tools {
+  position: absolute;
+  z-index: 3;
+  right: 26px;
+  bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.globe-tools[hidden] {
+  display: none;
+}
+.globe-buttons {
+  display: grid;
+  gap: 6px;
+}
+.globe-tools button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 12px;
+  background: var(--globe-panel);
+  color: var(--globe-text);
+  transition:
+    border-color 0.16s ease,
+    color 0.16s ease,
+    background-color 0.16s ease;
+}
+.globe-tools button:hover {
+  border-color: var(--globe-teal);
+  color: var(--globe-teal);
+}
+/* The pad is one disc with an arrow at each compass point. */
+.globe-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(3, 30px);
+  place-items: center;
+  padding: 3px;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(62, 230, 193, 0.14) 0 9%, transparent 10%),
+    var(--globe-panel);
+}
+.globe-tools .globe-pad button {
+  width: 30px;
+  height: 30px;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+}
+.globe-tools .globe-pad button:hover {
+  border-color: var(--globe-teal);
+  background: rgba(62, 230, 193, 0.1);
+}
+.globe-pad .is-north {
+  grid-area: 1 / 2;
+}
+.globe-pad .is-west {
+  grid-area: 2 / 1;
+}
+.globe-pad .is-east {
+  grid-area: 2 / 3;
+}
+.globe-pad .is-south {
+  grid-area: 3 / 2;
+}
+.globe-view button:focus-visible,
+.globe-view a:focus-visible {
+  outline: 2px solid var(--globe-focus);
+  outline-offset: 2px;
+}
+/* A pressed toggle is marked by a teal ring and icon, not by its fill alone. */
+.globe-tools button[aria-pressed='true'] {
+  border-color: var(--globe-teal);
+  box-shadow: inset 0 0 0 1px var(--globe-teal);
+  color: var(--globe-teal);
+}
+/* Over the scene a control can rest on white cloud: a dark band on both sides of the ring keeps
+   it at 3:1 there too. */
+.globe-tools button:focus-visible,
+.globe-hud a:focus-visible {
+  box-shadow: 0 0 0 5px var(--globe-focus-band);
+}
+.globe-tools button[aria-pressed='true']:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px var(--globe-teal),
+    0 0 0 5px var(--globe-focus-band);
+}
+.globe-wheel-hint {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 999px;
+  background: var(--globe-panel);
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+/* Waiting for the 3D code (App's skeleton) or for WebGL to start, and the fallbacks. */
+.globe-loading,
+.globe-fallback {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+}
+.globe-loading {
+  gap: 18px;
+  font-size: 13px;
+  color: var(--globe-muted);
+}
+.globe-orb {
+  width: clamp(96px, 20cqi, 220px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, rgba(62, 230, 193, 0.32), transparent 46%),
+    radial-gradient(circle at 70% 76%, rgba(139, 124, 255, 0.3), transparent 52%),
+    radial-gradient(circle at 50% 50%, #142446 0%, #0b1530 68%);
+  box-shadow:
+    0 0 0 1px rgba(160, 178, 255, 0.2),
+    0 0 46px 6px rgba(62, 230, 193, 0.16),
+    0 0 90px 22px rgba(139, 124, 255, 0.14);
+}
+.globe-fallback .globe-orb {
+  margin-bottom: 8px;
+}
+.globe-fallback h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.globe-fallback p {
+  max-width: 400px;
+  font-size: 13px;
+  color: var(--globe-muted);
+}
+.globe-text-button {
+  padding: 6px 12px;
+  border: 1px solid var(--globe-control-line);
+  border-radius: 9px;
+  background: var(--aurora-surface-raised, #131e33);
+  color: var(--globe-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.globe-text-button:hover {
+  border-color: var(--globe-teal);
+}
+/* Without WebGL 2 the globe cannot come back, so the card is a short notice with the selected
+   place's daylight, not a stage held empty above the conditions and warnings. */
+.globe-view.is-unsupported {
+  min-height: 0;
+}
+.globe-view.is-unsupported .globe-frame {
+  display: block;
+}
+.globe-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px 26px;
+  padding: 22px 26px;
+}
+.globe-compact > .globe-orb {
+  flex: none;
+  width: 68px;
+  box-shadow:
+    0 0 0 1px rgba(160, 178, 255, 0.2),
+    0 0 26px 2px rgba(62, 230, 193, 0.14);
+}
+.globe-compact-text {
+  flex: 1 1 300px;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-width: 0;
+}
+.globe-compact-text h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  color: var(--globe-text);
+}
+.globe-compact-text p {
+  max-width: 560px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--globe-muted);
+}
+.globe-compact-text .globe-alerts {
+  margin-top: 4px;
+}
+.globe-notes {
+  flex: none;
+  display: grid;
+  gap: 7px;
+  padding: 16px 26px 18px;
+  border-top: 1px solid var(--globe-line);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--globe-muted);
+}
+.globe-notes p {
+  line-height: 1.6;
+}
+.globe-notes a {
+  color: var(--globe-teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.globe-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 0 0 2px;
+  padding: 0;
+  list-style: none;
+  color: var(--globe-text);
+}
+.globe-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.globe-key {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.globe-key.is-selected {
+  background: var(--globe-teal);
+  box-shadow: 0 0 0 3px rgba(62, 230, 193, 0.25);
+}
+.globe-key.is-saved {
+  background: var(--globe-violet);
+  box-shadow: 0 0 0 3px rgba(139, 124, 255, 0.25);
+}
+/* The globe draws the red line over a dark casing; so does its key. */
+.globe-key.is-warning {
+  width: 20px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, #070b16 0 2px, var(--globe-red) 2px 4px, #070b16 4px 6px);
+}
+.globe-key.is-gap {
+  width: 16px;
+  height: 12px;
+  border-radius: 3px;
+  background:
+    repeating-linear-gradient(135deg, rgba(139, 124, 255, 0.75) 0 1.5px, transparent 1.5px 4.5px),
+    #2a3042;
+  box-shadow: 0 0 0 1px rgba(160, 178, 255, 0.3);
+}
+.globe-credit {
+  font-size: 11px;
+}
+.globe-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 187, 114, 0.4);
+  border-radius: 11px;
+  background: rgba(255, 187, 114, 0.08);
+  color: #ffd7ad;
+}
+.globe-warning span {
+  flex: 1 1 240px;
+}
+.globe-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A medium card: the readouts form a rail on the left; the globe and its controls the rest. */
+@container globe (max-width: 999px) {
+  .globe-view {
+    min-height: clamp(700px, calc(62vh + 230px), 900px);
+  }
+  .globe-frame {
+    display: grid;
+    grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .globe-stage {
+    position: relative;
+    inset: auto;
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: flex;
+    flex-direction: column;
+  }
+  .globe-viewport {
+    position: relative;
+    inset: auto;
+    flex: 1 1 auto;
+    min-height: 240px;
+  }
+  /* Below the selected place, whose label sits above its marker at the centre. */
+  .globe-help {
+    left: 12px;
+    right: 12px;
+    bottom: 10px;
+  }
+  .globe-tools {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px 16px;
+  }
+  .globe-pad,
+  .globe-buttons {
+    display: flex;
+    gap: 4px;
+  }
+  .globe-pad {
+    padding: 2px;
+    border-radius: 12px;
+    background: var(--globe-panel);
+  }
+  .globe-tools button {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  .globe-tools .globe-pad button {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+  .globe-hud {
+    position: relative;
+    inset: auto;
+    z-index: 3;
+  }
+  .globe-hud-top {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 16px;
+    padding: 24px 0 0 24px;
+  }
+  .globe-hud-bottom {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 12px 0 22px 24px;
+  }
+  .globe-title h2 {
+    margin-bottom: 0;
+    font-size: 26px;
+  }
+  /* The notes say what the subtitle would. */
+  .globe-title p {
+    display: none;
+  }
+  .globe-view.is-closer .globe-title {
+    opacity: 1;
+  }
+  .globe-side,
+  .globe-facts {
+    justify-items: start;
+  }
+  /* Each fact keeps to one line in the rail. */
+  .globe-facts dt {
+    letter-spacing: 0.6px;
+  }
+  .globe-facts dt svg {
+    display: none;
+  }
+  .globe-place {
+    width: auto;
+  }
+}
+/* A narrow card: title and readouts above the globe, its controls and the place below it. */
+@container globe (max-width: 599px) {
+  /* Narrower cards wrap their text onto more lines, so they keep a little more height. */
+  .globe-view {
+    min-height: max(800px, calc(1000px - 60cqi));
+  }
+  .globe-frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .globe-stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .globe-viewport {
+    min-height: 180px;
+  }
+  .globe-tools {
+    gap: 6px;
+    padding: 2px 8px 8px;
+  }
+  .globe-pad,
+  .globe-buttons {
+    gap: 3px;
+  }
+  .globe-tools button {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+  .globe-tools .globe-pad button {
+    width: 29px;
+    height: 32px;
+  }
+  /* The title's and the side column's parts share one wrapping row: the warnings sit beside the
+     eyebrow where they fit, so the globe keeps the height, and below it where they do not. */
+  .globe-hud-top {
+    grid-row: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 16px 16px 4px;
+  }
+  .globe-title,
+  .globe-side {
+    display: contents;
+  }
+  .globe-eyebrow {
+    letter-spacing: 1.2px;
+    white-space: nowrap;
+  }
+  .globe-alerts {
+    order: 1;
+    gap: 5px;
+    padding: 5px 8px 5px 9px;
+    font-size: 11.5px;
+  }
+  .globe-title h2 {
+    order: 2;
+    flex: 1 0 100%;
+    margin: 0;
+    font-size: 22px;
+  }
+  .globe-hud-bottom {
+    grid-row: 3;
+    padding: 2px 16px 14px;
+  }
+  /* Two small tiles, label over value: the mosaic's date with its coverage, and the sun. */
+  .globe-facts {
+    order: 3;
+    flex: 1 0 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-items: stretch;
+  }
+  .globe-facts > div {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 6px 9px 7px;
+    border-radius: 10px;
+  }
+  .globe-facts > .globe-coverage {
+    display: none;
+  }
+  .globe-narrow {
+    display: inline;
+  }
+  .globe-facts dt {
+    gap: 4px;
+    font-size: 9px;
+    letter-spacing: 0.6px;
+  }
+  .globe-facts dt svg {
+    display: none;
+  }
+  .globe-facts dd {
+    font-size: 12px;
+    white-space: normal;
+  }
+  .globe-place {
+    flex: 1;
+    width: auto;
+    max-width: none;
+    gap: 2px;
+    padding: 10px 13px 11px;
+  }
+  .globe-place-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 10px;
+  }
+  .globe-place strong {
+    font-size: 16px;
+  }
+  .globe-compact {
+    gap: 14px 18px;
+    padding: 18px 16px;
+  }
+  /* On a phone the notice keeps to its words. */
+  .globe-compact > .globe-orb {
+    display: none;
+  }
+  .globe-compact-text .globe-alerts {
+    justify-self: start;
+  }
+  .globe-notes {
+    gap: 6px;
+    padding: 12px 16px 14px;
+  }
+  /* Short on a phone, whole for a screen reader: the key and the place card show what these words
+     add. The warnings link keeps its count and noun, which begin its name (GlobeView.tsx). */
+  .globe-more,
+  .globe-alerts .globe-more-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+@media (max-width: 600px) {
+  .globe-slot,
+  .globe-unavailable {
+    margin-bottom: 18px;
+  }
+  .globe-view,
+  .panel.globe-unavailable {
+    border-radius: 22px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .globe-crosshair,
+  .globe-help,
+  .globe-title,
+  .globe-alerts,
+  .globe-tools button {
+    transition: none;
+  }
+}
+/* Forced colours drop shadows and backgrounds: the focus ring becomes an outline, and the key's
+   swatches keep the colours the globe itself draws. */
+@media (forced-colors: active) {
+  .globe-surface:focus-visible::after {
+    box-shadow: none;
+    outline: 3px solid Highlight;
+    outline-offset: -3px;
+  }
+  .globe-key,
+  .globe-terminator {
+    forced-color-adjust: none;
+  }
+  .globe-tools button,
+  .globe-pad,
+  .globe-alerts {
+    border-color: ButtonText;
+  }
+  /* A pressed toggle's teal ring and icon are dropped here, so it takes the system's selection
+     colours, as the page's other toggles do (frontend-design.css). Opted out of adjustment, it
+     keeps the dark band beside its focus ring. */
+  .globe-tools button[aria-pressed='true'] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+    box-shadow: none;
+  }
+  .globe-tools button[aria-pressed='true']:focus-visible {
+    box-shadow: 0 0 0 5px var(--globe-focus-band);
+  }
+}
+/* Paper gets no globe: a WebGL canvas prints unreliably, and the print styles clear its fills.
+   The warning list, conditions and the rest print as usual. */
+@media print {
+  .globe-slot {
+    display: none;
+  }
+}

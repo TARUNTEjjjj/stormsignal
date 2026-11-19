@@ -27,7 +27,9 @@ const METRICS = {
   precipitation: { label: 'Precipitation', button: 'Precip.', unit: 'mm', icon: CloudRain },
   wind: { label: 'Wind', button: 'Wind', unit: 'km/h', icon: Wind },
 } as const;
-const COLORS = ['#8be7d3', '#ffbb72', '#a6a3ff', '#82c9ec'];
+// Local model, ECMWF, GFS and a spare: aurora hues that keep 3:1 on the panels, stay apart from
+// each other and from warning colours (red, orange, yellow), so no series reads as a warning.
+const COLORS = ['#3ee6c1', '#b4a9ff', '#6cc3ff', '#e78ff0'];
 const timeOptions: Intl.DateTimeFormatOptions = {
   day: '2-digit',
   month: 'short',
@@ -274,7 +276,7 @@ export default function ForecastExplorer({
                         cy={valuePosition(points[index].value!, domain)}
                         r="4"
                         fill={COLORS[seriesIndex % COLORS.length]}
-                        stroke="#0a141b"
+                        stroke="#060a14"
                         strokeWidth="2"
                       />
                     </g>

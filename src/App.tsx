@@ -1,4 +1,4 @@
-import { lazy, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Activity,
   ArrowDown,
@@ -39,6 +39,11 @@ import {
 } from 'lucide-react';
 const WeatherMap = lazy(() => import('./components/WeatherMap'));
 const DisasterWatch = lazy(() => import('./components/DisasterWatch'));
+// The globe's code loads in Full workspace only, and three.js after it, once WebGL 2 is there.
+// Its stylesheet comes with the dashboard (about 4 kB compressed), so the skeleton below is the
+// globe's own card at its own size and nothing under it moves when the 3D code arrives.
+const GlobeView = lazy(() => import('./components/GlobeView'));
+import './components/GlobeView.css';
 import OfflineBriefing from './components/OfflineBriefing';
 import AtmosphereScene from './components/AtmosphereScene';
 import ForecastExplorer from './components/ForecastExplorer';
@@ -276,6 +281,56 @@ function PanelHeader({
         <h2>{title}</h2>
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * The globe's card while its code downloads: the frame, stage and notes the card has as it starts,
+ * so the loading orb sits where the globe will appear and nothing moves when the code arrives
+ * (tests/globe-view.test.ts compares the two). Its notes hold no links: the card replaces them,
+ * and a link focused here would drop keyboard focus to the page.
+ */
+function GlobeSkeleton() {
+  return (
+    <div className="globe-slot">
+      <section className="globe-view is-loading" aria-label="3D globe">
+        <div className="globe-frame">
+          <div className="globe-stage">
+            <div className="globe-viewport">
+              <p className="globe-loading" role="status">
+                <span className="globe-orb" aria-hidden="true" />
+                Loading the 3D globe…
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="globe-notes">
+          <ul className="globe-legend" aria-label="Globe key">
+            <li>
+              <span className="globe-key is-selected" aria-hidden="true" />
+              Selected place
+            </li>
+            <li>
+              <span className="globe-key is-saved" aria-hidden="true" />
+              Saved places
+            </li>
+            <li>
+              <span className="globe-key is-warning" aria-hidden="true" />
+              Official warning outline
+            </li>
+          </ul>
+          <p>
+            Red outlines appear only for active official warnings supplied with one. No outline here
+            does not mean there is no warning. Read warnings &amp; local guidance
+          </p>
+          <p>
+            Satellite imagery, not radar or a live camera, and never a sign that a place is safe.
+            <span className="globe-more"> Night is drawn from the sun&rsquo;s position now.</span>
+          </p>
+          <p className="globe-credit">Imagery: NASA EOSDIS GIBS · loading</p>
+        </div>
+      </section>
     </div>
   );
 }
@@ -902,7 +957,7 @@ export default function App() {
             <Menu size={22} />
           </button>
           <div className="breadcrumb">
-            Workspace <span>/</span> <strong>Weather overview</strong>
+            Workspace <span aria-hidden="true">/</span> <strong>Weather overview</strong>
           </div>
           <div className="search-area" ref={searchArea}>
             <form
@@ -996,7 +1051,7 @@ export default function App() {
             <div>
               <div className="eyebrow location-eyebrow">
                 <MapPin size={13} />
-                {place.country || 'Selected coordinates'} <span> / </span>
+                {place.country || 'Selected coordinates'} <span aria-hidden="true"> / </span>
                 {localTime(now, tz, { day: '2-digit', month: 'long', year: 'numeric' })}
               </div>
               <h1>
@@ -1098,6 +1153,23 @@ export default function App() {
           )}
           {policy.essentials && (
             <>
+              {policy.extras && (
+                <OptionalPanel
+                  label="3D globe"
+                  className="globe-unavailable"
+                  onUseEssentials={() => changeConnectionMode('lite')}
+                >
+                  <Suspense fallback={<GlobeSkeleton />}>
+                    <GlobeView
+                      place={place}
+                      saved={saved}
+                      alerts={activeAlerts}
+                      clockOffset={alerts.data?.clockOffset}
+                      onSelect={selectPlace}
+                    />
+                  </Suspense>
+                </OptionalPanel>
+              )}
               <div className="overview-grid">
                 <section className="conditions-card" aria-busy={forecast.loading}>
                   <div className="card-kicker">
@@ -1113,7 +1185,12 @@ export default function App() {
                     </span>
                   </div>
                   <AtmosphereScene code={f?.current.code} />
-                  <div className="temperature">
+                  {/* No value is shown as plain muted text: in the gradient a dash read as a bar. */}
+                  <div
+                    className={
+                      finite(f?.current.temperature) ? 'temperature' : 'temperature is-missing'
+                    }
+                  >
                     <span>
                       {value(f?.current.temperature)}
                       <sup>°</sup>
@@ -1161,7 +1238,10 @@ export default function App() {
                         Precipitation
                         {/* Open-Meteo sums current precipitation over the preceding 15 minutes. */}
                         <strong>
-                          {value(f?.current.precipitation, 1)} <small>mm · last 15 min</small>
+                          {value(f?.current.precipitation, 1)}{' '}
+                          <small>
+                            mm · <span>last 15 min</span>
+                          </small>
                         </strong>
                       </span>
                     </div>
@@ -1305,7 +1385,7 @@ export default function App() {
                 <div className="analytics-grid">
                   <section className="panel forecast-panel" id="forecast">
                     <PanelHeader eyebrow="LOOK AHEAD" title="One forecast. Multiple perspectives.">
-                      <span className="panel-number">01</span>
+                      <Layers size={21} />
                     </PanelHeader>
                     {hours.length ? (
                       <ForecastExplorer
@@ -1672,13 +1752,16 @@ export default function App() {
               eyebrow="THE EVIDENCE BEHIND THE SCREEN"
               title="Know the source. Know the limits."
             >
+              {/* A switch: its name stays "Data saver" and its state is aria-pressed, shown by a
+                  check and the teal ring, so it is never read as "Data saver on, pressed". */}
               <button
                 className={`quiet-button ${connectionMode === 'lite' ? 'enabled' : ''}`}
                 aria-pressed={connectionMode === 'lite'}
                 onClick={() => changeConnectionMode(connectionMode === 'lite' ? 'full' : 'lite')}
               >
                 <WifiOff size={15} />
-                {connectionMode === 'lite' ? 'Data saver on' : 'Use data saver'}
+                Data saver
+                {connectionMode === 'lite' && <Check size={14} />}
               </button>
             </PanelHeader>
             <div className="sources-grid">

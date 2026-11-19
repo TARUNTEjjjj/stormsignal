@@ -1,0 +1,310 @@
+{
+  "measuredAt": "2026-11-19T12:08:28.737Z",
+  "revision": "42728d8be121bcd8e3528a12023d9b29b8a8a135",
+  "runtime": {
+    "wrangler": "4.157.0",
+    "compatibilityDate": "2026-10-30",
+    "note": "Local workerd via wrangler dev; not the deployed Cloudflare runtime or hardware."
+  },
+  "machine": {
+    "cpu": "Apple M5",
+    "cores": 10,
+    "memoryGiB": 16,
+    "os": "darwin 27.2.0 arm64",
+    "node": "v26.13.0"
+  },
+  "coldFirstParse": {
+    "fixture": "byte near-bound (1,000 entries, 1 MB)",
+    "bytes": 1000000,
+    "entries": 1000,
+    "kolkataAlerts": 1,
+    "adapterMs": {
+      "runs": 1,
+      "first": 32,
+      "median": 32,
+      "p95": 32,
+      "max": 32
+    },
+    "phasesMs": {
+      "utf8Length": 0,
+      "xmlValidate": 6,
+      "xmlParse": 14
+    }
+  },
+  "parse": [
+    {
+      "fixture": "short (20 entries)",
+      "bytes": 12703,
+      "entries": 20,
+      "kolkataAlerts": 1,
+      "adapterMs": {
+        "runs": 30,
+        "first": 1,
+        "median": 0,
+        "p95": 1,
+        "max": 1
+      },
+      "phasesMs": {
+        "utf8Length": 0,
+        "xmlValidate": 0,
+        "xmlParse": 0
+      }
+    },
+    {
+      "fixture": "observed-size near-bound (1,000 entries)",
+      "bytes": 629043,
+      "entries": 1000,
+      "kolkataAlerts": 1,
+      "adapterMs": {
+        "runs": 30,
+        "first": 15,
+        "median": 12,
+        "p95": 14,
+        "max": 15
+      },
+      "phasesMs": {
+        "utf8Length": 0,
+        "xmlValidate": 2,
+        "xmlParse": 9
+      }
+    },
+    {
+      "fixture": "byte near-bound (1,000 entries, 1 MB)",
+      "bytes": 1000000,
+      "entries": 1000,
+      "kolkataAlerts": 1,
+      "adapterMs": {
+        "runs": 30,
+        "first": 13,
+        "median": 12,
+        "p95": 14,
+        "max": 14
+      },
+      "phasesMs": {
+        "utf8Length": 0,
+        "xmlValidate": 3,
+        "xmlParse": 8
+      }
+    }
+  ],
+  "requests": [
+    {
+      "fixture": "short (20 entries)",
+      "simulatedUpstreamLatencyMs": 0,
+      "status": 200,
+      "alerts": 1,
+      "checks": ["imd-kolkata:available", "sachet:unavailable"],
+      "wallMs": {
+        "runs": 10,
+        "first": 8,
+        "median": 1,
+        "p95": 8,
+        "max": 8
+      },
+      "simulatedNetworkWaitMs": {
+        "runs": 10,
+        "first": 0,
+        "median": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "cpuMs": {
+        "runs": 10,
+        "first": 8,
+        "median": 1,
+        "p95": 8,
+        "max": 8
+      }
+    },
+    {
+      "fixture": "observed-size near-bound (1,000 entries)",
+      "simulatedUpstreamLatencyMs": 0,
+      "status": 200,
+      "alerts": 1,
+      "checks": ["imd-kolkata:available", "sachet:unavailable"],
+      "wallMs": {
+        "runs": 10,
+        "first": 16,
+        "median": 14,
+        "p95": 16,
+        "max": 16
+      },
+      "simulatedNetworkWaitMs": {
+        "runs": 10,
+        "first": 0,
+        "median": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "cpuMs": {
+        "runs": 10,
+        "first": 16,
+        "median": 14,
+        "p95": 16,
+        "max": 16
+      }
+    },
+    {
+      "fixture": "byte near-bound (1,000 entries, 1 MB)",
+      "simulatedUpstreamLatencyMs": 0,
+      "status": 200,
+      "alerts": 1,
+      "checks": ["imd-kolkata:available", "sachet:unavailable"],
+      "wallMs": {
+        "runs": 10,
+        "first": 14,
+        "median": 14,
+        "p95": 16,
+        "max": 16
+      },
+      "simulatedNetworkWaitMs": {
+        "runs": 10,
+        "first": 0,
+        "median": 0,
+        "p95": 0,
+        "max": 0
+      },
+      "cpuMs": {
+        "runs": 10,
+        "first": 14,
+        "median": 14,
+        "p95": 16,
+        "max": 16
+      }
+    },
+    {
+      "fixture": "byte near-bound (1,000 entries, 1 MB)",
+      "simulatedUpstreamLatencyMs": 400,
+      "status": 200,
+      "alerts": 1,
+      "checks": ["imd-kolkata:available", "sachet:unavailable"],
+      "wallMs": {
+        "runs": 5,
+        "first": 438,
+        "median": 424,
+        "p95": 438,
+        "max": 438
+      },
+      "simulatedNetworkWaitMs": {
+        "runs": 5,
+        "first": 402,
+        "median": 402,
+        "p95": 403,
+        "max": 403
+      },
+      "cpuMs": {
+        "runs": 5,
+        "first": 36,
+        "median": 22,
+        "p95": 36,
+        "max": 36
+      }
+    }
+  ],
+  "osCpu": {
+    "short (20 entries)": {
+      "adapter": {
+        "runs": 100,
+        "msPerRun": 0.3
+      },
+      "request": {
+        "runs": 100,
+        "msPerRun": 2.4
+      }
+    },
+    "observed-size near-bound (1,000 entries)": {
+      "adapter": {
+        "runs": 100,
+        "msPerRun": 18.1
+      },
+      "request": {
+        "runs": 100,
+        "msPerRun": 18.3
+      }
+    },
+    "byte near-bound (1,000 entries, 1 MB)": {
+      "adapter": {
+        "runs": 100,
+        "msPerRun": 15.6
+      },
+      "request": {
+        "runs": 100,
+        "msPerRun": 19.3
+      }
+    }
+  },
+  "limits": [
+    {
+      "case": "declared-oversize",
+      "error": "Warning feed exceeds the size limit",
+      "passed": true,
+      "expected": "/exceeds the size limit/",
+      "elapsedMs": 0,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "streamed-oversize",
+      "error": "Warning feed exceeds the size limit",
+      "passed": true,
+      "expected": "/exceeds the size limit/",
+      "elapsedMs": 1,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "stalled-headers",
+      "error": "Official warning request timed out.",
+      "passed": true,
+      "expected": "/timed out/",
+      "elapsedMs": 8008,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "stalled-body",
+      "error": "Official warning request timed out.",
+      "passed": true,
+      "expected": "/timed out/",
+      "elapsedMs": 8003,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "http-503-retried-once",
+      "error": "Official warning source unavailable (HTTP 503)",
+      "passed": true,
+      "expected": "/HTTP 503/",
+      "elapsedMs": 153,
+      "upstreamCalls": 2
+    },
+    {
+      "case": "http-404-not-retried",
+      "error": "Official warning source unavailable (HTTP 404)",
+      "passed": true,
+      "expected": "/HTTP 404/",
+      "elapsedMs": 0,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "connection-error-retried-once",
+      "error": "connection reset (simulated)",
+      "passed": true,
+      "expected": "/connection reset/",
+      "elapsedMs": 152,
+      "upstreamCalls": 2
+    },
+    {
+      "case": "malformed-xml",
+      "error": "IMD district feed XML is malformed.",
+      "passed": true,
+      "expected": "/XML is malformed/",
+      "elapsedMs": 2,
+      "upstreamCalls": 1
+    },
+    {
+      "case": "over-entry-limit",
+      "error": "IMD district feed has too many entries.",
+      "passed": true,
+      "expected": "/too many entries/",
+      "elapsedMs": 34,
+      "upstreamCalls": 1
+    }
+  ]
+}

@@ -66,6 +66,21 @@ the real services:
   spacing, touch scrolling over the globe and the live regions passed. Text over the
   globe measured at least 5.8:1 over white cloud and 7.9:1 on the night side.
 
+Commit `f22f8c0` passed repository CI (Validate on Node 22, and the resource catalog
+tests) and was deployed to Cloudflare Pages production at **17:07 UTC**. The hosted site
+then reported version `7014fb5e…`, and `npm run test:live` through it returned:
+
+| City          | Elapsed | Observed provider result                                       |
+| ------------- | ------: | -------------------------------------------------------------- |
+| San Francisco |  2.99 s | NWS passed; three active records at that instant.              |
+| Manila        |  4.48 s | PAGASA direct and WMO supplementary checks passed.             |
+| Kolkata       |  2.93 s | IMD district and SACHET regional checks passed; three records. |
+| Jakarta       |  4.25 s | BMKG direct and WMO supplementary checks passed.               |
+
+On the hosted site, Data saver loaded only the application bundle and the forecast.
+Switching to Full workspace loaded the globe, which drew NASA's 18 November 2026 mosaic
+(93% of Earth imaged) with no console errors.
+
 Not covered: Safari, Firefox, Windows and a real GPU. Forced colours were checked only
 through Chrome's emulation, so the toggles and focus rings still need one look in
 Windows High Contrast.

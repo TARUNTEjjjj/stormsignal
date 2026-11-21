@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an idea or enhancement for StormSignal
+title: '[Feature]: '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement to StormSignal!
+        Contributions around alert coverage, accessibility, provider resilience, and offline usability are especially welcome.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Is your feature request related to a specific problem or data gap? Please describe.
+      placeholder: A clear description of what user need or problem this addresses.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: What change would you like to see?
+      placeholder: Describe the desired behavior, visual presentation, or data integration.
+    validations:
+      required: true
+  - type: textarea
+    id: data-sources
+    attributes:
+      label: Data sources & licensing (if applicable)
+      description: If this involves a new weather or warning provider, link the official documentation and licensing terms.
+      placeholder: e.g. Official meteorological agency API endpoint, open-access terms, licensing details...
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or workarounds you have considered.
+    validations:
+      required: false
+  - type: checkboxes
+    id: standards
+    attributes:
+      label: Standards alignment
+      options:
+        - label: This proposed change adheres to StormSignal's data safety standards (no simulated alerts or uncalibrated hazard claims).
+          required: true
+        - label: This proposed change respects accessibility and offline-first design principles.
+          required: false

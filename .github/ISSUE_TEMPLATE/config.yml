@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/TARUNTEjjjj/stormsignal/security/policy
+    about: Please report security vulnerabilities privately according to our security policy.
+  - name: Verification & Architecture Documentation
+    url: https://github.com/TARUNTEjjjj/stormsignal/tree/main/docs
+    about: Read our comprehensive architecture, data sources, and verification records.

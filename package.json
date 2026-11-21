@@ -23,7 +23,7 @@
     "test:resources": "node --test scripts/resources/resource-catalog.test.mjs && node scripts/resources/check-catalog.mjs"
   },
   "dependencies": {
-    "fast-xml-parser": "5.12.0",
+    "fast-xml-parser": "5.12.1",
     "leaflet": "1.9.4",
     "lucide-react": "1.31.0",
     "react": "19.3.1",

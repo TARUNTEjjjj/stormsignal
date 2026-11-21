@@ -1,44 +1,100 @@
----
 name: Bug report
-about: Report a reproducible problem with the StormSignal app
-title: "[Bug]: "
-labels: bug
-assignees: ""
----
-
-## What happened?
-A clear description of the problem.
-
-## Steps to reproduce
-1.
-2.
-3.
-
-## Expected behavior
-What did you expect to happen?
-
-## Observed behavior
-What happened instead? Include any visible error message.
-
-## Context
-- StormSignal version or commit (if known):
-- Browser and version:
-- Device / operating system:
-- Viewport size (if relevant):
-- App mode (Data saver, Full workspace, or Offline only):
-- Approximate date and time, including timezone:
-- City or region (optional; do not share exact coordinates or a home address):
-
-## Data-source details (if relevant)
-- Feature/provider involved (forecast, satellite, map, official warnings, resource library, etc.):
-- Source status shown by the app:
-- Was the result from a live provider or a test fixture?
-
-## Evidence
-Add a screenshot or short recording if it helps. Remove personal information, private coordinates, access tokens and other secrets before posting.
-
-## Troubleshooting already tried
-List any refresh, reconnect or other checks you have tried.
-
-## Additional notes
-Anything else that may help reproduce the issue.
+description: Report a reproducible problem with the StormSignal app
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue!
+        **Important:** Never include private coordinates, contact details, API tokens, or personal emergency information.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+      placeholder: Tell us what went wrong...
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Open StormSignal...
+        2. Select or search for...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed behavior
+      description: What happened instead? Include any visible error message.
+    validations:
+      required: true
+  - type: dropdown
+    id: app-mode
+    attributes:
+      label: App mode
+      description: Which mode was active when the issue occurred?
+      options:
+        - Full workspace
+        - Data saver
+        - Offline only
+        - Other / Not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Environment & Context
+      description: Provide browser, device, operating system, and viewport size.
+      value: |
+        - StormSignal version or commit (if known):
+        - Browser and version:
+        - Device / operating system:
+        - Viewport size (if relevant):
+        - Approximate date and time (with timezone):
+        - City or region (optional; no private coordinates):
+    validations:
+      required: false
+  - type: textarea
+    id: data-source
+    attributes:
+      label: Data-source details (if relevant)
+      description: Provider involved, source status shown by the app, live or fixture.
+      placeholder: e.g. Open-Meteo forecast, NASA VIIRS satellite, NWS alert, NDMA SACHET...
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Attach screenshots or logs (ensure all personal coordinates and tokens are removed).
+    validations:
+      required: false
+  - type: textarea
+    id: troubleshooting
+    attributes:
+      label: Troubleshooting already tried
+      description: List any refresh, reconnect, or cache clearance steps attempted.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Verification checklist
+      options:
+        - label: I have confirmed that no secrets, private coordinates, or sensitive personal information are included in this report.
+          required: true
+        - label: I have checked existing issues to see if this problem has already been reported.
+          required: false

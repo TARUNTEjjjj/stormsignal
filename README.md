@@ -1,5 +1,12 @@
 # StormSignal
 
+[![Validate](https://github.com/TARUNTEjjjj/stormsignal/actions/workflows/ci.yml/badge.svg)](https://github.com/TARUNTEjjjj/stormsignal/actions/workflows/ci.yml)
+[![Resource catalog](https://github.com/TARUNTEjjjj/stormsignal/actions/workflows/resources.yml/badge.svg)](https://github.com/TARUNTEjjjj/stormsignal/actions/workflows/resources.yml)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 [Open the live website](https://stormsignal-weather.pages.dev) · [Verification notes](docs/verification.md)
 
 Weather with evidence. A weather workspace that puts forecasts, satellite imagery, model disagreement, and official warning coverage in one view.

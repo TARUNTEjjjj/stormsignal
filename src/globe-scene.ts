@@ -905,7 +905,7 @@ export function createGlobe(
         texture.flipY = false;
         texture.wrapS = RepeatWrapping;
         texture.minFilter = LinearMipmapLinearFilter;
-        texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+        texture.anisotropy = Math.min(16, renderer.capabilities.getMaxAnisotropy());
         texture.needsUpdate = true;
         uniform.value = texture;
       } else uniform.value = blank();

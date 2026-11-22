@@ -24,6 +24,7 @@ import {
   Sun,
   Sunset,
   TriangleAlert,
+  ZoomIn,
 } from 'lucide-react';
 import { sourceClock } from '../connectivity';
 import { fetchImageryFrames } from '../imagery';
@@ -359,6 +360,9 @@ export function GlobeCard({
           {imagery.text}
         </span>
       )}
+      <a href="#satellite" className="globe-ground-link">
+        <ZoomIn size={12} aria-hidden="true" /> Zoom to ground detail ↗
+      </a>
     </div>
   );
   const eyebrow = (

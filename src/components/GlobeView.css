@@ -446,6 +446,20 @@
 .globe-place-line.is-none svg {
   color: #c2b8ff;
 }
+.globe-ground-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--globe-teal);
+  text-decoration: none;
+}
+.globe-ground-link:hover,
+.globe-ground-link:focus-visible {
+  text-decoration: underline;
+  color: #ffffff;
+}
 
 /* Controls: a rotate pad and a column of buttons at the bottom right of the scene. */
 .globe-tools {

@@ -1,0 +1,31 @@
+# StormSignal — AI Development Rules & Architecture Guidelines
+
+## Project Overview
+StormSignal is a weather situational awareness and evidence workspace built with React 19, TypeScript, Three.js, Vite, and Cloudflare Pages & Workers. It aggregates multi-model forecasts, satellite mosaics, and official severe weather warnings with offline-first resilience.
+
+## Core Rules & Invariants
+
+### 1. Data Safety Standards
+- Never fabricate alerts, emergency contacts, shelter locations, or evacuation routes.
+- Distinguish modeled forecast estimates from official meteorological warnings (NWS, SACHET/IMD, PAGASA, BMKG, WMO).
+- Never claim a location is "safe" because an alert feed returned no warnings or had a fetch failure.
+- Retain required attribution, source links, and clear timestamps for all external data providers.
+
+### 2. Architecture & Bundle Boundaries
+- The initial offline shell must remain ultra-lightweight. Critical assets are cached by Service Worker (`public/sw.js`).
+- Three.js is optional and strictly dynamically imported on demand only when WebGL 2 is available and the user is in "Full workspace" mode.
+- Global stylesheet must adhere to the bundle size budget (<= 85 KB uncompressed, <= 18 KB gzip).
+- Server warning gateway runs as an advanced Cloudflare Pages Function (`_worker.js`) with bounded timeouts, request coalescing, and CPU execution limits.
+
+### 3. Design & Accessibility (WCAG 2.1 AA)
+- Midnight Aurora theme tokens defined on `:root` in `frontend-design.css`.
+- Maintain minimum 4.5:1 contrast for all body and heading text; 3:1 for interactive controls and focus rings.
+- Tabular figures (`font-variant-numeric: tabular-nums`) for all meteorological tables, coordinates, timestamps, and readings.
+- Respect `prefers-reduced-motion` (disable automatic rotation/movement) and `forced-colors` (high contrast system highlights).
+- All modal dialogs, drawers, and search dropdowns must trap/manage keyboard focus and support Escape to close.
+
+### 4. Code Quality & Testing
+- Use Node.js native test runner (`node --test`) with TypeScript via `tsx`.
+- Keep all unit tests passing (`npm test`, `npm run test:resources:ui`, `npm run test:resources`).
+- Code formatting is enforced via Prettier (`npm run format:check`). Run `npm run format` before committing.
+- Build artifacts must verify cleanly with `npm run check`.

@@ -1245,6 +1245,28 @@ export default function App() {
                         </strong>
                       </span>
                     </div>
+                    <div>
+                      <Sun size={17} />
+                      <span>
+                        UV Index
+                        <strong>
+                          {value(f?.current.uv, 1)}{' '}
+                          <small>
+                            {f?.current.uv === null || f?.current.uv === undefined
+                              ? ''
+                              : f.current.uv >= 11
+                                ? 'extreme'
+                                : f.current.uv >= 8
+                                  ? 'very high'
+                                  : f.current.uv >= 6
+                                    ? 'high'
+                                    : f.current.uv >= 3
+                                      ? 'moderate'
+                                      : 'low'}
+                          </small>
+                        </strong>
+                      </span>
+                    </div>
                     {policy.extras && (
                       <div>
                         <Eye size={17} />

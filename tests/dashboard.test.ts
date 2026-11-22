@@ -278,6 +278,14 @@ test('the current precipitation tile says its amount is for 15 minutes, not an h
   assert.match(tile, /^Precipitation0\.4 mm\b.*\b15 min\b/);
 });
 
+test('the current UV index tile shows WHO risk level when UV is present', (t) => {
+  const now = Date.UTC(2026, 10, 16, 3);
+  t.mock.timers.enable({ apis: ['Date'], now });
+  loaded.forecast = forecast(now, { 0: { uv: 7.2 } }, { uv: 7.2 });
+  const tile = plain(between(render(), 'UV Index', '</strong>'));
+  assert.match(tile, /^UV Index7\.2 high/);
+});
+
 test('heavy rain and heavy snow in the next 24 hours each show a card with its own icon', (t) => {
   const now = Date.UTC(2026, 10, 16, 3);
   t.mock.timers.enable({ apis: ['Date'], now });

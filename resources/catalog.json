@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "project": "stormsignal",
   "title": "StormSignal evidence resources",
-  "fetchedAt": "2026-11-23T13:41:35.309Z",
-  "attemptedAt": "2026-11-23T13:41:14.535Z",
+  "fetchedAt": "2026-11-24T14:18:58.501Z",
+  "attemptedAt": "2026-11-24T14:18:37.723Z",
   "status": "live",
   "errors": [],
   "excludedSeeds": [],
@@ -37,21 +37,21 @@
         "weather",
         "weather-data"
       ],
-      "stars": 1458,
+      "stars": 1459,
       "forks": 462,
-      "pushedAt": "2026-11-18T19:20:50.000Z",
+      "pushedAt": "2026-11-23T14:20:43.000Z",
       "license": "BSD-3-Clause",
       "category": "weather",
       "sourceQuery": "repo:Unidata/MetPy",
-      "fetchedAt": "2026-11-23T13:41:21.984Z",
+      "fetchedAt": "2026-11-24T14:18:44.953Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather",
         "repo:Unidata/MetPy"
       ],
-      "score": 70.69,
-      "reason": "Weather and climate data tools resource; 1458 GitHub stars."
+      "score": 70.79,
+      "reason": "Weather and climate data tools resource; 1459 GitHub stars."
     },
     {
       "id": 285335799,
@@ -76,13 +76,13 @@
       "license": "MIT",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 68.8,
+      "score": 68.78,
       "reason": "Weather and climate data tools resource; 667 GitHub stars."
     },
     {
@@ -102,17 +102,17 @@
       ],
       "stars": 1814,
       "forks": 904,
-      "pushedAt": "2026-11-21T09:33:10.000Z",
+      "pushedAt": "2026-11-23T21:49:02.000Z",
       "license": null,
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 56.24,
+      "score": 56.28,
       "reason": "Weather and climate data tools resource; 1814 GitHub stars."
     },
     {
@@ -126,20 +126,20 @@
         "deep-learning",
         "weather"
       ],
-      "stars": 1255,
+      "stars": 1256,
       "forks": 301,
-      "pushedAt": "2026-11-21T18:24:58.000Z",
+      "pushedAt": "2026-11-24T06:32:57.000Z",
       "license": "Apache-2.0",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 55.45,
-      "reason": "Weather and climate data tools resource; 1255 GitHub stars."
+      "score": 55.49,
+      "reason": "Weather and climate data tools resource; 1256 GitHub stars."
     },
     {
       "id": 51397392,
@@ -161,13 +161,13 @@
       "license": "Apache-2.0",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 55.35,
+      "score": 55.32,
       "reason": "Weather and climate data tools resource; 1216 GitHub stars."
     },
     {
@@ -184,20 +184,20 @@
         "weather-app",
         "weather-information"
       ],
-      "stars": 30812,
-      "forks": 1280,
-      "pushedAt": "2026-11-22T13:22:06.000Z",
+      "stars": 30813,
+      "forks": 1281,
+      "pushedAt": "2026-11-24T11:49:00.000Z",
       "license": "Apache-2.0",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 47.42,
-      "reason": "Weather and climate data tools resource; 30812 GitHub stars."
+      "score": 47.44,
+      "reason": "Weather and climate data tools resource; 30813 GitHub stars."
     },
     {
       "id": 21803829,
@@ -216,7 +216,7 @@
       "license": "MIT",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
@@ -247,7 +247,7 @@
       "license": null,
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
@@ -266,13 +266,13 @@
         "weather-api",
         "weather-forecast"
       ],
-      "stars": 6718,
-      "forks": 487,
-      "pushedAt": "2026-11-23T13:21:12.000Z",
+      "stars": 6720,
+      "forks": 488,
+      "pushedAt": "2026-11-24T14:15:54.000Z",
       "license": "AGPL-3.0",
       "category": "weather",
       "sourceQuery": "repo:open-meteo/open-meteo",
-      "fetchedAt": "2026-11-23T13:41:19.380Z",
+      "fetchedAt": "2026-11-24T14:18:42.534Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
@@ -280,7 +280,7 @@
         "repo:open-meteo/open-meteo"
       ],
       "score": 44.14,
-      "reason": "Weather and climate data tools resource; 6718 GitHub stars."
+      "reason": "Weather and climate data tools resource; 6720 GitHub stars."
     },
     {
       "id": 26971815,
@@ -303,13 +303,13 @@
       "license": "ISC",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 44.1,
+      "score": 44.07,
       "reason": "Weather and climate data tools resource; 8572 GitHub stars."
     },
     {
@@ -340,17 +340,17 @@
       ],
       "stars": 4899,
       "forks": 849,
-      "pushedAt": "2026-11-23T10:43:55.000Z",
+      "pushedAt": "2026-11-24T08:19:43.000Z",
       "license": "GPL-3.0",
       "category": "weather",
       "sourceQuery": "topic:weather",
-      "fetchedAt": "2026-11-23T13:41:16.939Z",
+      "fetchedAt": "2026-11-24T14:18:40.079Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:weather"
       ],
-      "score": 43.45,
+      "score": 43.44,
       "reason": "Weather and climate data tools resource; 4899 GitHub stars."
     },
     {
@@ -372,13 +372,13 @@
       "license": "Apache-2.0",
       "category": "weather",
       "sourceQuery": "repo:pydata/xarray",
-      "fetchedAt": "2026-11-23T13:41:24.415Z",
+      "fetchedAt": "2026-11-24T14:18:47.382Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "repo:pydata/xarray"
       ],
-      "score": 43.12,
+      "score": 43.09,
       "reason": "Weather and climate data tools resource; 4240 GitHub stars."
     },
     {
@@ -408,13 +408,13 @@
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 87.78,
+      "score": 87.75,
       "reason": "Geospatial visualization resource; 4083 GitHub stars."
     },
     {
@@ -444,20 +444,20 @@
         "typescript",
         "visualization"
       ],
-      "stars": 3393,
+      "stars": 3392,
       "forks": 461,
       "pushedAt": "2026-09-12T15:26:55.000Z",
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 86.01,
-      "reason": "Geospatial visualization resource; 3393 GitHub stars."
+      "score": 85.99,
+      "reason": "Geospatial visualization resource; 3392 GitHub stars."
     },
     {
       "id": 728420934,
@@ -475,13 +475,13 @@
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 85.63,
+      "score": 85.61,
       "reason": "Geospatial visualization resource; 1476 GitHub stars."
     },
     {
@@ -510,20 +510,20 @@
         "visualization",
         "webgl"
       ],
-      "stars": 980,
+      "stars": 981,
       "forks": 56,
       "pushedAt": "2026-11-23T04:51:03.000Z",
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 84.95,
-      "reason": "Geospatial visualization resource; 980 GitHub stars."
+      "score": 84.92,
+      "reason": "Geospatial visualization resource; 981 GitHub stars."
     },
     {
       "id": 12152307,
@@ -547,20 +547,20 @@
         "webgl",
         "webgl2"
       ],
-      "stars": 963,
+      "stars": 964,
       "forks": 135,
-      "pushedAt": "2026-11-22T11:32:18.000Z",
+      "pushedAt": "2026-11-23T15:53:05.000Z",
       "license": "Apache-2.0",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 84.89,
-      "reason": "Geospatial visualization resource; 963 GitHub stars."
+      "score": 84.9,
+      "reason": "Geospatial visualization resource; 964 GitHub stars."
     },
     {
       "id": 209321064,
@@ -595,13 +595,13 @@
       "license": "CC0-1.0",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 84.64,
+      "score": 84.61,
       "reason": "Geospatial visualization resource; 885 GitHub stars."
     },
     {
@@ -621,17 +621,17 @@
       ],
       "stars": 586,
       "forks": 224,
-      "pushedAt": "2026-10-24T05:24:27.000Z",
+      "pushedAt": "2026-11-23T16:23:50.000Z",
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 83.08,
+      "score": 83.82,
       "reason": "Geospatial visualization resource; 586 GitHub stars."
     },
     {
@@ -656,7 +656,7 @@
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
@@ -681,20 +681,20 @@
         "gltf",
         "webgl"
       ],
-      "stars": 15980,
-      "forks": 3907,
-      "pushedAt": "2026-11-22T06:12:04.000Z",
+      "stars": 15981,
+      "forks": 3906,
+      "pushedAt": "2026-11-24T10:34:19.000Z",
       "license": "Apache-2.0",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 70.98,
-      "reason": "Geospatial visualization resource; 15980 GitHub stars."
+      "score": 71.01,
+      "reason": "Geospatial visualization resource; 15981 GitHub stars."
     },
     {
       "id": 123345344,
@@ -708,20 +708,20 @@
         "mapbox",
         "visualization"
       ],
-      "stars": 12106,
+      "stars": 12107,
       "forks": 1962,
-      "pushedAt": "2026-11-23T13:15:10.000Z",
+      "pushedAt": "2026-11-24T03:51:59.000Z",
       "license": "MIT",
       "category": "maps",
       "sourceQuery": "topic:geospatial",
-      "fetchedAt": "2026-11-23T13:41:30.142Z",
+      "fetchedAt": "2026-11-24T14:18:53.697Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "topic:geospatial"
       ],
-      "score": 70.41,
-      "reason": "Geospatial visualization resource; 12106 GitHub stars."
+      "score": 70.4,
+      "reason": "Geospatial visualization resource; 12107 GitHub stars."
     },
     {
       "id": 931135,
@@ -733,20 +733,20 @@
         "leaflet",
         "maps"
       ],
-      "stars": 45972,
+      "stars": 45978,
       "forks": 6331,
-      "pushedAt": "2026-11-22T19:09:42.000Z",
+      "pushedAt": "2026-11-23T21:36:17.000Z",
       "license": "BSD-2-Clause",
       "category": "maps",
       "sourceQuery": "repo:Leaflet/Leaflet",
-      "fetchedAt": "2026-11-23T13:41:32.596Z",
+      "fetchedAt": "2026-11-24T14:18:56.087Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "repo:Leaflet/Leaflet"
       ],
       "score": 53.29,
-      "reason": "Geospatial visualization resource; 45972 GitHub stars."
+      "reason": "Geospatial visualization resource; 45978 GitHub stars."
     },
     {
       "id": 319779344,
@@ -761,20 +761,20 @@
         "typescript",
         "webgl2"
       ],
-      "stars": 12159,
-      "forks": 1358,
-      "pushedAt": "2026-11-23T12:30:57.000Z",
+      "stars": 12168,
+      "forks": 1360,
+      "pushedAt": "2026-11-24T11:15:28.000Z",
       "license": null,
       "category": "maps",
       "sourceQuery": "repo:maplibre/maplibre-gl-js",
-      "fetchedAt": "2026-11-23T13:41:35.309Z",
+      "fetchedAt": "2026-11-24T14:18:58.501Z",
       "provenance": "github",
       "stale": false,
       "sourceQueries": [
         "repo:maplibre/maplibre-gl-js"
       ],
       "score": 50.42,
-      "reason": "Geospatial visualization resource; 12159 GitHub stars."
+      "reason": "Geospatial visualization resource; 12168 GitHub stars."
     }
   ]
 }

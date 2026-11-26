@@ -21,7 +21,9 @@ import {
   SETTLE_MS,
   angularDistance,
   latLonToVector,
+  outlineSegments,
   pointPlace,
+  segmentsCentroid,
   sunDirection,
   vectorToLatLon,
   type GlobeViewState,
@@ -1175,4 +1177,172 @@ test('zoomed in, a new place keeps the zoom the viewer chose', () => {
   sameCentre(s.seen(), london, 'the new place');
   assert.ok(Math.abs(s.seen().distance - close) < 1e-6, `${s.seen().distance}: not ${close}`);
   assert.deepEqual(s.log, ['zoomed true'], 'still closer: the title stays aside');
+});
+
+test('orbital arcs, ground-track sweeps, and jet-stream ribbons animate under motion, pause cleanly, and hide no stars', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(100);
+  const drawnScene = s.renderer.scene!;
+  const orbits = drawnScene.getObjectByName('satellite-orbits');
+  const jets = drawnScene.getObjectByName('jet-streams');
+  assert.ok(
+    orbits && orbits.children.length === 8,
+    'polar + geo arcs, ground tracks, satellites, footprints',
+  );
+  assert.ok(jets && jets.children.length === 3, 'three atmospheric jet-stream flow ribbons');
+
+  const trackUniforms = orbits.children
+    .map((child) => ((child as Mesh).material as ShaderMaterial | undefined)?.uniforms)
+    .filter((u): u is NonNullable<typeof u> => !!u?.headPhase);
+  const jetUniforms = jets.children.map(
+    (child) => ((child as Mesh).material as ShaderMaterial).uniforms,
+  );
+  const satBeacons = orbits.children.filter((child) => child.type === 'Group');
+  assert.equal(trackUniforms.length, 2);
+  assert.equal(jetUniforms.length, 3);
+  assert.equal(satBeacons.length, 2);
+
+  const head0 = trackUniforms[0].headPhase.value as number;
+  const jet0 = jetUniforms[0].time.value as number;
+  const sat0 = satBeacons[0].position.clone();
+  s.run(2_000);
+  assert.notEqual(trackUniforms[0].headPhase.value, head0, 'ground-track sweep advances');
+  assert.ok((jetUniforms[0].time.value as number) > jet0, 'jet-stream phase advances');
+  assert.ok(satBeacons[0].position.distanceTo(sat0) > 0.01, 'satellite beacon moves along orbit');
+
+  // Under reduced motion / Pause, everything freezes and hides zero stars.
+  s.globe.setMotion(false, false);
+  s.run(100);
+  const frozenHead = trackUniforms[0].headPhase.value as number;
+  const frozenJet = jetUniforms[0].time.value as number;
+  const frozenSat = satBeacons[0].position.clone();
+  s.run(3_000);
+  assert.equal(trackUniforms[0].headPhase.value, frozenHead, 'ground track pauses');
+  assert.equal(jetUniforms[0].time.value, frozenJet, 'jet streams pause');
+  assert.equal(satBeacons[0].position.distanceTo(frozenSat), 0, 'satellite beacons pause');
+  const view = sky(s);
+  assert.deepEqual(view.hidden, view.behind(1), 'orbital and jet-stream layers hide zero stars');
+});
+
+test('severe-warning beacons anchor to active outline centroids, pulse, hide no stars, and dispose on update', () => {
+  const s = scene();
+  s.globe.setPlace(chennai);
+  s.globe.setMotion(true, false);
+  s.run(100);
+  const beacons = s.renderer.scene!.getObjectByName('warning-beacons')!;
+  assert.ok(beacons);
+  assert.equal(beacons.children.length, 0, 'no warning beacons without active outlines');
+
+  const segA = outlineSegments(
+    {
+      type: 'MultiPolygon',
+      coordinates: [
+        [
+          [
+            [76, 10],
+            [84, 10],
+            [84, 16],
+            [76, 16],
+            [76, 10],
+          ],
+        ],
+      ],
+    },
+    1.003,
+    1,
+  );
+  const segB = outlineSegments(
+    {
+      type: 'MultiPolygon',
+      coordinates: [
+        [
+          [
+            [-4, 49],
+            [4, 49],
+            [4, 54],
+            [-4, 54],
+            [-4, 49],
+          ],
+        ],
+      ],
+    },
+    1.003,
+    1,
+  );
+  s.globe.setOutlines([segA, segB]);
+  s.run(100);
+  assert.equal(beacons.children.length, 2, 'one beacon assembly per active warning polygon');
+  const expectedA = new Vector3(...segmentsCentroid(segA, 1.003)!);
+  const expectedB = new Vector3(...segmentsCentroid(segB, 1.003)!);
+  assert.ok(beacons.children[0].position.distanceTo(expectedA) < 1e-6);
+  assert.ok(beacons.children[1].position.distanceTo(expectedB) < 1e-6);
+
+  // Track disposal of beacon materials when outlines are replaced or cleared.
+  const firstMaterials: Material[] = [];
+  beacons.traverse((obj) => {
+    const mat = (obj as Mesh).material as Material | undefined;
+    if (mat) firstMaterials.push(mat);
+  });
+  assert.equal(firstMaterials.length, 4, 'two materials (cone + ring) per beacon');
+  let disposedCount = 0;
+  for (const mat of firstMaterials) {
+    const orig = mat.dispose.bind(mat);
+    mat.dispose = () => {
+      disposedCount++;
+      orig();
+    };
+  }
+
+  // Verify beacon pulse advances with motion and hides no stars.
+  const coneUniform = ((beacons.children[0].children[0] as Mesh).material as ShaderMaterial)
+    .uniforms.pulse;
+  const p0 = coneUniform.value as number;
+  s.run(500);
+  assert.notEqual(coneUniform.value, p0, 'warning beacon cone pulses');
+  const view = sky(s);
+  assert.deepEqual(view.hidden, view.behind(1), 'warning beacons hide zero stars');
+
+  // Replace outlines -> previous beacon materials must be disposed immediately.
+  s.globe.setOutlines([segA]);
+  assert.equal(disposedCount, 4, 'replaced warning beacon materials disposed immediately');
+  assert.equal(beacons.children.length, 1);
+
+  // Clear outlines -> all warning beacons removed.
+  s.globe.setOutlines([]);
+  s.run(100);
+  assert.equal(beacons.children.length, 0);
+});
+
+test('geodesic SLERP fly-to crosses the antimeridian along the short great-circle path', () => {
+  const s = scene();
+  const eastSide: Place = {
+    id: 'kamchatka',
+    name: 'East',
+    country: 'Test',
+    countryCode: 'TS',
+    latitude: 40,
+    longitude: 170,
+  };
+  const westSide: Place = {
+    id: 'aleutians',
+    name: 'West',
+    country: 'Test',
+    countryCode: 'TS',
+    latitude: 40,
+    longitude: -170,
+  };
+  s.globe.setPlace(eastSide);
+  s.globe.setMotion(true, false);
+  s.run(100);
+  s.globe.setPlace(westSide);
+  s.run(380);
+  const mid = s.seen();
+  assert.ok(
+    angularDistance(mid, { latitude: 40, longitude: 180 }) < 12,
+    `mid-flight passes near 180° instead of wrapping through 0° (got lon ${mid.longitude})`,
+  );
+  s.run(600);
+  sameCentre(s.seen(), westSide, 'lands cleanly on antimeridian destination');
 });

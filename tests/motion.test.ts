@@ -564,7 +564,13 @@ test('the lean ends when the pointer leaves the window, the page scrolls away or
   lean();
   page.win.send('resize', {});
   assert.equal(card.getAttribute('data-tilt'), null, 'a new layout reads the box again');
-  assert.ok(page.win.passive('scroll') && page.win.passive('resize'), 'passive listeners');
+  lean();
+  page.win.send('blur', {});
+  assert.equal(card.getAttribute('data-tilt'), null, 'window blur ends tilt');
+  assert.ok(
+    page.win.passive('scroll') && page.win.passive('resize') && page.win.passive('blur'),
+    'passive listeners',
+  );
 });
 
 test('plugging in a mouse while the page is open starts the tilt, and unplugging it stops it', () => {
@@ -677,12 +683,18 @@ test('tilt follows the pointer, and larger cards lean less', () => {
   assert.equal(corner['--tilt-ry'], `-${MAX_TILT.toFixed(2)}deg`, 'left edge leans left');
   assert.equal(corner['--tilt-rx'], `-${MAX_TILT.toFixed(2)}deg`, 'bottom edge leans forward');
   assert.equal(corner['--tilt-px'], '-1.000');
+  assert.equal(corner['--glare-angle'], '225.0deg');
   // Outside the card the values stop at its edge.
   assert.deepEqual(tiltFor(box, -50, 400), corner);
   // A card twice as wide as the reference leans half as far.
   const wide = tiltFor({ left: 0, top: 0, width: 520, height: 200 }, 520, 100)!;
   assert.equal(wide['--tilt-ry'], `${(MAX_TILT / 2).toFixed(2)}deg`);
   assert.equal(tiltFor({ left: 0, top: 0, width: 0, height: 100 }, 0, 0), null);
+  assert.equal(tiltFor(box, Number.NaN, 100), null);
+  assert.equal(
+    tiltFor({ left: 0, top: 0, width: Number.POSITIVE_INFINITY, height: 100 }, 0, 0),
+    null,
+  );
 });
 
 test('warnings and the interactive map and chart never tilt; whole sections are revealed', () => {

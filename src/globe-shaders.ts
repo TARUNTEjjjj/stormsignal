@@ -3,7 +3,7 @@
  * tests/globe-shaders.test.ts evaluates the surface shader for points on the globe, and checks the
  * warning-outline patch against three.js's own line shader.
  */
-import { SHADING, SHADING_GLSL } from './globe';
+import { ATMOSPHERE_SCATTER_GLSL, SHADING, SHADING_GLSL } from './globe';
 
 export const surfaceVertex = /* glsl */ `
   varying vec2 vUv;
@@ -15,6 +15,18 @@ export const surfaceVertex = /* glsl */ `
     vNormal = normalize(mat3(modelMatrix) * normal);
     vView = normalize(cameraPosition - world.xyz);
     gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+export const atmosphereVertex = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vView;
+  varying vec3 vWorldPos;
+  void main() {
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vWorldPos = world.xyz;
+    vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vView = normalize(cameraPosition - world.xyz);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
 export const earthFragment = /* glsl */ `
@@ -77,14 +89,72 @@ export const atmosphereFragment = /* glsl */ `
   uniform float edge;
   varying vec3 vNormal;
   varying vec3 vView;
+  ${ATMOSPHERE_SCATTER_GLSL}
   void main() {
-    vec3 n = normalize(vNormal);
-    // 1 where the line of sight grazes the planet, 0 at the outer edge of the shell.
-    float k = clamp(-dot(n, normalize(vView)) / edge, 0.0, 1.0);
-    float glow = pow(k, 1.8) * 0.62;
-    float lit = 0.3 + 0.7 * smoothstep(-0.5, 0.6, dot(n, sun));
-    vec3 colour = mix(violet, teal, smoothstep(0.3, 1.0, k)) * glow * lit;
-    gl_FragColor = vec4(colour, glow);
+    gl_FragColor = atmosphereScatter(vNormal, vView, sun, edge, teal, violet);
+    #include <colorspace_fragment>
+  }
+`;
+export const ribbonVertex = /* glsl */ `
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    vUv = uv;
+    vec4 world = modelMatrix * vec4(position, 1.0);
+    vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vView = normalize(cameraPosition - world.xyz);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+export const ribbonFragment = /* glsl */ `
+  uniform vec3 colour;
+  uniform float time;
+  uniform float speed;
+  uniform float opacity;
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    float band = exp(-pow((vUv.y - 0.5) * 3.1, 2.0));
+    float packet = 0.5 + 0.5 * sin(6.2831853 * (vUv.x * 6.0 - time * speed));
+    float stream = 0.28 + 0.72 * packet * packet;
+    float horizon = smoothstep(0.0, 0.14, dot(normalize(vNormal), normalize(vView)));
+    float alpha = clamp(band * stream * horizon * 0.72, 0.0, 1.0) * opacity;
+    gl_FragColor = vec4(colour * alpha, alpha);
+    #include <colorspace_fragment>
+  }
+`;
+export const groundTrackFragment = /* glsl */ `
+  uniform vec3 colour;
+  uniform float headPhase;
+  uniform float arcFraction;
+  uniform float opacity;
+  varying vec2 vUv;
+  varying vec3 vNormal;
+  varying vec3 vView;
+  void main() {
+    float behind = mod(headPhase - vUv.x + 1.0, 1.0);
+    if (behind > arcFraction) discard;
+    float trail = smoothstep(arcFraction, 0.0, behind);
+    float band = exp(-pow((vUv.y - 0.5) * 2.8, 2.0));
+    float horizon = smoothstep(0.0, 0.08, dot(normalize(vNormal), normalize(vView)));
+    float alpha = trail * band * horizon * opacity;
+    if (alpha <= 0.001) discard;
+    gl_FragColor = vec4(colour * alpha, alpha);
+    #include <colorspace_fragment>
+  }
+`;
+export const beaconConeFragment = /* glsl */ `
+  uniform vec3 colour;
+  uniform float pulse;
+  uniform float opacity;
+  varying vec2 vUv;
+  void main() {
+    float heightFade = vUv.y >= 1.0 ? 0.0 : pow(max(1.0 - vUv.y, 0.0), 1.45);
+    float wave = 0.65 + 0.35 * sin(6.2831853 * (vUv.y * 1.5 - pulse));
+    float alpha = clamp(heightFade * wave * opacity, 0.0, 1.0);
+    gl_FragColor = vec4(colour * alpha, alpha);
     #include <colorspace_fragment>
   }
 `;

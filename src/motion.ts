@@ -60,6 +60,7 @@ export const TILT_PROPERTIES = [
   '--tilt-py',
   '--glare-x',
   '--glare-y',
+  '--glare-angle',
 ] as const;
 export type Tilt = Record<(typeof TILT_PROPERTIES)[number], string>;
 
@@ -73,18 +74,28 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 
 /**
  * The custom properties for a pointer at (x, y) over a card's box: rotations toward the pointer,
- * its position from -1 to 1 for parallax, and its position in percent for the glare. A larger
- * card leans less, so its far edge moves about as far as a small card's. Null for an empty box.
+ * its position from -1 to 1 for parallax, and its position in percent and directional angle for
+ * the specular sheen. A larger card leans less, so its far edge moves about as far as a small
+ * card's. Null for an empty or non-finite box.
  */
 export function tiltFor(
   box: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>,
   x: number,
   y: number,
 ): Tilt | null {
-  if (!(box.width > 0) || !(box.height > 0)) return null;
+  if (
+    !Number.isFinite(box.width) ||
+    !Number.isFinite(box.height) ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !(box.width > 0) ||
+    !(box.height > 0)
+  )
+    return null;
   const px = clamp((x - box.left) / box.width, 0, 1);
   const py = clamp((y - box.top) / box.height, 0, 1);
   const max = MAX_TILT * Math.min(1, 260 / Math.max(box.width, box.height));
+  const angle = (Math.atan2(py - 0.5, px - 0.5) * 180) / Math.PI + 90;
   return {
     '--tilt-rx': `${((0.5 - py) * 2 * max).toFixed(2)}deg`,
     '--tilt-ry': `${((px - 0.5) * 2 * max).toFixed(2)}deg`,
@@ -92,6 +103,7 @@ export function tiltFor(
     '--tilt-py': ((py - 0.5) * 2).toFixed(3),
     '--glare-x': `${(px * 100).toFixed(1)}%`,
     '--glare-y': `${(py * 100).toFixed(1)}%`,
+    '--glare-angle': `${angle.toFixed(1)}deg`,
   };
 }
 
@@ -311,6 +323,7 @@ function startTilt(win: MotionWindow, doc: Document): () => void {
   doc.addEventListener('pointerleave', leave, { passive: true, capture: true });
   win.addEventListener('scroll', scrolled, { passive: true });
   win.addEventListener('resize', resized, { passive: true });
+  win.addEventListener('blur', release, { passive: true });
   return () => {
     if (frame) win.cancelAnimationFrame(frame);
     frame = 0;
@@ -318,6 +331,7 @@ function startTilt(win: MotionWindow, doc: Document): () => void {
     doc.removeEventListener('pointerleave', leave, { capture: true });
     win.removeEventListener('scroll', scrolled);
     win.removeEventListener('resize', resized);
+    win.removeEventListener('blur', release);
     release();
   };
 }

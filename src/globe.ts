@@ -1443,3 +1443,499 @@ export function starfield(count: number, seed = 2026, radius = 60) {
   }
   return { positions, sizes, tints };
 }
+
+function normalizeVector([x, y, z]: Vector): Vector {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return [0, 0, 1];
+  const length = Math.hypot(x, y, z);
+  return length > 1e-12 ? [x / length, y / length, z / length] : [0, 0, 1];
+}
+
+function dotVector(a: Vector, b: Vector): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function crossVector(a: Vector, b: Vector): Vector {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+
+/**
+ * Volumetric Rayleigh and Henyey-Greenstein Mie atmospheric rim scatter parameters, shared between
+ * the CPU reference math and the WebGL2 atmosphere fragment shader.
+ */
+export const ATMOSPHERE_SCATTER = {
+  rayleighPower: 2.2,
+  rayleighBase: 0.55,
+  rayleighLimb: 0.45,
+  mieG: 0.65,
+  miePower: 1.7,
+  mieScale: 0.42,
+  twilightWidth: 0.26,
+  goldTwilight: [0.95, 0.72, 0.36] as Vector,
+  deepIndigo: [0.12, 0.16, 0.48] as Vector,
+} as const;
+
+/** Normalized atmospheric grazing optical depth factor (`0` outer rim -> `1` planetary limb). */
+export function atmosphereOpticalDepth(k: number): number {
+  const c = clamp(Number.isFinite(k) ? k : 0, 0, 1);
+  if (c <= 0) return 0;
+  return (
+    c ** ATMOSPHERE_SCATTER.rayleighPower *
+    (ATMOSPHERE_SCATTER.rayleighBase + ATMOSPHERE_SCATTER.rayleighLimb * c)
+  );
+}
+
+/** Henyey-Greenstein forward scattering phase function (always finite and strictly positive). */
+export function miePhaseFunction(cosTheta: number, g = ATMOSPHERE_SCATTER.mieG): number {
+  const c = clamp(Number.isFinite(cosTheta) ? cosTheta : 0, -1, 1);
+  const g2 = g * g;
+  const denom = Math.max(1 + g2 - 2 * g * c, 0.08);
+  return (1 - g2) / (4 * Math.PI * denom * Math.sqrt(denom));
+}
+
+/**
+ * Volumetric Rayleigh/Mie scatter RGBA in linear light for a point on the outer atmosphere shell.
+ * Matches `ATMOSPHERE_SCATTER_GLSL` in `atmosphereFragment`.
+ */
+export function atmosphereScatter(
+  normal: Vector,
+  view: Vector,
+  sun: Vector,
+  edge: number,
+  teal: Vector,
+  violet: Vector,
+): [number, number, number, number] {
+  const n = normalizeVector(normal);
+  const v = normalizeVector(view);
+  const s = normalizeVector(sun);
+  const safeEdge = Number.isFinite(edge) && edge > 1e-6 ? edge : 1e-6;
+  const k = clamp(-dotVector(n, v) / safeEdge, 0, 1);
+  const rayleigh = atmosphereOpticalDepth(k);
+  const sunHeight = dotVector(n, s);
+  const dayFactor = smoothstep(-0.45, 0.55, sunHeight);
+  const twilight = Math.exp(-((sunHeight / ATMOSPHERE_SCATTER.twilightWidth) ** 2)) * k;
+  const cosTheta = clamp(-dotVector(v, s), -1, 1);
+  const miePhase = miePhaseFunction(cosTheta, ATMOSPHERE_SCATTER.mieG);
+  const miePow = k <= 0 ? 0 : k ** ATMOSPHERE_SCATTER.miePower;
+  const mie = miePhase * miePow * ATMOSPHERE_SCATTER.mieScale * smoothstep(-0.55, 0.25, sunHeight);
+  const dayMix = smoothstep(0.25, 0.95, k);
+  const auroraMix = smoothstep(0.2, 0.92, k);
+  const twilightMix = clamp(twilight * 0.48 + mie * 0.55, 0, 1);
+  const glow = clamp(rayleigh * (0.28 + 0.54 * dayFactor) + mie * 0.36 + twilight * 0.2, 0, 0.92);
+  const out = [0, 1, 2].map((i) => {
+    const dayCol = violet[i] + (teal[i] - violet[i]) * dayMix;
+    const warmCyan = teal[i] + (ATMOSPHERE_SCATTER.goldTwilight[i] - teal[i]) * 0.62;
+    const sunlit = dayCol + (warmCyan - dayCol) * twilightMix;
+    const auroraTint = violet[i] + (teal[i] - violet[i]) * 0.65;
+    const nightAurora =
+      ATMOSPHERE_SCATTER.deepIndigo[i] +
+      (auroraTint - ATMOSPHERE_SCATTER.deepIndigo[i]) * auroraMix;
+    const rimColour = nightAurora + (sunlit - nightAurora) * dayFactor;
+    return rimColour * glow;
+  });
+  return [out[0], out[1], out[2], glow];
+}
+
+/** GLSL implementation of `atmosphereScatter`, built directly from `ATMOSPHERE_SCATTER`. */
+export const ATMOSPHERE_SCATTER_GLSL = /* glsl */ `
+  vec4 atmosphereScatter(vec3 normal, vec3 view, vec3 sun, float edge, vec3 teal, vec3 violet) {
+    vec3 n = normalize(normal);
+    vec3 v = normalize(view);
+    vec3 s = normalize(sun);
+    float safeEdge = max(edge, 0.000001);
+    float k = clamp(-dot(n, v) / safeEdge, 0.0, 1.0);
+    float rayleigh = k <= 0.0 ? 0.0 : pow(k, ${glsl(ATMOSPHERE_SCATTER.rayleighPower)}) * (${glsl(ATMOSPHERE_SCATTER.rayleighBase)} + ${glsl(ATMOSPHERE_SCATTER.rayleighLimb)} * k);
+    float sunHeight = dot(n, s);
+    float dayFactor = smoothstep(-0.45, 0.55, sunHeight);
+    float twilight = exp(-pow(sunHeight / ${glsl(ATMOSPHERE_SCATTER.twilightWidth)}, 2.0)) * k;
+    float g = ${glsl(ATMOSPHERE_SCATTER.mieG)};
+    float cosTheta = clamp(-dot(v, s), -1.0, 1.0);
+    float denom = max(1.0 + g * g - 2.0 * g * cosTheta, 0.08);
+    float miePhase = (1.0 - g * g) / (12.56637061 * denom * sqrt(denom));
+    float miePow = k <= 0.0 ? 0.0 : pow(k, ${glsl(ATMOSPHERE_SCATTER.miePower)});
+    float mie = miePhase * miePow * ${glsl(ATMOSPHERE_SCATTER.mieScale)} * smoothstep(-0.55, 0.25, sunHeight);
+    vec3 dayCol = mix(violet, teal, smoothstep(0.25, 0.95, k));
+    vec3 goldCol = vec3(${ATMOSPHERE_SCATTER.goldTwilight.map(glsl).join(', ')});
+    vec3 sunlit = mix(dayCol, mix(teal, goldCol, 0.62), clamp(twilight * 0.48 + mie * 0.55, 0.0, 1.0));
+    vec3 indigoCol = vec3(${ATMOSPHERE_SCATTER.deepIndigo.map(glsl).join(', ')});
+    vec3 nightAurora = mix(indigoCol, mix(violet, teal, 0.65), smoothstep(0.20, 0.92, k));
+    vec3 rimColour = mix(nightAurora, sunlit, dayFactor);
+    float glow = clamp(rayleigh * (0.28 + 0.54 * dayFactor) + mie * 0.36 + twilight * 0.20, 0.0, 0.92);
+    return vec4(rimColour * glow, glow);
+  }
+`;
+
+/** Circular meteorological satellite orbit specification in Earth radii. */
+export interface OrbitSpec {
+  id: 'polar' | 'geo';
+  radius: number;
+  inclinationDeg: number;
+  raanDeg: number;
+  phaseOffset: number;
+  speed: number;
+}
+
+/** Polar sun-synchronous (NOAA-20 class) and geostationary-band meteorological orbital paths. */
+export const SATELLITE_ORBITS: readonly OrbitSpec[] = [
+  {
+    id: 'polar',
+    radius: 1.13,
+    inclinationDeg: 98.7,
+    raanDeg: 38,
+    phaseOffset: 0.15,
+    speed: 0.045,
+  },
+  {
+    id: 'geo',
+    radius: 1.24,
+    inclinationDeg: 8.5,
+    raanDeg: -25,
+    phaseOffset: 0.62,
+    speed: 0.018,
+  },
+] as const;
+
+/** Orthonormal basis `[u, v, normal]` for an orbital plane of inclination `i` and ascending node `raanDeg`. */
+export function orbitalBasis(orbit: Pick<OrbitSpec, 'inclinationDeg' | 'raanDeg'>): {
+  u: Vector;
+  v: Vector;
+  normal: Vector;
+} {
+  const inc = orbit.inclinationDeg * RAD;
+  const u = latLonToVector(0, orbit.raanDeg, 1);
+  const east = latLonToVector(0, orbit.raanDeg + 90, 1);
+  const cosI = Math.cos(inc);
+  const sinI = Math.sin(inc);
+  const v: Vector = [cosI * east[0], sinI, cosI * east[2]];
+  const normal = normalizeVector(crossVector(u, v));
+  return { u, v, normal };
+}
+
+/** 3D position on `orbit` at orbital anomaly `anomalyRad` (radians from ascending node). */
+export function orbitalPoint(
+  orbit: Pick<OrbitSpec, 'inclinationDeg' | 'raanDeg'> & { radius?: number },
+  anomalyRad: number,
+  radiusOverride?: number,
+): Vector {
+  const r = Number.isFinite(radiusOverride) ? radiusOverride! : (orbit.radius ?? 1);
+  const theta = Number.isFinite(anomalyRad) ? anomalyRad : 0;
+  const { u, v } = orbitalBasis(orbit);
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  return [r * (c * u[0] + s * v[0]), r * (c * u[1] + s * v[1]), r * (c * u[2] + s * v[2])];
+}
+
+/** Closed 3D orbital ring as line-segment vertex pairs `[x0,y0,z0, x1,y1,z1, ...]`. */
+export function orbitalArcSegments(
+  orbit: Pick<OrbitSpec, 'radius' | 'inclinationDeg' | 'raanDeg'>,
+  steps = 96,
+  radiusOverride?: number,
+): Float32Array {
+  const count = Math.max(8, Math.floor(steps));
+  const out = new Float32Array(count * 6);
+  for (let i = 0; i < count; i++) {
+    const a0 = (i / count) * Math.PI * 2;
+    const a1 = ((i + 1) / count) * Math.PI * 2;
+    out.set(orbitalPoint(orbit, a0, radiusOverride), i * 6);
+    out.set(orbitalPoint(orbit, a1, radiusOverride), i * 6 + 3);
+  }
+  return out;
+}
+
+/** Trailing sub-satellite ground track arc behind `headPhase` (normalized `[0, 1)` around orbit). */
+export function groundTrackSweepSegments(
+  orbit: Pick<OrbitSpec, 'radius' | 'inclinationDeg' | 'raanDeg'>,
+  headPhase: number,
+  arcRadians = Math.PI * 0.48,
+  steps = 48,
+  radius = 1.004,
+): Float32Array {
+  const count = Math.max(4, Math.floor(steps));
+  const head = (((Number.isFinite(headPhase) ? headPhase : 0) % 1) + 1) % 1;
+  const headAngle = head * Math.PI * 2;
+  const span = Math.max(0, Number.isFinite(arcRadians) ? arcRadians : 0);
+  const out = new Float32Array(count * 6);
+  for (let i = 0; i < count; i++) {
+    const a0 = headAngle - span * (1 - i / count);
+    const a1 = headAngle - span * (1 - (i + 1) / count);
+    out.set(orbitalPoint(orbit, a0, radius), i * 6);
+    out.set(orbitalPoint(orbit, a1, radius), i * 6 + 3);
+  }
+  return out;
+}
+
+/** Orbital position, sub-satellite ground point and geodetic coordinate at `phaseSeconds`. */
+export function satellitePosition(
+  orbit: OrbitSpec,
+  phaseSeconds: number,
+  groundRadius = 1.004,
+): { phase: number; orbital: Vector; ground: Vector; latLon: LatLon } {
+  const t = Number.isFinite(phaseSeconds) ? phaseSeconds : 0;
+  const raw = orbit.phaseOffset + orbit.speed * t;
+  const phase = ((raw % 1) + 1) % 1;
+  const angle = phase * Math.PI * 2;
+  const orbital = orbitalPoint(orbit, angle);
+  const ground = orbitalPoint(orbit, angle, groundRadius);
+  return { phase, orbital, ground, latLon: vectorToLatLon(ground) };
+}
+
+/** Atmospheric jet-stream ribbon descriptor along a Rossby-wave latitude band. */
+export interface JetStreamSpec {
+  id: string;
+  latitudeDeg: number;
+  amplitudeDeg: number;
+  waves: number;
+  altitude: number;
+  phaseOffset: number;
+  speed: number;
+  tint: 'teal' | 'violet';
+}
+
+export const JET_STREAMS: readonly JetStreamSpec[] = [
+  {
+    id: 'northern-polar',
+    latitudeDeg: 44,
+    amplitudeDeg: 7.5,
+    waves: 5,
+    altitude: 1.024,
+    phaseOffset: 0.4,
+    speed: 0.085,
+    tint: 'teal',
+  },
+  {
+    id: 'tropical-easterly',
+    latitudeDeg: 17,
+    amplitudeDeg: 3.5,
+    waves: 4,
+    altitude: 1.021,
+    phaseOffset: 2.1,
+    speed: -0.06,
+    tint: 'violet',
+  },
+  {
+    id: 'southern-polar',
+    latitudeDeg: -46,
+    amplitudeDeg: 6.5,
+    waves: 5,
+    altitude: 1.024,
+    phaseOffset: 1.2,
+    speed: 0.075,
+    tint: 'teal',
+  },
+] as const;
+
+function buildSphericalRibbon(
+  centerAt: (u: number) => Vector,
+  radius: number,
+  segments: number,
+  halfWidthRad: number,
+): { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint16Array } {
+  const count = Math.max(12, Math.floor(segments));
+  const width = Math.max(0.002, Number.isFinite(halfWidthRad) ? halfWidthRad : 0.014);
+  const positions = new Float32Array((count + 1) * 2 * 3);
+  const normals = new Float32Array((count + 1) * 2 * 3);
+  const uvs = new Float32Array((count + 1) * 2 * 2);
+  const indices = new Uint16Array(count * 6);
+  const eps = 1e-4;
+  for (let i = 0; i <= count; i++) {
+    const u = i / count;
+    const uPos = i === count ? 0 : u;
+    const c = centerAt(uPos);
+    const n = normalizeVector(c);
+    const prev = centerAt(uPos - eps);
+    const next = centerAt(uPos + eps);
+    const tangent = normalizeVector([next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]]);
+    const binormal = normalizeVector(crossVector(n, tangent));
+    for (let side = 0; side < 2; side++) {
+      const sign = side === 0 ? -1 : 1;
+      const offset: Vector = [
+        c[0] + sign * width * radius * binormal[0],
+        c[1] + sign * width * radius * binormal[1],
+        c[2] + sign * width * radius * binormal[2],
+      ];
+      const onShell = normalizeVector(offset);
+      const vertex = i * 2 + side;
+      positions.set([onShell[0] * radius, onShell[1] * radius, onShell[2] * radius], vertex * 3);
+      normals.set(onShell, vertex * 3);
+      uvs.set([u, side], vertex * 2);
+    }
+  }
+  for (let i = 0; i < count; i++) {
+    const a = i * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    indices.set([a, b, c, b, d, c], i * 6);
+  }
+  return { positions, normals, uvs, indices };
+}
+
+/**
+ * Builds a closed spherical flow-ribbon mesh at `stream.altitude` with orthonormal tangent-binormal
+ * cross-sections and seam-continuous UVs (`u` in `[0, 1]`, `v` across width `[0, 1]`).
+ */
+export function jetStreamRibbonGeometryData(
+  stream: JetStreamSpec,
+  segments = 144,
+  halfWidthRad = 0.014,
+): { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint16Array } {
+  const radius = Math.max(1.002, Number.isFinite(stream.altitude) ? stream.altitude : 1.022);
+  return buildSphericalRibbon(
+    (u) => {
+      const lon = u * 360 - 180;
+      const lat = clamp(
+        stream.latitudeDeg +
+          stream.amplitudeDeg * Math.sin(stream.waves * Math.PI * 2 * u + stream.phaseOffset),
+        -85,
+        85,
+      );
+      return latLonToVector(lat, lon, radius);
+    },
+    radius,
+    segments,
+    halfWidthRad,
+  );
+}
+
+/**
+ * Builds a closed sub-satellite ground-track ribbon around `orbit` at surface `radius`, so the
+ * trailing sweep shader can animate in O(1) GPU time without per-frame geometry allocation.
+ */
+export function groundTrackRibbonGeometryData(
+  orbit: Pick<OrbitSpec, 'inclinationDeg' | 'raanDeg'>,
+  segments = 144,
+  halfWidthRad = 0.006,
+  radius = 1.004,
+): { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint16Array } {
+  const safeRadius = Math.max(1.001, Number.isFinite(radius) ? radius : 1.004);
+  return buildSphericalRibbon(
+    (u) => orbitalPoint(orbit, u * Math.PI * 2, safeRadius),
+    safeRadius,
+    segments,
+    halfWidthRad,
+  );
+}
+
+/**
+ * Evaluates normalized jet-stream flow tracer brightness matching `ribbonFragment` on the GPU.
+ */
+export function jetStreamFlowIntensity(
+  u: number,
+  v: number,
+  time: number,
+  speed: number,
+  facingDot: number,
+): number {
+  const band = Math.exp(-(((v - 0.5) * 3.1) ** 2));
+  const packet = 0.5 + 0.5 * Math.sin(Math.PI * 2 * (u * 6 - time * speed));
+  const stream = 0.28 + 0.72 * packet * packet;
+  const horizon = smoothstep(0.0, 0.14, facingDot);
+  return clamp(band * stream * horizon * 0.72, 0, 1);
+}
+
+/**
+ * Computes the length-weighted spherical centroid on `radius` from flattened line segment pairs
+ * `[x0,y0,z0, x1,y1,z1, ...]`. Returns `null` when no finite vertex exists.
+ */
+export function segmentsCentroid(segments: Float32Array, radius = 1): Vector | null {
+  if (!(segments.length >= 6) || !Number.isFinite(radius) || radius <= 0) return null;
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+  let fallback: Vector | null = null;
+  for (let i = 0; i + 5 < segments.length; i += 6) {
+    const x0 = segments[i];
+    const y0 = segments[i + 1];
+    const z0 = segments[i + 2];
+    const x1 = segments[i + 3];
+    const y1 = segments[i + 4];
+    const z1 = segments[i + 5];
+    if (
+      !Number.isFinite(x0) ||
+      !Number.isFinite(y0) ||
+      !Number.isFinite(z0) ||
+      !Number.isFinite(x1) ||
+      !Number.isFinite(y1) ||
+      !Number.isFinite(z1)
+    )
+      continue;
+    if (!fallback) fallback = normalizeVector([x0, y0, z0]);
+    const segLen = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+    const weight = segLen > 0 ? segLen : 1;
+    sx += 0.5 * (x0 + x1) * weight;
+    sy += 0.5 * (y0 + y1) * weight;
+    sz += 0.5 * (z0 + z1) * weight;
+  }
+  const norm = Math.hypot(sx, sy, sz);
+  const unit = norm > 1e-8 ? ([sx / norm, sy / norm, sz / norm] as Vector) : fallback;
+  return unit ? [unit[0] * radius, unit[1] * radius, unit[2] * radius] : null;
+}
+
+/** Geodesic spherical linear interpolation between two direction vectors on `S^2`. */
+export function slerpDirection(from: Vector, to: Vector, t: number): Vector {
+  const u = normalizeVector(from);
+  const v = normalizeVector(to);
+  const s = clamp(Number.isFinite(t) ? t : 0, 0, 1);
+  if (s <= 0) return u;
+  if (s >= 1) return v;
+  const dot = clamp(dotVector(u, v), -1, 1);
+  const omega = Math.acos(dot);
+  if (omega < 1e-6) {
+    return normalizeVector([
+      u[0] + (v[0] - u[0]) * s,
+      u[1] + (v[1] - u[1]) * s,
+      u[2] + (v[2] - u[2]) * s,
+    ]);
+  }
+  if (Math.PI - omega < 1e-4) {
+    const seed: Vector = Math.abs(u[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const axis = normalizeVector(crossVector(u, seed));
+    const ortho = crossVector(axis, u);
+    const angle = omega * s;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    return normalizeVector([
+      u[0] * cosA + ortho[0] * sinA,
+      u[1] * cosA + ortho[1] * sinA,
+      u[2] * cosA + ortho[2] * sinA,
+    ]);
+  }
+  const sinOmega = Math.sin(omega);
+  const w0 = Math.sin((1 - s) * omega) / sinOmega;
+  const w1 = Math.sin(s * omega) / sinOmega;
+  return normalizeVector([u[0] * w0 + v[0] * w1, u[1] * w0 + v[1] * w1, u[2] * w0 + v[2] * w1]);
+}
+
+/** Smooth damped cubic-spring easing curve in `[0, 1]` with zero-velocity arrival. */
+export function dampedFlyEase(t: number): number {
+  const s = clamp(Number.isFinite(t) ? t : 0, 0, 1);
+  const cubic = s < 0.5 ? 4 * s * s * s : 1 - (-2 * s + 2) ** 3 / 2;
+  const dampedOut = 1 - (1 - s) ** 3;
+  return 0.75 * cubic + 0.25 * dampedOut;
+}
+
+/**
+ * Geodesic camera fly-to interpolation between `from` and `to` views using shortest-path
+ * spherical SLERP and damped distance easing.
+ */
+export function flyToView(
+  from: GlobeViewState,
+  to: GlobeViewState,
+  t: number,
+  maxLatitude = 90,
+): GlobeViewState {
+  const s = clamp(Number.isFinite(t) ? t : 0, 0, 1);
+  if (s <= 0) return { ...from };
+  if (s >= 1) return { ...to };
+  const eased = dampedFlyEase(s);
+  const direction = slerpDirection(
+    latLonToVector(from.latitude, from.longitude),
+    latLonToVector(to.latitude, to.longitude),
+    eased,
+  );
+  const { latitude, longitude } = vectorToLatLon(direction);
+  return {
+    latitude: clamp(latitude, -maxLatitude, maxLatitude),
+    longitude,
+    distance: from.distance + (to.distance - from.distance) * eased,
+  };
+}

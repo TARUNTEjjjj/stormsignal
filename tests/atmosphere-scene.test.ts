@@ -67,3 +67,12 @@ test('the artwork follows the weather code it is given, and draws no body withou
   assert.match(scene(95), /fill="#e9e4ff"/, 'lightning');
   assert.doesNotMatch(scene(63), /fill="#e9e4ff"/);
 });
+
+test('the artwork separates depth-parallax layers cleanly without altering accessibility', () => {
+  for (const code of [null, 0, 63, 95]) {
+    const html = scene(code);
+    for (const layer of ['atmo-depth-far', 'atmo-depth-mid', 'atmo-depth-near']) {
+      assert.match(html, new RegExp(`class="${layer}"`), `missing ${layer} for code ${code}`);
+    }
+  }
+});

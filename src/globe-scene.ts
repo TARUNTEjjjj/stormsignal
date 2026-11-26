@@ -5,7 +5,7 @@
  * runs it on three.js itself, with a stand-in for the renderer, which alone needs a GPU.
  */
 // Types only: three.js itself is downloaded by loadThree, after the browser shows it has WebGL 2.
-import type { Color, Group, ShaderMaterial, Texture, Vector3, WebGLRenderer } from 'three';
+import type { Color, Group, Mesh, ShaderMaterial, Texture, Vector3, WebGLRenderer } from 'three';
 import type { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import type { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
@@ -13,6 +13,8 @@ import { normalizeLongitude } from './imagery';
 import {
   DAILY_OPACITY,
   HOME_GLIDE_MS,
+  JET_STREAMS,
+  SATELLITE_ORBITS,
   WARNING_LINE,
   ambientWait,
   angularDistance,
@@ -23,15 +25,21 @@ import {
   drawing,
   fadeDaily,
   fitDistance,
+  flyToView,
+  groundTrackRibbonGeometryData,
   hatchDegrees,
   hexColor,
   isTap,
+  jetStreamRibbonGeometryData,
   latLonToVector,
   nearestMarker,
   nextFrame,
+  orbitalArcSegments,
   pointPlace,
   raySphere,
   returnsHome,
+  satellitePosition,
+  segmentsCentroid,
   skipsFrame,
   starfield,
   stepView,
@@ -45,12 +53,17 @@ import {
 } from './globe';
 import {
   atmosphereFragment,
+  atmosphereVertex,
+  beaconConeFragment,
   beamFragment,
   earthFragment,
   flatFragment,
   glowFragment,
+  groundTrackFragment,
   hideBeyondHorizon,
   plainVertex,
+  ribbonFragment,
+  ribbonVertex,
   starFragment,
   starVertex,
   surfaceVertex,
@@ -85,6 +98,7 @@ export async function loadThree() {
           Color,
           CylinderGeometry,
           DataTexture,
+          DoubleSide,
           Group,
           LinearMipmapLinearFilter,
           Mesh,
@@ -110,6 +124,7 @@ export async function loadThree() {
           Color,
           CylinderGeometry,
           DataTexture,
+          DoubleSide,
           Group,
           LinearMipmapLinearFilter,
           Mesh,
@@ -226,6 +241,7 @@ export function createGlobe(
     Color,
     CylinderGeometry,
     DataTexture,
+    DoubleSide,
     Group,
     LinearMipmapLinearFilter,
     Mesh,
@@ -322,7 +338,7 @@ export function createGlobe(
             sun: { value: sun },
             edge: { value: Math.sqrt(1 - 1 / ATMOSPHERE ** 2) },
           },
-          vertexShader: surfaceVertex,
+          vertexShader: atmosphereVertex,
           fragmentShader: atmosphereFragment,
           side: BackSide,
           blending: AdditiveBlending,
@@ -437,6 +453,106 @@ export function createGlobe(
   ];
   let outlineGeometry: LineSegmentsGeometry | null = null;
   let outlineLines: LineSegments2[] = [];
+
+  const ribbonGeometry = (data: ReturnType<typeof jetStreamRibbonGeometryData>) => {
+    const geometry = keep(new BufferGeometry());
+    geometry.setAttribute('position', new BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new BufferAttribute(data.normals, 3));
+    geometry.setAttribute('uv', new BufferAttribute(data.uvs, 2));
+    geometry.setIndex(new BufferAttribute(data.indices, 1));
+    return geometry;
+  };
+
+  // Animated 3D satellite orbital arcs, ground-track sweeps and nadir footprint markers.
+  const orbitGroup = new Group();
+  orbitGroup.name = 'satellite-orbits';
+  scene.add(orbitGroup);
+  const orbitLineMaterials: LineMaterial[] = [];
+  const satellites = SATELLITE_ORBITS.map((orbit) => {
+    const isPolar = orbit.id === 'polar';
+    const orbitColour = isPolar ? teal : violet;
+    const arcGeo = keep(new LineSegmentsGeometry().setPositions(orbitalArcSegments(orbit, 96)));
+    const arcMat = keep(
+      new LineMaterial({
+        color: isPolar ? '#3ee6c1' : '#8b7cff',
+        linewidth: 1.2,
+        transparent: true,
+        opacity: isPolar ? 0.34 : 0.28,
+        depthWrite: false,
+      }),
+    );
+    orbitLineMaterials.push(arcMat);
+    const arcLine = new LineSegments2(arcGeo, arcMat);
+    arcLine.renderOrder = 1;
+    const trackMat = keep(
+      new ShaderMaterial({
+        uniforms: {
+          colour: { value: orbitColour },
+          headPhase: { value: orbit.phaseOffset },
+          arcFraction: { value: 0.24 },
+          opacity: { value: 0.52 },
+        },
+        vertexShader: ribbonVertex,
+        fragmentShader: groundTrackFragment,
+        blending: AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+      }),
+    );
+    const trackMesh = new Mesh(ribbonGeometry(groundTrackRibbonGeometryData(orbit)), trackMat);
+    trackMesh.renderOrder = 1;
+    const beacon = new Group();
+    const satHalo = new Mesh(disc, glow(orbitColour, 0.78));
+    satHalo.scale.setScalar(0.036);
+    const satCore = new Mesh(disc, flat(white, 0.96));
+    satCore.scale.setScalar(0.008);
+    satCore.position.z = 0.0005;
+    beacon.add(satHalo, satCore);
+    const footprint = new Mesh(ring, flat(orbitColour, 0.56));
+    footprint.scale.setScalar(0.022);
+    orbitGroup.add(arcLine, trackMesh, beacon, footprint);
+    return { orbit, trackMat, beacon, footprint };
+  });
+
+  // 3D atmospheric jet-stream flow ribbons along mid-latitude Rossby waves and tropical bands.
+  const jetStreamGroup = new Group();
+  jetStreamGroup.name = 'jet-streams';
+  scene.add(jetStreamGroup);
+  const jetStreamMaterials = JET_STREAMS.map((stream) => {
+    const material = keep(
+      new ShaderMaterial({
+        uniforms: {
+          colour: { value: stream.tint === 'teal' ? teal : violet },
+          time: { value: 0 },
+          speed: { value: stream.speed },
+          opacity: { value: 0.42 },
+        },
+        vertexShader: ribbonVertex,
+        fragmentShader: ribbonFragment,
+        blending: AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+      }),
+    );
+    const mesh = new Mesh(ribbonGeometry(jetStreamRibbonGeometryData(stream)), material);
+    mesh.renderOrder = 1;
+    jetStreamGroup.add(mesh);
+    return material;
+  });
+
+  // Volumetric severe-warning beacons anchored to active warning polygon centroids.
+  const warningRed = new Color(WARNING_LINE.colour);
+  const beaconConeGeometry = keep(new CylinderGeometry(0.001, 0.022, 0.085, 24, 1, true));
+  beaconConeGeometry.rotateX(Math.PI / 2);
+  beaconConeGeometry.translate(0, 0, 0.0425);
+  const beaconGroup = new Group();
+  beaconGroup.name = 'warning-beacons';
+  scene.add(beaconGroup);
+  const beaconMaterials: ShaderMaterial[] = [];
+  const beaconCones: ShaderMaterial[] = [];
+  const beaconPulses: { ring: Mesh; material: ShaderMaterial; phaseOffset: number }[] = [];
 
   let width = 1;
   let height = 1;
@@ -603,13 +719,7 @@ export function createGlobe(
       let moving = false;
       if (flight) {
         const t = Math.min(1, Math.max(0, (now - flight.start) / flight.duration));
-        const eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-        const turn = normalizeLongitude(flight.to.longitude - flight.from.longitude);
-        show({
-          latitude: flight.from.latitude + (flight.to.latitude - flight.from.latitude) * eased,
-          longitude: flight.from.longitude + turn * eased,
-          distance: flight.from.distance + (flight.to.distance - flight.from.distance) * eased,
-        });
+        show(flyToView(flight.from, flight.to, t, MAX_LATITUDE));
         if (t >= 1) flight = null;
         moving = true;
       }
@@ -626,6 +736,7 @@ export function createGlobe(
       }
       selected.scale.setScalar(scale);
       for (const marker of savedGroup.children) marker.scale.setScalar(scale);
+      for (const beacon of beaconGroup.children) beacon.scale.setScalar(scale);
       if (mix.value !== dailyTarget) {
         mix.value = fadeDaily(mix.value, dailyTarget, delta, animate);
         earthMaterial.uniforms.dailyShown.value = mix.value / DAILY_OPACITY;
@@ -638,6 +749,24 @@ export function createGlobe(
         selectedParts.pulses[index].scale.setScalar(0.016 + 0.05 * at);
         material.uniforms.opacity.value = (cosmetic ? (1 - at) ** 2 : 0.25) * (index ? 0.5 : 0.7);
       });
+      for (const { orbit, trackMat, beacon, footprint } of satellites) {
+        const { phase: headPhase, orbital, ground } = satellitePosition(orbit, phase);
+        trackMat.uniforms.headPhase.value = headPhase;
+        beacon.position.set(...orbital);
+        beacon.lookAt(camera.position);
+        beacon.scale.setScalar(scale);
+        footprint.position.set(...ground);
+        footprint.lookAt(ground[0] * 2, ground[1] * 2, ground[2] * 2);
+        footprint.scale.setScalar(scale);
+      }
+      for (const material of jetStreamMaterials) material.uniforms.time.value = phase;
+      for (const coneMat of beaconCones)
+        coneMat.uniforms.pulse.value = cosmetic ? (phase * 0.55) % 1 : 0.25;
+      for (const { ring: shock, material, phaseOffset } of beaconPulses) {
+        const at = cosmetic ? (phase / 2.2 + phaseOffset) % 1 : 0.38;
+        shock.scale.setScalar(0.014 + 0.052 * at);
+        material.uniforms.opacity.value = (cosmetic ? (1 - at) ** 2 : 0.42) * 0.78;
+      }
       starMaterial.uniforms.time.value = phase;
       starMaterial.uniforms.twinkle.value = cosmetic ? 1 : 0;
       if (label && current) {
@@ -673,6 +802,7 @@ export function createGlobe(
     renderer.setSize(width, height, false);
     starMaterial.uniforms.pixelRatio.value = ratio;
     for (const material of outlineMaterials) material.resolution.set(width, height);
+    for (const material of orbitLineMaterials) material.resolution.set(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     const previous = fit;
@@ -874,6 +1004,10 @@ export function createGlobe(
         outlineGeometry = null;
         outlineLines = [];
       }
+      for (const child of [...beaconGroup.children]) beaconGroup.remove(child);
+      for (const material of beaconMaterials.splice(0)) life.drop(material);
+      beaconCones.length = 0;
+      beaconPulses.length = 0;
       const points = segments.reduce((total, part) => total + part.length, 0);
       if (points) {
         const all = new Float32Array(points);
@@ -890,6 +1024,38 @@ export function createGlobe(
           return shape;
         });
         scene.add(...outlineLines);
+        segments.forEach((part, index) => {
+          const centroid = segmentsCentroid(part, OUTLINE_RADIUS);
+          if (!centroid) return;
+          const coneMat = keep(
+            new ShaderMaterial({
+              uniforms: {
+                colour: { value: warningRed },
+                pulse: { value: 0.25 },
+                opacity: { value: 0.56 },
+              },
+              vertexShader: plainVertex,
+              fragmentShader: beaconConeFragment,
+              blending: AdditiveBlending,
+              transparent: true,
+              depthWrite: false,
+              side: DoubleSide,
+            }),
+          );
+          const ringMat = flat(warningRed, 0.72);
+          beaconMaterials.push(coneMat, ringMat);
+          const cone = new Mesh(beaconConeGeometry, coneMat);
+          const shock = new Mesh(ring, ringMat);
+          shock.position.z = 0.0015;
+          shock.scale.setScalar(0.02);
+          const beacon = new Group();
+          beacon.add(cone, shock);
+          marker(new Vector3(...centroid), beacon);
+          beaconGroup.add(beacon);
+          beaconCones.push(coneMat);
+          beaconPulses.push({ ring: shock, material: ringMat, phaseOffset: (index * 0.27) % 1 });
+        });
+        touch();
       }
       invalidate();
     },

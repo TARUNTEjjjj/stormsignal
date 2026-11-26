@@ -47,6 +47,7 @@
   --font-mono:
     ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.22, 1.24, 0.36, 1);
   /* Earlier names, remapped onto the palette so every rule that reads them follows it. */
   --bg: var(--aurora-bg);
   --panel: var(--aurora-surface);
@@ -1123,8 +1124,8 @@ input[type='range']:disabled {
 @media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
   :is(.conditions-card, .disaster-card, .sources-grid > div, .preparedness-banner) {
     transition:
-      transform 0.6s var(--ease-out),
-      box-shadow 0.6s var(--ease-out),
+      transform 0.55s var(--ease-spring),
+      box-shadow 0.55s var(--ease-out),
       border-color 0.3s ease,
       opacity 0.75s var(--ease-out) var(--reveal-delay, 0s),
       translate 0.75s var(--ease-out) var(--reveal-delay, 0s);
@@ -1141,7 +1142,7 @@ input[type='range']:disabled {
   /* The hour tiles sit inside the tilting card, so they lift on their own instead of leaning. */
   .horizon-hours > div {
     transition:
-      translate 0.35s var(--ease-out),
+      translate 0.38s var(--ease-spring),
       border-color 0.3s ease,
       background-color 0.3s ease;
   }
@@ -1161,18 +1162,31 @@ input[type='range']:disabled {
     z-index: -1;
     border-radius: inherit;
     pointer-events: none;
-    background: radial-gradient(
-      circle at var(--glare-x, 50%) var(--glare-y, 50%),
-      rgba(255, 255, 255, 0.05),
-      transparent 48%
-    );
+    background:
+      radial-gradient(
+        240px circle at var(--glare-x, 50%) var(--glare-y, 50%),
+        rgba(62, 230, 193, 0.1),
+        rgba(139, 124, 255, 0.05) 38%,
+        transparent 68%
+      ),
+      linear-gradient(var(--glare-angle, 135deg), rgba(238, 243, 255, 0.045), transparent 42%);
   }
-  .atmosphere-scene {
-    transition: translate 0.6s var(--ease-out);
+  .atmo-depth-far,
+  .atmo-depth-mid,
+  .atmo-depth-near {
+    transition: translate 0.55s var(--ease-spring);
   }
-  .conditions-card[data-tilt] .atmosphere-scene {
-    translate: calc(var(--tilt-px, 0) * -12px) calc(var(--tilt-py, 0) * -9px);
+  .conditions-card[data-tilt] .atmo-depth-far {
+    translate: calc(var(--tilt-px, 0) * -4px) calc(var(--tilt-py, 0) * -3px);
+    transition-duration: 0.22s;
+  }
+  .conditions-card[data-tilt] .atmo-depth-mid {
+    translate: calc(var(--tilt-px, 0) * -10px) calc(var(--tilt-py, 0) * -8px);
     transition-duration: 0.2s;
+  }
+  .conditions-card[data-tilt] .atmo-depth-near {
+    translate: calc(var(--tilt-px, 0) * -17px) calc(var(--tilt-py, 0) * -12px);
+    transition-duration: 0.18s;
   }
   .secondary-button:hover,
   .primary-button:hover {
